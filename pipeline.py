@@ -28,7 +28,7 @@ prompt = f"""
 ]
 """
 
-response = model.generate_content(prompt)
+response = model.generate_content(prompt, request_options={"timeout": 600.0})
 raw_text = response.text.strip()
 if raw_text.startswith("```"):
     raw_text = raw_text.split("\n", 1)[1].rsplit("\n", 1)[0].strip()
