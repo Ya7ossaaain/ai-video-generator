@@ -11,7 +11,7 @@ import google.generativeai as genai
 from duckduckgo_search import DDGS
 import requests
 
-# 1. إعداد النموذج فائق الذكاء مع نظام الحصانة ضد التوقف (Smart Multi-Tier Engine)
+# 1. إعداد النموذج الذكي
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
 def get_master_model():
@@ -25,59 +25,58 @@ def get_master_model():
 
 model, active_model_name = get_master_model()
 topic = os.environ.get("VIDEO_TOPIC", "حادثة ممر دياتلوف: اللغز الذي حيّر العالم")
-print(f"🎬 [المخرج الذكي]: بدء هندسة فيلم وثائقي استقصائي عن: {topic}")
-print(f"🧠 [العقل المفكر]: النموذج النشط المعتمد -> {active_model_name}")
+print(f"🎬 [المخرج الذكي]: إنتاج وثائقي عن: {topic}")
+print(f"🧠 [النموذج النشط]: {active_model_name}")
 
-# 2. برومبت الإخراج السينمائي ثلاثي الفصول
-director_prompt = f"""
-أنت مخرج ومؤلف وثائقيات استقصائية وتاريخية حاصل على جوائز عالمية (طراز BBC و Netflix).
-المهمة: هندسة وتأليف سيناريو فيلم وثائقي طويل ومكثف عن: "{topic}".
-
-البنية الهيكلية للإخراج:
-1. صمم فيلماً من 10 إلى 12 مشهداً مترابطاً بنظام الفصول الثلاثة:
-   - الفصل الأول (مشاهد 1-3): الخطاف الدرامي، بناء هالة الغموض، ورمي التساؤل الجوهري.
-   - الفصل الثاني (مشاهد 4-8): التحقيق المعمق، استعراض الأدلة، شهادات، وربط القرائن المتناقضة.
-   - الفصل الثالث (مشاهد 9-12): الذروة، تفكيك الفرضيات، وخاتمة فلسفية تأملية مفتوحة.
-2. لغة الإلقاء: لغة عربية فصحى أدبية، جزلة، ذات عمق تحقيقي وتسكين وقفي دقيق ومريح. ممنوع منعاً باتاً لغة مخاطبة الجمهور المبتذلة (أهلاً بكم، سنرى، في هذا المقطع).
-3. كل فقرة سردية دسمة تتكون من 3 إلى 4 جمل مركبة وموزونة، تأخذ بين 22 إلى 26 ثانية إلقاء هادئ.
-4. هندسة الانتقاء البصري لكل مشهد:
-   - "video": للمشاهد التعبيرية الحية والحركية (بحث B-roll في Pexels). اكتب وصفاً إنجليزياً سينمائياً واضحاً (مثال: "forensic scientist microscope dark lab 4k cinematic").
-   - "real": للأدلة والشخصيات ومسارح الجرائم الأصلية (بحث أرشيفي). اكتب كلمات بحث مفتاحية دقيقة بالإنجليزية للمحققين والصور الواقعية.
-   - "ai": للمشاهد التخيلية التاريخية أو التشكيلية الصعبة. اكتب وصفاً درامياً غنياً لـ FLUX مع إضاءة سينمائية.
-5. نوع حركة الكاميرا (camera_move): اختر لكل مشهد إما "zoom_in" أو "zoom_out" أو "pan_horizontal" بما يخدم تصاعد الحدث.
-
-الرد حصراً مصفوفة JSON نقية وصحيحة برمجياً:
-[
-  {{
-    "scene_num": 1,
-    "act": "I",
-    "narration": "نص السرد التحقيقي الفصيح هنا...",
-    "media_type": "video",
-    "search_query": "snow covered dark pine forest aerial cinematic 4k",
-    "ai_prompt": "Drone shot of endless desolate Siberian forest covered in deep snow, cold cinematic light, 8k",
-    "camera_move": "zoom_in"
-  }}
-]
-"""
-
-# استدعاء الذكاء الاصطناعي مع نظام الصمود والانتظار التلقائي
+# حفظ السيناريو في ملف محلي لمنع إعادة توليده إذا توقف السيرفر
+script_cache_file = "cached_scenes.json"
 scenes = None
-for attempt in range(6):
+
+if os.path.exists(script_cache_file):
     try:
-        print(f"✍️ جاري صياغة السرد الوثائقي وهندسة المشاهد (محاولة {attempt + 1})...")
-        res = model.generate_content(director_prompt, request_options={"timeout": 600.0})
-        clean_json = res.text.strip().replace("```json", "").replace("```", "").strip()
-        scenes = json.loads(clean_json)
-        print(f"✨ تم اعتماد السيناريو الإخراجي بنجاح: {len(scenes)} مشهداً موزعاً على الفصول الثلاثة.")
-        break
-    except Exception as e:
-        print(f"⏳ خادم الذكاء الاصطناعي يستغرق وقتاً أو يطلب الانتظار ({e}). إعادة المحاولة بعد 20 ثانية...")
-        time.sleep(20)
+        with open(script_cache_file, "r", encoding="utf-8") as f:
+            scenes = json.load(f)
+        print(f"⚡ [استئناف]: تم استرجاع السيناريو المحفوظ مسبقاً ({len(scenes)} مشهداً).")
+    except Exception:
+        scenes = None
 
 if not scenes:
-    raise RuntimeError("تعذر استخراج السيناريو بعد عدة محاولات.")
+    director_prompt = f"""
+    أنت مخرج وثائقيات جنائية واستقصائية محترف (طراز BBC و Netflix).
+    المهمة: كتابة سيناريو وثائقي دسم ومحبوك درامياً عن: "{topic}".
+    قسّم العمل إلى 10 إلى 12 مشهداً مترابطاً (مقدمة غامضة -> تشريح الوقائع والقرائن -> الخاتمة والتساؤلات).
+    لغة السرد: لغة عربية فصحى أدبية رصينة ومريحة، بدون مقدمات ترحيبية مبتذلة.
+    حدد media_type: إما "video" أو "real" أو "ai".
+    الرد مصفوفة JSON نقية فقط:
+    [
+      {{
+        "scene_num": 1,
+        "narration": "نص السرد الفصيح...",
+        "media_type": "video",
+        "search_query": "snow covered dark pine forest aerial cinematic 4k",
+        "ai_prompt": "Cinematic aerial view of deep snow forest in Siberia, cold lighting, 8k",
+        "camera_move": "zoom_in"
+      }}
+    ]
+    """
+    for attempt in range(5):
+        try:
+            print(f"✍️ جاري صياغة السيناريو الإخراجي (محاولة {attempt + 1})...")
+            res = model.generate_content(director_prompt, request_options={"timeout": 600.0})
+            clean_json = res.text.strip().replace("```json", "").replace("```", "").strip()
+            scenes = json.loads(clean_json)
+            with open(script_cache_file, "w", encoding="utf-8") as f:
+                json.dump(scenes, f, ensure_ascii=False, indent=2)
+            print(f"✨ تم اعتماد وحفظ السيناريو بنجاح ({len(scenes)} مشهد).")
+            break
+        except Exception as e:
+            print(f"⏳ ضغط مؤقت ({e}). إعادة المحاولة بعد 15 ثانية...")
+            time.sleep(15)
 
-# 3. دالة قياس مدة ملف الصوت بدقة الميلي ثانية
+if not scenes:
+    raise RuntimeError("تعذر إنشاء أو استعادة السيناريو.")
+
+# 2. قياس مدة ملف الصوت
 def get_audio_duration(file_path):
     cmd = [
         "ffprobe", "-v", "error", "-show_entries",
@@ -85,22 +84,20 @@ def get_audio_duration(file_path):
     ]
     return float(subprocess.check_output(cmd).decode().strip())
 
-# 4. محرك استرجاع مقاطع B-Roll الواقعية من Pexels
+# 3. جلب مقاطع الفيديو من Pexels
 def fetch_stock_video(query, output_path):
     api_key = os.environ.get("PEXELS_API_KEY", "")
     if not api_key:
         return False
-    print(f"🎥 [Pexels Video]: بحث عن لقطة حية لموضوع: '{query}'...")
+    print(f"🎥 [Pexels Video]: بحث عن: '{query}'...")
     try:
         headers = {"Authorization": api_key}
         url = f"https://api.pexels.com/videos/search?query={urllib.parse.quote(query)}&per_page=6&orientation=landscape"
         r = requests.get(url, headers=headers, timeout=12)
         if r.status_code == 200:
-            videos = r.json().get("videos", [])
-            for v in videos:
+            for v in r.json().get("videos", []):
                 files = v.get("video_files", [])
                 target_url = None
-                # تفضيل دقة 1080p كاملة
                 for f in files:
                     if f.get("width") == 1920 or f.get("height") == 1080:
                         target_url = f.get("link")
@@ -119,9 +116,9 @@ def fetch_stock_video(query, output_path):
         print(f"تنبيه Pexels: {e}")
     return False
 
-# 5. محرك استخراج الصور الأرشيفية الحقيقية من الإنترنت
+# 4. جلب صور حقيقية من الإنترنت
 def fetch_real_photo(query, output_path):
-    print(f"🔍 [الأرشيف التاريخي]: بحث عن وثيقة/صورة أصلية: '{query}'...")
+    print(f"🔍 [أرشيف الإنترنت]: بحث عن: '{query}'...")
     try:
         with DDGS() as ddgs:
             results = list(ddgs.images(keywords=query, max_results=6))
@@ -139,50 +136,78 @@ def fetch_real_photo(query, output_path):
         print(f"تنبيه الأرشيف: {e}")
     return False
 
-# 6. محرك التوليد الفني النقي بدون أي علامات مائية
+# 5. توليد الصور مع نظام حماية متعدد الطبقات (ضد أخطاء 500)
 def generate_ai_photo(prompt_text, output_path):
-    print("🎨 [الرسم السينمائي]: توليد بديل فوتوغرافي فائق الدقة (FLUX)...")
-    encoded = urllib.parse.quote(f"{prompt_text}, 8k photorealistic documentary shot, raw film grain, Hasselblad, sharp focus, cinematic lighting, masterpiece, no text, no logo")
-    # طلب ارتفاع 1120 لاقتطاع أي هوامش تلقائياً
-    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1120&nologo=true&nofeed=true&model=flux"
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(req, timeout=30) as resp, open(output_path, 'wb') as out:
-        out.write(resp.read())
+    print("🎨 [الذكاء الاصطناعي]: جاري توليد كادر بصري بديل...")
+    encoded = urllib.parse.quote(f"{prompt_text}, cinematic documentary shot, photorealistic, 8k, raw texture, no text, no logo")
+    
+    # محاولة التحميل من سيرفر التوليد مع إعادة المحاولة
+    for retry in range(3):
+        try:
+            url = f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1120&nologo=true&nofeed=true&model=flux"
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=35) as resp:
+                data = resp.read()
+                if len(data) > 10000:
+                    with open(output_path, 'wb') as out:
+                        out.write(data)
+                    return True
+        except Exception as e:
+            print(f"⚠️ تعثر مؤقت في سيرفر الصور ({e}). محاولة بعد 5 ثوانٍ...")
+            time.sleep(5)
 
-# 7. الإلقاء الصوتي الوثائقي الفخم
+    # خطة إنقاذ تلقائية (Fallback): إذا تعطل السيرفر، يتم البحث عن صورة واقعية للبرومبت
+    print("🔄 خطة الطوارئ: الانتقال للبحث عن بديل أرشيفي مناسب...")
+    if fetch_real_photo(prompt_text[:80], output_path):
+        return True
+
+    # خطة الطوارئ النهائية: إنشاء كادر لوني سينمائي داكن بـ FFmpeg لمنع توقف الرندرة نهائياً
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x0d1117:s=1920x1080:d=1",
+        "-frames:v", "1", output_path
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return True
+
+# 6. توليد الصوت
 async def generate_narration(text, path):
     comm = edge_tts.Communicate(text, "ar-SA-HamedNeural", rate="-2%", pitch="-1Hz")
     await comm.save(path)
 
-# 8. استوديو المونتاج ومعالجة الكاميرا واللون (FFmpeg Pro Engine)
+# 7. استوديو المونتاج مع نظام استئناف المشاهد المكتملة
 scene_videos = []
 
 for i, scene in enumerate(scenes):
-    act = scene.get("act", "II")
-    print(f"\n🎞️ ============= معالجة المشهد {i+1}/{len(scenes)} [الفصل {act}] =============")
-    audio_raw = f"audio_raw_{i}.mp3"
-    audio_norm = f"audio_{i}.mp3"
     video_out = f"scene_{i}.mp4"
+    audio_norm = f"audio_{i}.mp3"
+    audio_raw = f"audio_raw_{i}.mp3"
 
-    # أ. توليد الصوت ومعايرته تلفزيونياً (Broadcast Loudnorm)
-    asyncio.run(generate_narration(scene["narration"], audio_raw))
-    subprocess.run([
-        "ffmpeg", "-y", "-i", audio_raw,
-        "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
-        "-c:a", "libmp3lame", "-b:a", "192k",
-        audio_norm
-    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-    
+    # ميزة الاستئناف: إذا كان المشهد مُنتجاً مسبقاً وسليماً، يتم تخطيه فوراً
+    if os.path.exists(video_out) and os.path.getsize(video_out) > 50000:
+        print(f"⏩ [تخطي]: المشهد {i+1} جاهز ومكتمل مسبقاً، المتابعة إلى التالي...")
+        scene_videos.append(video_out)
+        continue
+
+    print(f"\n🎞️ ============= معالجة المشهد {i+1}/{len(scenes)} =============")
+
+    # أ. توليد الصوت إذا لم يكن موجوداً
+    if not (os.path.exists(audio_norm) and os.path.getsize(audio_norm) > 1000):
+        asyncio.run(generate_narration(scene["narration"], audio_raw))
+        subprocess.run([
+            "ffmpeg", "-y", "-i", audio_raw,
+            "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+            "-c:a", "libmp3lame", "-b:a", "192k",
+            audio_norm
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
     duration = get_audio_duration(audio_norm)
     fps = 25
     total_frames = int(duration * fps) + 12
 
-    # ب. التحقق من إمكانية استخدام فيديو متحرك
+    # ب. محاولة جلب فيديو متحرك
     is_video_ready = False
     temp_clip = f"clip_{i}.mp4"
     if scene.get("media_type") == "video" and scene.get("search_query"):
         if fetch_stock_video(scene["search_query"], temp_clip):
-            # تطبيق فلتر الملاءمة + التدريج اللوني الموحد على الفيديو
             cmd_v = [
                 "ffmpeg", "-y",
                 "-stream_loop", "-1", "-i", temp_clip,
@@ -200,7 +225,7 @@ for i, scene in enumerate(scenes):
             subprocess.run(cmd_v, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
             is_video_ready = True
 
-    # ج. معالجة الصور الثابتة بنظام حركة كين بيرنز المتقدم
+    # ج. استخدام صورة (أرشيفية أو ذكاء اصطناعي) مع زووم سينمائي
     if not is_video_ready:
         image_path = f"image_{i}.jpg"
         got_img = False
@@ -214,12 +239,10 @@ for i, scene in enumerate(scenes):
 
         if camera_move == "zoom_out":
             zoom_expr = f"max(1.24-{step:.6f}*on,1.0)"
-            pan_expr = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-        else:  # zoom_in كخيار افتراضي أو مقصود
+        else:
             zoom_expr = f"min(1.0+{step:.6f}*on,1.24)"
-            pan_expr = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+        pan_expr = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
 
-        # اقتصاص العلامة المائية + تحريك الكاميرا + التدرج اللوني والتظليل السينمائي
         filter_complex = (
             f"[0:v]scale=w=1920:h=1120:force_original_aspect_ratio=increase,crop=1920:1080:0:0,"
             f"scale=8000:-1,"
@@ -242,7 +265,7 @@ for i, scene in enumerate(scenes):
 
     scene_videos.append(video_out)
 
-# 9. تجميع كافة المشاهد بدقة 1080p أصلية موحدة
+# 8. التجميع النهائي
 print("\n🪡 [المونتاج النهائي]: جاري دمج كافة فصول الفيلم الوثائقي...")
 with open("concat_list.txt", "w") as f:
     for vid in scene_videos:
@@ -255,7 +278,7 @@ subprocess.run([
     "-c", "copy", final_output
 ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
-# 10. نقل الفيلم إلى Google Drive عبر الويب آب المشفر
+# 9. الرفع التلقائي إلى Google Drive
 if "DRIVE_UPLOAD_URL" in os.environ and os.environ["DRIVE_UPLOAD_URL"]:
     print("☁️ [الرفع السحابي]: جاري إرسال الفيلم الوثائقي إلى Google Drive...")
     import base64
@@ -270,6 +293,6 @@ if "DRIVE_UPLOAD_URL" in os.environ and os.environ["DRIVE_UPLOAD_URL"]:
         params={"filename": f"Master_Doc_{stamp}.mp4"},
         timeout=300
     )
-    print("🚀 [نتيجة الرفع السحابي]:", resp.text)
+    print("🚀 [نتيجة درايف]:", resp.text)
 
-print("\n🏆 اكتمل إنتاج الفيلم الوثائقي الاحترافي بالكامل وبأعلى مقاييس الجودة العالمية!")
+print("\n🏆 اكتمل إنتاج الفيلم بالكامل وبنجاح تام!")
