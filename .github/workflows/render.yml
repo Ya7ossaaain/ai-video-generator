@@ -25,7 +25,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
           pip install --upgrade pip
-          pip install edge-tts google-generativeai requests duckduckgo_search
+          pip install edge-tts google-generativeai requests
 
       - name: تشغيل التوليد والمونتاج السحابي
         env:
@@ -33,7 +33,7 @@ jobs:
           DRIVE_UPLOAD_URL: ${{ secrets.DRIVE_UPLOAD_URL }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           VIDEO_TOPIC: ${{ github.event.inputs.topic }}
-        run: python pipeline.py
+        run: python -u pipeline.py
 
       - name: حفظ وتجهيز الفيديو للتحميل المباشر
         if: always()
