@@ -9,7 +9,7 @@ import google.generativeai as genai
 
 # 1. إعداد Gemini
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-model = genai.GenerativeModel("gemini-3-flash")
+model = genai.GenerativeModel("gemini-3-flash-preview")
 
 # استلام موضوع الفيديو
 topic = os.environ.get("VIDEO_TOPIC", "أسرار الحضارات القديمة الغامضة")
