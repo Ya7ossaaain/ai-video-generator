@@ -1,17 +1,16 @@
-name: Generate Long Video
+name: إنتاج الفيلم الوثائقي السحابي
 
 on:
   workflow_dispatch:
     inputs:
       topic:
-        description: 'اكتب موضوع الفيديو هنا (بالإنجليزية أو العربية)'
-        required: true
-        default: 'Ancient Egypt Mysteries'
+        description: 'موضوع الفيلم الوثائقي'
+        required: false
+        default: 'حادثة ممر دياتلوف: اللغز الذي حيّر العالم'
 
 jobs:
-  build:
+  build-and-render:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
 
     steps:
       - name: استدعاء المشروع
@@ -22,20 +21,23 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: تثبيت أدوات المونتاج والمكتبات
+      - name: تثبيت FFmpeg والمكتبات
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
-          pip install edge-tts google-generativeai
+          pip install --upgrade pip
+          pip install edge-tts google-generativeai requests duckduckgo_search
 
       - name: تشغيل التوليد والمونتاج السحابي
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DRIVE_UPLOAD_URL: ${{ secrets.DRIVE_UPLOAD_URL }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           VIDEO_TOPIC: ${{ github.event.inputs.topic }}
         run: python pipeline.py
 
       - name: حفظ وتجهيز الفيديو للتحميل المباشر
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Full-Documentary-Video
-          path: final_long_video.mp4
-          retention-days: 7
+          name: documentary-video
+          path: final_documentary.mp4
