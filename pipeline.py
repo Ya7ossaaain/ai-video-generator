@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-FORENSIC & HISTORICAL DOCUMENTARY AUTOMATION ENGINE (PRODUCTION PIPELINE V4.7 - KEY POOLING)
+FORENSIC & HISTORICAL DOCUMENTARY AUTOMATION ENGINE (PRODUCTION PIPELINE V4.8 - DEDICATED MODELS)
 ====================================================================================================
 نظام متكامل ومؤتمت لإنتاج الأفلام الوثائقية الاستقصائية والجنائية بدقة سينمائية ومعايير صحفية صارمة.
-- المحرك الصوتي: Google Gemini TTS (gemini-3.8-flash-tts بنبرة Charon التوثيقية).
-- إدارة الحصص المتعددة (API Key Rotation): التبديل الفوري بين 4 مفاتيح مستقلة عند ظهور 429.
-- محرك السيناريو: gemini-3.8-flash و gemini-3-flash-preview بدعم التدوير الآلي.
+- المحرك الصوتي: gemini-3.8-flash-tts حصرياً (بصوت Charon التوثيقي).
+- محرك السيناريو والنصوص: gemini-3.8-flash و gemini-3-flash-preview حصرياً.
+- إدارة الحصص المتعددة (API Key Rotation): التبديل الفوري بين المفاتيح المستقلة عند ظهور 429.
 - محرك التحقق الأرشيفي: جلب وفحص الأدلة والمصادر (Wikimedia & Wikipedia APIs).
 - محرك النزاهة التوثيقية: تصنيف مرئي بين الوثائق الأصلية وإعادة التمثيل الرقمية.
 - محرك الرسوميات: معالجة النصوص العربية وحساب التفاف الأسطر بالبكسل مع طبقات ألفا شفافة.
@@ -82,7 +82,6 @@ logger.addHandler(console_handler)
 
 def parse_api_keys() -> List[str]:
     raw = os.environ.get("GEMINI_API_KEY", "")
-    # دعم الفصل بالفواصل العادية أو السطور الجديدة
     keys = [k.strip() for k in raw.replace("\n", ",").split(",") if k.strip()]
     return keys
 
@@ -95,15 +94,15 @@ class PipelineConfig:
     video_crf: int = 19
     video_preset: str = "veryfast"
     
-    # نماذج الذكاء الاصطناعي المعتمدة
+    # نماذج الذكاء الاصطناعي المعتمدة بدقة
     text_generation_models: List[str] = field(default_factory=lambda: ["gemini-3.8-flash", "gemini-3-flash-preview"])
-    tts_models: List[str] = field(default_factory=lambda: ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"])
+    tts_models: List[str] = field(default_factory=lambda: ["gemini-3.8-flash-tts"])
     gemini_voice_name: str = "Charon"
     
     # تدوير المفاتيح وإدارة سرعة التوليد
     audio_sample_rate: int = 48000
     audio_bitrate: str = "192k"
-    post_tts_cooldown: int = 10     # مع وجود عدة مفاتيح تكفي 10 ثوانٍ كفاصل أمان
+    post_tts_cooldown: int = 10     # فاصل أمان 10 ثوانٍ بفضل توزيع الحمل على المفاتيح
     max_rotation_attempts: int = 16 # محاولات كافية للدوران عبر كافة المفاتيح
     
     # مسارات الملفات والمجلدات
@@ -377,7 +376,7 @@ class GeminiDocumentaryDirector:
         prompt = f"""
         أنت كبير المحققين والمخرجين للوثائقيات الجنائية والتاريخية الكبرى.
         الموضوع: "{topic}".
-        المطلوب: إنتاج سيناريو استقصائي محكم ومضبوط لغوياً ونحوياً بالكامل يتكون من 35 إلى 37 مشهداً.
+        المطلوب: إنتاج سيناريو استقصائي وقصصي واقعي محكم ومضبوط لغوياً ونحوياً بالكامل يتكون من 35 إلى 37 مشهداً.
 
         القواعد الصارمة لإخراج الفيلم:
         1. السلامة النحوية واللغوية: الالتزام التام بتطابق المذكر والمؤنث وضبط النطق (مثال: قل "زياً أسودَ" ولا تقل "زياً سوداء").
@@ -387,7 +386,7 @@ class GeminiDocumentaryDirector:
            - "AI_REENACTMENT": لتمثيل اللحظات التخيلية التي لم توثقها كاميرا.
            - "STOCK_BROLL": للقطات العامة (أمطار ليلية، آلة كاتبة، دوران أشرطة الكاسيت).
         3. كلمات البحث (search_query) للوثائق الأصلية يجب أن تكون مكتوبة باللغة الإنجليزية الأرشيفية المعتمدة في السجلات الأمريكية والفيدرالية.
-        4. السرد (narration): جملتان مكثفتان وقويتان باللغة العربية الفصحى الرصينة.
+        4. السرد (narration): جملتان مكثفتان وقويتان باللغة العربية الفصحى الرصينة تحكي الواقعة بإثارة وواقعية.
         5. حركة الكاميرا (camera_move): اختر من ("zoom_in", "zoom_out", "tilt_down", "pan_left", "pan_right").
 
         أخرج النتيجة بصيغة JSON Array نقية ومباشرة فقط:
@@ -423,7 +422,7 @@ class GeminiDocumentaryDirector:
         raise RuntimeError("فشل توليد السيناريو الاستقصائي عبر كافة المفاتيح المتاحة.")
 
     def synthesize_charon_voice(self, text: str, output_wav: Path) -> None:
-        """توليد صوت Charon مع التدوير التلقائي السريع للمفاتيح عند سقف الحصة."""
+        """توليد صوت Charon حصرياً عبر gemini-3.8-flash-tts مع التدوير التلقائي للمفاتيح."""
         for attempt in range(1, CONFIG.max_rotation_attempts + 1):
             for model_name in CONFIG.tts_models:
                 try:
@@ -454,7 +453,7 @@ class GeminiDocumentaryDirector:
                         with open(output_wav, "wb") as f:
                             f.write(binary_data)
                         
-                        # تبريد قصير جداً (10 ثوانٍ) كافٍ تماماً بفضل توزيع الحمل
+                        # تبريد قصير بفضل توزيع الحمل بين المفاتيح
                         time.sleep(CONFIG.post_tts_cooldown)
                         return
 
@@ -462,10 +461,9 @@ class GeminiDocumentaryDirector:
                     err_msg = str(e)
                     logger.warning(f"تنبيه صوت ({model_name} - محاولة {attempt}): {err_msg[:80]}")
                     
-                    # إذا كان الخطأ 429 أو 503، نقوم بالتدوير الفوري للمفتاح التالي دون تعطيل
                     if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "503" in err_msg:
                         self.rotate_to_next_key()
-                        time.sleep(2) # تأخير عابر للربط بالمفتاح الجديد
+                        time.sleep(2)
                         break
                     
                     time.sleep(5)
@@ -481,7 +479,7 @@ class ForensicAssetHarvester:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "ForensicDocumentaryEngine/4.7 (contact: historical_investigation@gmail.com)"
+            "User-Agent": "ForensicDocumentaryEngine/4.8 (contact: historical_investigation@gmail.com)"
         })
 
     def search_wikimedia_archive(self, query: str, output_path: Path) -> Tuple[bool, str]:
@@ -828,7 +826,7 @@ class MasterDocumentaryPipeline:
                 source_attribution = ""
                 self.harvester.generate_ai_reenactment_visual(ai_prompt, image_path)
 
-            # توليد صوت Charon مع التدوير التلقائي الفوري للمفاتيح
+            # توليد صوت Charon حصرياً بموديل gemini-3.8-flash-tts مع تدوير المفاتيح
             if not voice_raw_wav.exists() or voice_raw_wav.stat().st_size < 1000:
                 self.director.synthesize_charon_voice(narration, voice_raw_wav)
 
@@ -879,15 +877,15 @@ class MasterDocumentaryPipeline:
         logger.info(f"✨ اكتمل إنتاج الفيلم بالكامل! المدة الإجمالية: {dur_min} دقيقة و {dur_sec} ثانية.")
 
         # المرحلة 4: النشر والأرشفة السحابية
-        video_title = f"تحقيق استقصائي: {CONFIG.topic} (ملف الأدلة الموثقة)"
+        video_title = f"حكايات واقعية: {CONFIG.topic} (القصة والوثائق الكاملة)"
         video_desc = (
-            f"تحقيق جنائي وتاريخي موثق بالأدلة والمحاضر الرسمية الأصلية حول {CONFIG.topic}.\n\n"
-            "ملاحظة توثيقية: يلتزم هذا العمل بالنزاهة الصحفية؛ حيث يتم الفصل بوضوح بين الوثائق الأرشيفية الأصلية "
+            f"قصة حقيقية ووقائع موثقة بالأدلة والمحاضر الرسمية الأصلية حول {CONFIG.topic}.\n\n"
+            "ملاحظة توثيقية: يلتزم هذا العمل بالنزاهة والشفافية؛ حيث يتم الفصل بوضوح بين الوثائق الأرشيفية الأصلية "
             "وبين إعادة التمثيل الرقمية بالذكاء الاصطناعي عبر الشارات الظاهرة على الشاشة.\n\n"
-            "هل تعتقد أن الشفرات الجنائية المتبقية ستحسم هوية الفاعل يوماً ما؟ شاركنا رأيك في التعليقات.\n\n"
-            "#وثائقي #تحقيقات #أدلة_جنائية #تاريخ #جرائم_غامضة"
+            "هل تعتقد أن الحقيقة الكاملة ستظهر يوماً ما؟ شاركنا رأيك في التعليقات.\n\n"
+            "#الحسين #حكايات_واقعية #وثائقي #قصص_واقعية #غموض #جرائم_غامضة"
         )
-        video_tags = ["وثائقي", "تحقيقات", "أدلة جنائية", "غموض", "قضايا تاريخية", "شفرات"]
+        video_tags = ["الحسين", "حكايات واقعية", "قصص حقيقية", "وثائقي", "أدلة جنائية", "غموض", "قضايا تاريخية"]
 
         CloudDistributionEngine.upload_to_google_drive(master_film_mp4)
 
