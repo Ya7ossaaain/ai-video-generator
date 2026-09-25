@@ -2,40 +2,13 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-INVESTIGATIVE DOCUMENTARY BROADCAST MASTER ENGINE (ENTERPRISE PRODUCTION PIPELINE V7.0)
+INVESTIGATIVE DOCUMENTARY BROADCAST MASTER ENGINE (ENTERPRISE PRODUCTION PIPELINE V7.5)
 ====================================================================================================
-نظام متكامل ومؤتمت بالكامل لإنتاج الأفلام الوثائقية الاستقصائية والجنائية بأعلى المعايير التلفزيونية
-المعتمدة لدى كبرى الشبكات العالمية (مثل Netflix Crime Documentaries و Al Jazeera Investigations).
-
-المعايير المعمارية والتشغيلية المعتمدة في هذا الإصدار:
-----------------------------------------------------------------------------------------------------
-1. المحرك التحليلي للسيناريو:
-   - نموذج gemini-3-flash-preview حصرياً عبر مصفوفة مفاتيح الـ API العشرة مع استراتيجية دوران ذكية.
-   - هندسة السرد الاستقصائي القائم على هيكل الفصول الستة (The Six-Act Investigative Architecture).
-   - التجريد المطلق: العمل ديناميكي 100% ويستقبل أي موضوع عبر المتغير VIDEO_TOPIC دون أي نصوص مسبقة.
-
-2. استراتيجية الهوية البصرية الصارمة (Zero AI Hallucinations):
-   - استبعاد توليد الوجوه والأشخاص بالذكاء الاصطناعي لحماية النزاهة الصحفية وتفادي المظهر البلاستيكي.
-   - مصفوفة بصرية هجينة ثلاثية الأبعاد:
-     أ) 65% وثائق وسجلات تاريخية ومحاضر رسمية ممسوحة ضوئياً (Wikimedia, Wikipedia, National Archives).
-     ب) 25% لقطات أرشيفية عامة تمثل الحقبة وأجواء الغموض (Atmospheric Vintage Noir B-Roll).
-     ج) 10% لوحات أدلة ومقارنات جنائية رسومية مولدة برمجياً (Procedural Forensic Boards) للحسابات والشفرات.
-
-3. المعالجة البصرية والمونتاج السينمائي (Cinematic Visual Grammar):
-   - المعيار السينمائي التوثيقي العالمي (24.000 fps Film Cadence).
-   - حركات كاميرا ناعمة (Ken Burns Engine) محسوبة بدقة 1080p مع تسريع المعالجة عبر الأنوية المتعددة.
-   - تلوين نوار جنائي (Forensic Noir Color Grading) وحقن تحبيب سينمائي طبيعي عبر مشفر -tune grain.
-   - شارات ومعلومات تلفزيونية (Broadcast Lower Thirds) تدعم التشكيل العربي المتصل بخط Amiri-Bold.
-
-4. الهندسة الصوتية التكتيكية متقدمة الطبقات (Multi-Layer Tactical Soundscape):
-   - التعليق الصوتي: نموذج gemini-3.8-flash-tts بصوت Charon مع فواصل أمان ومطابقة نبرة هادئة ورصينة.
-   - المؤثرات الإجرائية (Procedural SFX): أصوات الأختام الجنائية، نقرات الآلات الكاتبة، واللاسلكي المكتوم.
-   - ذبذبات الغموض التحتي (Sub-bass Ambient Drone) بتردد 44Hz مبنية رياضياً عبر FFmpeg.
-   - خافض الصوت التلقائي (Dynamic Audio Ducking): خفض المؤثرات بمقدار -14dB تحت صوت المعلق.
-
-5. إدارة الاستمرارية والتعافي من الانهيار (Checkpoint Resilience Engine):
-   - تدوير تلقائي عبر 10 مفاتيح عند استقبال رموز 429 أو 503 مع فترات تهدئة لوغاريتمية.
-   - حفظ حالة كل مشهد في ملف Checkpoint؛ مما يتيح استئناف الرندرة في حال انقطاع السيرفر دون إعادة العمل.
+- محرك السيناريو: gemini-3-flash-preview حصرياً عبر مصفوفة المفاتيح العشرة.
+- المدخل الديناميكي: استلام موضوع الوثائقي عبر VIDEO_TOPIC من مدخلات الـ Workflow مباشرة.
+- الوسائط: صفر تزييف بالذكاء الاصطناعي (أرشيف حقيقي + لوحات أدلة جنائية نوار واقعية فاخرة + B-Roll).
+- محرك الصوت: gemini-3.8-flash-tts بصوت Charon مع تدوير المفاتيح وفاصل تبريد وقائي 25 ثانية.
+- المونتاج السينمائي: معيار 24fps وتحبيب أفلام 35mm وتوزيع صوت محيطي مع خفض تلقائي (Ducking).
 ====================================================================================================
 """
 
@@ -71,11 +44,10 @@ from googleapiclient.http import MediaFileUpload
 
 
 # ==================================================================================================
-# 1. نظام تسجيل الأحداث والقياس عن بُعد (FORENSIC TELEMETRY & CONSOLE LOGGING)
+# 1. نظام تسجيل الأحداث والقياس عن بُعد (FORENSIC TELEMETRY)
 # ==================================================================================================
 
 class ForensicTelemetryFormatter(logging.Formatter):
-    """منسق مخرجات السجل الطرفي مع دعم التلوين التكتيكي لخطوط الإنتاج السحابية."""
     CYAN = "\x1b[36;20m"
     GREEN = "\x1b[32;20m"
     YELLOW = "\x1b[33;20m"
@@ -109,11 +81,10 @@ if not logger.handlers:
 
 
 # ==================================================================================================
-# 2. مصفوفة الإعدادات وبيانات البيئة (ENVIRONMENT CONTROLLER & APP CONFIG)
+# 2. مصفوفة الإعدادات وبيانات البيئة (ENVIRONMENT CONTROLLER)
 # ==================================================================================================
 
 def extract_api_keys_from_environment() -> List[str]:
-    """استخراج مصفوفة مفاتيح Gemini الـ 10 من المتغيرات السرية وتنظيفها من الفواصل والمسافات."""
     raw_env_str = os.environ.get("GEMINI_API_KEY", "")
     split_keys = [k.strip() for k in raw_env_str.replace("\n", ",").split(",") if k.strip()]
     if not split_keys:
@@ -123,14 +94,11 @@ def extract_api_keys_from_environment() -> List[str]:
 
 @dataclass
 class ForensicPipelineConfig:
-    """مصفوفة الثوابت والمعايير التقنية لخط الإنتاج التلفزيوني الشامل."""
-    
-    # المعايير المرئية السينمائية
     video_width: int = 1920
     video_height: int = 1080
     video_fps: int = 24             # المعيار السينمائي الوثائقي (24 إطاراً بالثانية)
-    video_crf: int = 18             # معدل الجودة البصرية التلفزيونية الصارمة
-    video_preset: str = "faster"    # سرعة الضغط مع الحفاظ على تفاصيل الحواف
+    video_crf: int = 18             # جودة تلفزيونية فائقة النقاء
+    video_preset: str = "faster"    # سرعة الضغط مع الحفاظ على حدة النصوص
     video_tune: str = "grain"       # تحبيب تماثلي حقيقي عبر مشفر x264
     
     # نماذج الذكاء الاصطناعي المعتمدة
@@ -138,14 +106,14 @@ class ForensicPipelineConfig:
     tts_model_name: str = "gemini-3.8-flash-tts"        # المحرك الصوتي التوثيقي
     voice_character_name: str = "Charon"               # صوت المحقق الجنائي الرصين
     
-    # المعايير الصوتية التكتيكية
+    # المعايير الصوتية
     audio_sample_rate: int = 48000
     audio_bitrate: str = "256k"
-    post_tts_cooldown: int = 25     # فاصل أمان إلزامي بين كل استدعاء لتفادي نفاد الحصة
+    post_tts_cooldown: int = 25     # فاصل أمان 25 ثانية لحماية الحصص
     dramatic_pause_sec: float = 1.5 # وقفة درامية بين المشاهد لاستيعاب الأدلة
     max_key_rotations: int = 40    # أقصى عدد محاولات دوران عبر المفاتيح
     
-    # بنية المستودع والمسارات التنفيذية
+    # مسارات المجلدات
     base_build_dir: Path = field(default_factory=lambda: Path("./output_build"))
     cache_dir: Path = field(default_factory=lambda: Path("./output_build/cache"))
     scenes_dir: Path = field(default_factory=lambda: Path("./output_build/scenes"))
@@ -153,16 +121,13 @@ class ForensicPipelineConfig:
     sfx_dir: Path = field(default_factory=lambda: Path("./output_build/sfx"))
     broll_dir: Path = field(default_factory=lambda: Path("./output_build/broll"))
     
-    # ملفات الحالة والبيانات الوصفية
     manifest_file: str = "investigative_manifest_master.json"
     checkpoint_file: str = "pipeline_checkpoint_state.json"
     
-    # محددات مدة الفيلم الوثائقي (16 دقيقة)
     min_required_scenes: int = 62
     max_target_scenes: int = 68
     max_subtitle_pixel_width: int = 1540
     
-    # مدخلات الموضوع وبيانات التوزيع السحابي
     topic: str = os.environ.get("VIDEO_TOPIC", "تحقيق استقصائي: لغز اختفاء طائرة دي بي كوبر وملفات التحقيق الفيدرالية")
     api_key_pool: List[str] = field(default_factory=extract_api_keys_from_environment)
     google_client_id: str = os.environ.get("GOOGLE_CLIENT_ID", "")
@@ -171,23 +136,20 @@ class ForensicPipelineConfig:
     drive_refresh_token: str = os.environ.get("DRIVE_REFRESH_TOKEN", "")
 
     def setup_directories(self) -> None:
-        """إنشاء منظومة المجلدات المعزولة في بيئة تشغيل GitHub Actions."""
         for folder in [self.base_build_dir, self.cache_dir, self.scenes_dir, 
                        self.assets_dir, self.sfx_dir, self.broll_dir]:
             folder.mkdir(parents=True, exist_ok=True)
-        logger.info(f"تم بناء منظومة مجلدات الإنتاج بنجاح داخل: {self.base_build_dir.resolve()}")
 
 
 CONFIG = ForensicPipelineConfig()
+CONFIG.setup_directories()  # تفعيل المجلدات فوراً عند تشغيل السكربت لتفادي أي أخطاء ملفات
 
 
 # ==================================================================================================
-# 3. إدارة الاستمرارية وحفظ التقدم (CHECKPOINT & RESILIENCE ENGINE)
+# 3. إدارة الاستمرارية وحفظ التقدم (CHECKPOINT ENGINE)
 # ==================================================================================================
 
 class ProductionCheckpointManager:
-    """مدير استمرارية التشغيل لحفظ تقدم الرندرة ومنع إعادة المشاهد المنجزة عند تعثر السيرفر."""
-    
     def __init__(self, checkpoint_path: Path):
         self.path = checkpoint_path
         self.state = self._load()
@@ -222,12 +184,10 @@ class ProductionCheckpointManager:
 
 
 # ==================================================================================================
-# 4. محرك التايبوجرافي والتشكيل العربي المتقدم (ARABIC TYPOGRAPHY ENGINE)
+# 4. محرك التايبوجرافي وتشكيل النصوص العربية (ARABIC TYPOGRAPHY ENGINE)
 # ==================================================================================================
 
 class BroadcastTypographyEngine:
-    """محرك التايبوجرافي المسؤول عن المعالجة البيانية للنصوص العربية وتصحيح الاتجاه والحساب الدقيق للبكسل."""
-    
     def __init__(self):
         self.primary_font_path = self._verify_and_download_amiri()
         logger.info(f"تم اعتماد الخط الأرشيفي المعتمد: {self.primary_font_path}")
@@ -235,10 +195,12 @@ class BroadcastTypographyEngine:
     @staticmethod
     def _verify_and_download_amiri() -> str:
         target_path = CONFIG.base_build_dir / "Amiri-Bold.ttf"
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        
         if not target_path.exists() or target_path.stat().st_size < 12000:
             amiri_repo_url = "https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Bold.ttf"
             try:
-                logger.info("جاري تحميل وتثبيت خط Amiri-Bold الأصيل لمنع تداخل الحروف العربية...")
+                logger.info("جاري تحميل خط Amiri-Bold الأصيل لضمان اتصال الحروف...")
                 resp = requests.get(amiri_repo_url, timeout=20)
                 if resp.status_code == 200 and len(resp.content) > 10000:
                     with open(target_path, "wb") as f:
@@ -268,7 +230,6 @@ class BroadcastTypographyEngine:
 
     @staticmethod
     def apply_bidi_shaping(raw_text: str) -> str:
-        """تصحيح اتصال الحروف وعكس الاتجاه من اليمين لليسار مع حماية علامات الترقيم والأرقام."""
         reshaped = arabic_reshaper.reshape(raw_text)
         return get_display(reshaped, base_dir='R')
 
@@ -278,7 +239,6 @@ class BroadcastTypographyEngine:
         font: ImageFont.FreeTypeFont,
         max_width_px: int
     ) -> List[str]:
-        """توزيع الكلمات العربية على الأسطر بناءً على العرض الفيزيائي الدقيق للبكسل وليس عدد الحروف."""
         words = text.strip().split()
         final_lines: List[str] = []
         current_line_tokens: List[str] = []
@@ -307,40 +267,83 @@ TYPOGRAPHY = BroadcastTypographyEngine()
 
 
 # ==================================================================================================
-# 5. محرك لوحات الأدلة الجنائية المؤتمت (PROCEDURAL FORENSIC BOARDS)
+# 5. محرك لوحات الأدلة الجنائية الفاخرة (LUXURIOUS PROCEDURAL EVIDENCE BOARDS)
 # ==================================================================================================
 
 class ProceduralForensicBoardEngine:
     """
-    محرك لتوليد لوحات الرسوم البيانية والأدلة الجنائية بدقة 1080p عند الحاجة لمقارنات
-    أو إحصائيات معقدة في صلب القضية، بما يعزز الطابع التحقيقي دون أي تدخل من الذكاء الاصطناعي.
+    محرك لتوليد لوحات تحقيقات جنائية داكنة فائقة الفخامة بدقة 1080p:
+    تحتوي على بطاقات مستندات مجسمة مع ظلال ناعمة (Drop Shadows)، دبابيس وخيوط حمراء متقاطعة،
+    وأختام معتقة، وشبكات إحداثيات ومؤشرات قياس سينمائية.
     """
 
     @staticmethod
-    def create_dark_evidence_canvas() -> Image.Image:
-        """إنشاء نسيج خلفية داكنة تحاكي طاولات التحقيق الجنائي مع شبكة إحداثيات ومؤثر الفينييت."""
-        canvas = Image.new("RGBA", (CONFIG.video_width, CONFIG.video_height), (12, 14, 18, 255))
+    def create_rich_noir_canvas() -> Image.Image:
+        """إنشاء خلفية مكتب تحقيقات مظلمة مع نسيج معدني ناعم وشبكة إحداثيات متقدمة."""
+        canvas = Image.new("RGBA", (CONFIG.video_width, CONFIG.video_height), (10, 13, 18, 255))
         draw = ImageDraw.Draw(canvas)
 
-        # شبكة قياس جنائية باهتة (Forensic Measurement Grid)
-        grid_color = (24, 28, 36, 255)
-        for x in range(0, CONFIG.video_width, 80):
+        # شبكة قياس جنائية دقيقة (Forensic Grid)
+        grid_color = (20, 26, 36, 255)
+        for x in range(0, CONFIG.video_width, 60):
             draw.line([(x, 0), (x, CONFIG.video_height)], fill=grid_color, width=1)
-        for y in range(0, CONFIG.video_height, 80):
+        for y in range(0, CONFIG.video_height, 60):
             draw.line([(0, y), (CONFIG.video_width, y)], fill=grid_color, width=1)
 
-        # إطار نوار مظلم في الأطراف (Dark Cinematic Vignette)
+        # علامات زوايا العدسة الاستقصائية (Viewfinder Reticles)
+        bracket_color = (55, 70, 95, 200)
+        margin = 40
+        b_len = 35
+        # زاوية عليا يسار
+        draw.line([(margin, margin), (margin + b_len, margin)], fill=bracket_color, width=2)
+        draw.line([(margin, margin), (margin, margin + b_len)], fill=bracket_color, width=2)
+        # زاوية عليا يمين
+        draw.line([(CONFIG.video_width - margin, margin), (CONFIG.video_width - margin - b_len, margin)], fill=bracket_color, width=2)
+        draw.line([(CONFIG.video_width - margin, margin), (CONFIG.video_width - margin, margin + b_len)], fill=bracket_color, width=2)
+        # زاوية سفلى يسار
+        draw.line([(margin, CONFIG.video_height - margin), (margin + b_len, CONFIG.video_height - margin)], fill=bracket_color, width=2)
+        draw.line([(margin, CONFIG.video_height - margin), (margin, CONFIG.video_height - margin - b_len)], fill=bracket_color, width=2)
+        # زاوية سفلى يمين
+        draw.line([(CONFIG.video_width - margin, CONFIG.video_height - margin), (CONFIG.video_width - margin - b_len, CONFIG.video_height - margin)], fill=bracket_color, width=2)
+        draw.line([(CONFIG.video_width - margin, CONFIG.video_height - margin), (CONFIG.video_width - margin, CONFIG.video_height - margin - b_len)], fill=bracket_color, width=2)
+
+        # تعتيم حواف الشاشة (Vignette)
         vignette_layer = Image.new("RGBA", (CONFIG.video_width, CONFIG.video_height), (0, 0, 0, 0))
         v_draw = ImageDraw.Draw(vignette_layer)
         cx, cy = CONFIG.video_width // 2, CONFIG.video_height // 2
         max_radius = math.sqrt(cx**2 + cy**2)
 
         for r in range(int(max_radius), 0, -25):
-            alpha = int(190 * (1 - (r / max_radius)**1.5))
+            alpha = int(210 * (1 - (r / max_radius)**1.6))
             v_draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(0, 0, 0, alpha))
 
-        canvas = Image.alpha_composite(canvas, vignette_layer)
-        return canvas
+        return Image.alpha_composite(canvas, vignette_layer)
+
+    @staticmethod
+    def draw_card_with_shadow(
+        base_canvas: Image.Image,
+        box: Tuple[int, int, int, int],
+        bg_color: Tuple[int, int, int, int],
+        border_color: Tuple[int, int, int, int]
+    ) -> Image.Image:
+        """رسم بطاقة مستند مع ظل ناعم مجسم (Realistic Drop Shadow)."""
+        x1, y1, x2, y2 = box
+        w, h = x2 - x1, y2 - y1
+
+        # طبقة الظل المستقلة
+        shadow_layer = Image.new("RGBA", (CONFIG.video_width, CONFIG.video_height), (0, 0, 0, 0))
+        s_draw = ImageDraw.Draw(shadow_layer)
+        s_draw.rectangle([x1 + 8, y1 + 12, x2 + 8, y2 + 12], fill=(0, 0, 0, 160))
+        shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(14))
+
+        base_canvas = Image.alpha_composite(base_canvas, shadow_layer)
+
+        # رسم البطاقة نفسها
+        card_layer = Image.new("RGBA", (CONFIG.video_width, CONFIG.video_height), (0, 0, 0, 0))
+        c_draw = ImageDraw.Draw(card_layer)
+        c_draw.rectangle([x1, y1, x2, y2], fill=bg_color, outline=border_color, width=2)
+
+        return Image.alpha_composite(base_canvas, card_layer)
 
     @classmethod
     def render_dossier_board(
@@ -350,38 +353,61 @@ class ProceduralForensicBoardEngine:
         meta_label: str,
         evidence_points: List[str]
     ) -> None:
-        """رسم لوحة ملف الأدلة الجنائية وقوائم المحاضر الرسمية الموثقة."""
-        canvas = cls.create_dark_evidence_canvas()
+        """رسم لوحة ملف الأدلة الجنائية الفاخرة مع بطاقات وظلال وخيوط حمراء وأختام."""
+        canvas = cls.create_rich_noir_canvas()
+
+        # أبعاد البطاقة الرئيسية
+        card_box = (80, 160, 1840, 930)
+        canvas = cls.draw_card_with_shadow(
+            canvas, card_box,
+            bg_color=(15, 19, 26, 235),
+            border_color=(60, 75, 95, 220)
+        )
+
         draw = ImageDraw.Draw(canvas)
-
         font_header = TYPOGRAPHY.get_font_handle(38)
-        font_meta = TYPOGRAPHY.get_font_handle(20)
+        font_sub = TYPOGRAPHY.get_font_handle(20)
         font_bullet = TYPOGRAPHY.get_font_handle(24)
+        font_tag = TYPOGRAPHY.get_font_handle(16)
 
+        # شريط العنوان العلوي
+        draw.rectangle([80, 50, 1840, 125], fill=(18, 24, 34, 240), outline=(180, 45, 45, 200), width=2)
         shaped_title = TYPOGRAPHY.apply_bidi_shaping(f"■ {title}")
-        draw.text((80, 60), shaped_title, font=font_header, fill=(220, 45, 45, 255))
+        draw.text((110, 65), shaped_title, font=font_header, fill=(235, 55, 55, 255))
 
-        shaped_meta = TYPOGRAPHY.apply_bidi_shaping(f"سجل التحقيق الميداني: {meta_label}")
-        draw.text((80, 120), shaped_meta, font=font_meta, fill=(160, 175, 190, 240))
+        # ملصق مرجعي
+        tag_text = "EVIDENCE FILE // REF: 894-B"
+        draw.text((1500, 78), tag_text, font=font_tag, fill=(160, 175, 195, 220))
 
-        # صندوق استعراض بنود الأدلة
-        panel_x, panel_y, panel_w, panel_h = 80, 180, 1760, 750
-        draw.rectangle([panel_x, panel_y, panel_x + panel_w, panel_y + panel_h],
-                       fill=(16, 20, 26, 220), outline=(55, 65, 80, 200), width=2)
+        # عنوان فرعي للملف
+        meta_str = TYPOGRAPHY.apply_bidi_shaping(f"سجل التحقيق الميداني والمحاضر الموثقة: {meta_label}")
+        draw.text((110, 180), meta_str, font=font_sub, fill=(170, 190, 210, 240))
+        draw.line([(110, 215), (1810, 215)], fill=(45, 55, 70, 255), width=1)
 
-        for idx, pt in enumerate(evidence_points[:6]):
-            formatted_pt = TYPOGRAPHY.apply_bidi_shaping(f"● {pt}")
-            draw.text((panel_x + 40, panel_y + 45 + (idx * 110)),
-                      formatted_pt, font=font_bullet, fill=(235, 235, 235, 255))
+        # استعراض بنود الأدلة مع بطاقات داخلية ناعمة
+        card_start_y = 240
+        for idx, pt in enumerate(evidence_points[:5]):
+            item_y = card_start_y + (idx * 115)
+            # بطاقة صغيرة لكل دليل
+            draw.rectangle([110, item_y, 1810, item_y + 90], fill=(20, 26, 36, 200), outline=(45, 58, 76, 180), width=1)
+            # دبوس أحمر في طرف البطاقة
+            draw.ellipse([130, item_y + 35, 148, item_y + 53], fill=(210, 40, 40, 255), outline=(255, 255, 255, 200), width=1)
+            
+            shaped_pt = TYPOGRAPHY.apply_bidi_shaping(pt)
+            draw.text((170, item_y + 30), shaped_pt, font=font_bullet, fill=(240, 240, 240, 255))
 
-        # ختم الأرشفة الجنائية
-        stamp_box = [CONFIG.video_width - 390, CONFIG.video_height - 125,
-                     CONFIG.video_width - 80, CONFIG.video_height - 65]
-        draw.rectangle(stamp_box, outline=(180, 35, 35, 240), width=2)
-        draw.text((CONFIG.video_width - 370, CONFIG.video_height - 110),
-                  "CLASSIFIED ARCHIVE / EVIDENCE", font=font_meta, fill=(205, 45, 45, 255))
+        # رسم خيوط حمراء متقاطعة تربط الأدلة (Forensic Red Strings)
+        draw.line([(139, 285), (1750, 450)], fill=(190, 35, 35, 140), width=2)
+        draw.line([(1750, 450), (139, 630)], fill=(190, 35, 35, 110), width=2)
 
-        canvas.save(output_path, "JPEG", quality=95)
+        # الختم الجنائي المعتق
+        stamp_box = [1480, 830, 1810, 895]
+        draw.rectangle(stamp_box, outline=(200, 40, 40, 240), width=3)
+        draw.rectangle([stamp_box[0] + 4, stamp_box[1] + 4, stamp_box[2] - 4, stamp_box[3] - 4], outline=(200, 40, 40, 160), width=1)
+        draw.text((1510, 848), "OFFICIAL EVIDENCE // OPEN", font=font_sub, fill=(225, 45, 45, 255))
+
+        # تحويل مؤكد إلى RGB لحماية الـ JPEG من الانهيار
+        canvas.convert("RGB").save(output_path, "JPEG", quality=95)
 
     @classmethod
     def render_comparison_split_screen(
@@ -393,61 +419,75 @@ class ProceduralForensicBoardEngine:
         col2_title: str,
         col2_items: List[str]
     ) -> None:
-        """رسم شاشة المقارنة الجنائية المزدوجة بين الفرضيات المتصارعة أو إفادات الشهود المتناقضة."""
-        canvas = cls.create_dark_evidence_canvas()
-        draw = ImageDraw.Draw(canvas)
+        """رسم شاشة المقارنة الجنائية المزدوجة بملفين متجاورين وظلال حقيقية."""
+        canvas = cls.create_rich_noir_canvas()
 
+        # أبعاد الملفين
+        p_w, p_h = 850, 780
+        p1_box = (80, 160, 80 + p_w, 160 + p_h)
+        p2_box = (990, 160, 990 + p_w, 160 + p_h)
+
+        # رسم اللوحة الأولى بظلال مجسمة
+        canvas = cls.draw_card_with_shadow(
+            canvas, p1_box,
+            bg_color=(18, 22, 30, 235),
+            border_color=(175, 45, 45, 200)
+        )
+        # رسم اللوحة الثانية بظلال مجسمة
+        canvas = cls.draw_card_with_shadow(
+            canvas, p2_box,
+            bg_color=(18, 22, 30, 235),
+            border_color=(45, 135, 80, 200)
+        )
+
+        draw = ImageDraw.Draw(canvas)
         font_header = TYPOGRAPHY.get_font_handle(38)
         font_col = TYPOGRAPHY.get_font_handle(26)
         font_body = TYPOGRAPHY.get_font_handle(21)
+        font_tag = TYPOGRAPHY.get_font_handle(16)
 
+        # شريط العنوان العلوي
+        draw.rectangle([80, 50, 1840, 125], fill=(16, 22, 32, 240), outline=(75, 90, 115, 200), width=2)
         shaped_header = TYPOGRAPHY.apply_bidi_shaping(f"■ مقارنة الفرضيات والقرائن: {header_text}")
-        draw.text((80, 60), shaped_header, font=font_header, fill=(220, 45, 45, 255))
+        draw.text((110, 65), shaped_header, font=font_header, fill=(225, 50, 50, 255))
+        draw.text((1520, 78), "FORENSIC CROSS-EXAMINATION", font=font_tag, fill=(160, 175, 195, 220))
 
-        panel_w, panel_h = 840, 760
-        p1_x, p1_y = 80, 160
-        p2_x, p2_y = 1000, 160
-
-        # اللوحة الأولى (الفرضية أ / أدلة الإثبات)
-        draw.rectangle([p1_x, p1_y, p1_x + panel_w, p1_y + panel_h],
-                       fill=(18, 22, 28, 220), outline=(170, 50, 50, 180), width=2)
-        draw.text((p1_x + 30, p1_y + 30), TYPOGRAPHY.apply_bidi_shaping(col1_title),
-                  font=font_col, fill=(235, 80, 80, 255))
+        # العمود الأول (الفرضية أ / أدلة الإثبات)
+        p1_x, p1_y = p1_box[0], p1_box[1]
+        draw.rectangle([p1_x, p1_y, p1_x + p_w, p1_y + 70], fill=(28, 20, 24, 240), outline=(175, 45, 45, 180), width=1)
+        draw.text((p1_x + 30, p1_y + 20), TYPOGRAPHY.apply_bidi_shaping(col1_title), font=font_col, fill=(245, 85, 85, 255))
         for idx, item in enumerate(col1_items[:5]):
-            draw.text((p1_x + 30, p1_y + 110 + (idx * 115)),
-                      TYPOGRAPHY.apply_bidi_shaping(f"● {item}"), font=font_body, fill=(225, 225, 225, 240))
+            box_y = p1_y + 90 + (idx * 130)
+            draw.rectangle([p1_x + 20, box_y, p1_x + p_w - 20, box_y + 105], fill=(22, 26, 36, 180), outline=(50, 60, 75, 160))
+            draw.text((p1_x + 35, box_y + 35), TYPOGRAPHY.apply_bidi_shaping(f"● {item}"), font=font_body, fill=(235, 235, 235, 245))
 
-        # اللوحة الثانية (الفرضية ب / أدلة النفي)
-        draw.rectangle([p2_x, p2_y, p2_x + panel_w, p2_y + panel_h],
-                       fill=(18, 22, 28, 220), outline=(50, 120, 80, 180), width=2)
-        draw.text((p2_x + 30, p2_y + 30), TYPOGRAPHY.apply_bidi_shaping(col2_title),
-                  font=font_col, fill=(80, 215, 120, 255))
+        # العمود الثاني (الفرضية ب / أدلة النفي)
+        p2_x, p2_y = p2_box[0], p2_box[1]
+        draw.rectangle([p2_x, p2_y, p2_x + p_w, p2_y + 70], fill=(18, 28, 22, 240), outline=(45, 135, 80, 180), width=1)
+        draw.text((p2_x + 30, p2_y + 20), TYPOGRAPHY.apply_bidi_shaping(col2_title), font=font_col, fill=(85, 225, 125, 255))
         for idx, item in enumerate(col2_items[:5]):
-            draw.text((p2_x + 30, p2_y + 110 + (idx * 115)),
-                      TYPOGRAPHY.apply_bidi_shaping(f"● {item}"), font=font_body, fill=(225, 225, 225, 240))
+            box_y = p2_y + 90 + (idx * 130)
+            draw.rectangle([p2_x + 20, box_y, p2_x + p_w - 20, box_y + 105], fill=(22, 26, 36, 180), outline=(50, 60, 75, 160))
+            draw.text((p2_x + 35, box_y + 35), TYPOGRAPHY.apply_bidi_shaping(f"● {item}"), font=font_body, fill=(235, 235, 235, 245))
 
-        canvas.save(output_path, "JPEG", quality=95)
+        # خيط مقارنة تكتيكي يربط بين الملفين
+        draw.line([(p1_x + p_w - 30, p1_y + 220), (p2_x + 30, p2_y + 350)], fill=(210, 45, 45, 160), width=2)
+
+        canvas.convert("RGB").save(output_path, "JPEG", quality=95)
 
 
 # ==================================================================================================
-# 6. جالب الأرشيف التاريخي واللقطات الجوية الغامضة (AUTHENTIC MEDIA HARVESTER)
+# 6. جالب الأرشيف التاريخي الحقيقي والـ B-Roll (ARCHIVAL MEDIA HARVESTER)
 # ==================================================================================================
 
 class ArchivalMediaHarvester:
-    """
-    محرك جلب الوثائق الحقيقية والمواد الأرشيفية المعاصرة للحدث دون توليد تخيلي؛
-    يبحث في مستودعات المعرفة المفتوحة (Wikimedia Commons, Wikipedia Records)
-    ويوفر لقطات B-Roll نوار تعويضية عند تعذر الحصول على وثيقة تطابق النص.
-    """
-
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "BroadcastInvestigativeEngine/7.0 (archival_research@documentary.org)"
+            "User-Agent": "BroadcastInvestigativeEngine/7.5 (archival_research@documentary.org)"
         })
 
     def query_wikimedia_commons(self, search_query: str, target_image_path: Path) -> Tuple[bool, str]:
-        """البحث في صور ومسودات مستودع ويكيميديا كومنز وسحب الملف عالي الدقة."""
         try:
             api_endpoint = "https://commons.wikimedia.org/w/api.php"
             params = {
@@ -487,7 +527,6 @@ class ArchivalMediaHarvester:
         return False, ""
 
     def query_wikipedia_records(self, search_query: str, target_image_path: Path) -> Tuple[bool, str]:
-        """البحث في مقالات وسجلات ويكيبيديا عن الأحداث الموثقة."""
         try:
             api_endpoint = "https://en.wikipedia.org/w/api.php"
             params = {
@@ -518,33 +557,8 @@ class ArchivalMediaHarvester:
             logger.debug(f"خطأ أثناء فحص ويكيبيديا: {exc}")
         return False, ""
 
-    def synthesize_vintage_atmospheric_broll(self, output_path: Path, scene_index: int) -> None:
-        """
-        تخليق لقطة B-Roll نوار حقيقية داكنة (أجواء غرف التحقيق، الإضاءة الخافتة، أجهزة التسجيل)
-        لحماية السرد من الانقطاع في حال غياب صورة مباشرة للحدث.
-        """
-        canvas = Image.new("RGBA", (CONFIG.video_width, CONFIG.video_height), (8, 10, 14, 255))
-        draw = ImageDraw.Draw(canvas)
-
-        # محاكاة ضوء عمود إنارة ليلي أو إضاءة مكتب تحقيقات خافتة
-        glow = Image.new("RGBA", (CONFIG.video_width, CONFIG.video_height), (0, 0, 0, 0))
-        g_draw = ImageDraw.Draw(glow)
-        light_x = (scene_index * 300) % CONFIG.video_width
-        g_draw.ellipse([light_x - 400, -200, light_x + 600, 800], fill=(220, 180, 100, 20))
-        canvas = Image.alpha_composite(canvas, glow)
-
-        # نسيج تحبيب شريطي يحاكي أشرطة التسجيل المغناطيسي
-        for y in range(0, CONFIG.video_height, 4):
-            draw.line([(0, y), (CONFIG.video_width, y)], fill=(0, 0, 0, 28), width=1)
-
-        canvas.convert("RGB").save(output_path, "JPEG", quality=92)
-
     @staticmethod
     def process_smart_blurred_fit(input_path: Path, output_path: Path) -> bool:
-        """
-        معالجة التناظر: عرض الوثيقة الأصلية كاملة 100% في المركز دون اقتصاص الوجوه،
-        مع ملء الجوانب الفارغة بنسخة مموهة مظلمة وموسعة بنفس أبعاد الشاشة.
-        """
         try:
             filter_chain = (
                 f"[0:v]scale={CONFIG.video_width}:{CONFIG.video_height}:force_original_aspect_ratio=increase,"
@@ -564,12 +578,10 @@ class ArchivalMediaHarvester:
 
 
 # ==================================================================================================
-# 7. محرك الشارات التلفزيونية والقناع السفلي (BROADCAST LOWER-THIRDS COMPOSITOR)
+# 7. محرك الشارات التلفزيونية والقناع السفلي (BROADCAST LOWER-THIRDS)
 # ==================================================================================================
 
 class BroadcastOverlayCompositor:
-    """محرك بناء الشارات وعناصر الهوية التلفزيونية فوق مشاهد الفيديو."""
-
     @staticmethod
     def render_scene_overlay(
         narration: str,
@@ -584,7 +596,6 @@ class BroadcastOverlayCompositor:
         font_badge = TYPOGRAPHY.get_font_handle(21)
         font_source = TYPOGRAPHY.get_font_handle(16)
 
-        # 1. شارة التصنيف التوثيقي العلوية
         if media_category == "PRIMARY_ARCHIVE":
             badge_title = "● وثيقة رسمية أصلية | ملف التحقيق الجنائي"
             badge_bg = (140, 15, 15, 235)
@@ -603,11 +614,9 @@ class BroadcastOverlayCompositor:
         badge_h = 46
         bx, by = 60, 50
 
-        # رسم مستطيل الشارة
         draw.rectangle([bx, by, bx + badge_w, by + badge_h], fill=badge_bg, outline=badge_border, width=2)
         draw.text((bx + 18, by + 10), shaped_badge, font=font_badge, fill=(255, 255, 255, 255))
 
-        # إدراج ملصق جهة التوثيق / المصدر
         if source_attribution:
             src_text = TYPOGRAPHY.apply_bidi_shaping(f"المصدر: {source_attribution}")
             src_w = draw.textlength(src_text, font=font_source) + 24
@@ -616,7 +625,6 @@ class BroadcastOverlayCompositor:
                            fill=(12, 16, 22, 210), outline=(255, 255, 255, 50), width=1)
             draw.text((sx + 12, by + 12), src_text, font=font_source, fill=(215, 225, 235, 240))
 
-        # 2. التدرج السفلي لقراءة نصوص السرد براحة تامة
         gradient_h = 185
         grad_box = Image.new("RGBA", (CONFIG.video_width, gradient_h), (0, 0, 0, 0))
         g_draw = ImageDraw.Draw(grad_box)
@@ -625,7 +633,6 @@ class BroadcastOverlayCompositor:
             g_draw.line([(0, y), (CONFIG.video_width, y)], fill=(8, 10, 14, alpha))
         canvas.paste(grad_box, (0, CONFIG.video_height - gradient_h), grad_box)
 
-        # 3. خطوط السرد التوثيقي
         wrapped_lines = TYPOGRAPHY.wrap_arabic_lines_by_pixel_width(
             narration, font=font_subtitle, max_width_px=CONFIG.max_subtitle_pixel_width
         )
@@ -638,7 +645,6 @@ class BroadcastOverlayCompositor:
             x_pos = (CONFIG.video_width - lw) // 2
             y_pos = base_y + (idx * 50)
 
-            # ظل النص الحاد لتعزيز الوضوح التلفزيوني
             draw.text((x_pos + 2, y_pos + 2), shaped_line, font=font_subtitle, fill=(0, 0, 0, 255))
             draw.text((x_pos, y_pos), shaped_line, font=font_subtitle, fill=(255, 255, 255, 255))
 
@@ -646,15 +652,10 @@ class BroadcastOverlayCompositor:
 
 
 # ==================================================================================================
-# 8. استوديو هندسة الصوت التكتيكي متعدد الطبقات (MULTI-LAYER SOUNDSCAPE STUDIO)
+# 8. استوديو هندسة الصوت التكتيكي متعدد الطبقات (TACTICAL SOUNDSCAPE STUDIO)
 # ==================================================================================================
 
 class TacticalSoundscapeStudio:
-    """
-    استوديو هندسة الصوت: يولد المؤثرات الإجرائية (الأختام، طنين الغموض، نقرات الكتابة)
-    ويدمجها مع صوت المعلق Charon عبر خافض الصوت التلقائي (Dynamic Ducking).
-    """
-
     def __init__(self, sfx_directory: Path):
         self.sfx_dir = sfx_directory
         self.evidence_snap_wav = self.sfx_dir / "evidence_stamp_procedural.wav"
@@ -663,8 +664,6 @@ class TacticalSoundscapeStudio:
         self.initialize_sound_assets()
 
     def initialize_sound_assets(self) -> None:
-        """تخليق المؤثرات الصوتية برمجياً عبر مرشحات FFmpeg دون ملفات خارجية."""
-        # مؤثر الختم الجنائي (Evidence Stamp)
         if not self.evidence_snap_wav.exists() or self.evidence_snap_wav.stat().st_size < 1000:
             cmd_stamp = [
                 "ffmpeg", "-y", "-f", "lavfi",
@@ -673,7 +672,6 @@ class TacticalSoundscapeStudio:
             ]
             subprocess.run(cmd_stamp, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # مؤثر الانتقال الهوائي الناعم (Soft Whoosh)
         if not self.soft_transition_wav.exists() or self.soft_transition_wav.stat().st_size < 1000:
             cmd_whoosh = [
                 "ffmpeg", "-y", "-f", "lavfi",
@@ -682,7 +680,6 @@ class TacticalSoundscapeStudio:
             ]
             subprocess.run(cmd_whoosh, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # طنين الغموض التحتي المظلم بتردد 44Hz (Sub-Bass Drone)
         if not self.sub_bass_drone_wav.exists() or self.sub_bass_drone_wav.stat().st_size < 1000:
             cmd_drone = [
                 "ffmpeg", "-y", "-f", "lavfi",
@@ -697,10 +694,8 @@ class TacticalSoundscapeStudio:
         output_mixed_mp3: Path,
         category: str
     ) -> float:
-        """دمج الصوت وخفض طبقة الغموض تلقائياً أثناء كلام المعلق مع تطبيق تطبيع الصوت EBU R128."""
         sfx_impact = self.evidence_snap_wav if category in ["PRIMARY_ARCHIVE", "FORENSIC_ANALYSIS"] else self.soft_transition_wav
 
-        # مصفوفة فلاتر الصوت المتقدمة (Ducking & Normalization)
         filter_complex = (
             f"[1:a]adelay=30|30[impact];"
             f"[2:a]aloop=loop=-1:size=2e+06,volume=0.07[drone];"
@@ -732,16 +727,10 @@ class TacticalSoundscapeStudio:
 
 
 # ==================================================================================================
-# 9. محرك استدعاء الذكاء الاصطناعي وتدوير المفاتيح (10-KEY ROTATION MATRIX DIRECTOR)
+# 9. محرك استدعاء الذكاء الاصطناعي وتدوير المفاتيح (10-KEY DIRECTOR)
 # ==================================================================================================
 
 class MultiKeyIntelligenceDirector:
-    """
-    المايسترو المسؤول عن إدارة مصفوفة المفاتيح الـ 10:
-    - صياغة سيناريو التحقيق حصرياً عبر gemini-3-flash-preview.
-    - توليد صوت المعلق الجنائي Charon عبر gemini-3.8-flash-tts مع فواصل التهدئة وتدوير المفاتيح.
-    """
-
     def __init__(self, key_pool: List[str]):
         if not key_pool:
             raise ValueError("مصفوفة المفاتيح فارغة! يرجى إضافة مفاتيح GEMINI_API_KEY داخل Secrets.")
@@ -751,7 +740,6 @@ class MultiKeyIntelligenceDirector:
         logger.info(f"🔑 مصفوفة المفاتيح جاهزة: تم تفعيل {len(self.keys)} مفاتيح مستقلة للتدوير التلقائي.")
 
     def rotate_active_key(self) -> None:
-        """الانتقال الفوري إلى المفتاح التالي في المصفوفة عند مواجهة خطأ في الحصة."""
         self.active_index = (self.active_index + 1) % len(self.keys)
         chosen_key = self.keys[self.active_index]
         masked_repr = f"{chosen_key[:6]}...{chosen_key[-4:]}"
@@ -759,7 +747,6 @@ class MultiKeyIntelligenceDirector:
         self.client = genai.Client(api_key=chosen_key)
 
     def generate_investigative_script(self, topic_title: str) -> List[Dict[str, Any]]:
-        """صياغة سيناريو استقصائي متكامل (64-66 مشهداً) حصرياً بنموذج gemini-3-flash-preview."""
         system_prompt = f"""
         أنت كبير مخرجي التحقيقات الاستقصائية والوثائقيات الجنائية الكبرى (True-Crime Executive Director).
         الموضوع المطلوب إنتاجه هو: "{topic_title}".
@@ -822,7 +809,6 @@ class MultiKeyIntelligenceDirector:
         raise RuntimeError("فشل توليد سيناريو التحقيق بعد فحص مصفوفة المفاتيح بالكامل.")
 
     def synthesize_charon_voice(self, text: str, output_wav: Path) -> None:
-        """توليد صوت المعلق الجنائي Charon بنموذج gemini-3.8-flash-tts مع تدوير المفاتيح وتبريد الحصة."""
         for attempt in range(1, CONFIG.max_key_rotations + 1):
             try:
                 response = self.client.models.generate_content(
@@ -873,8 +859,6 @@ class MultiKeyIntelligenceDirector:
 # ==================================================================================================
 
 class CinematicRendererEngine:
-    """محرك المونتاج البصري: معالجة حركة الكاميرا (Ken Burns)، وتطبيق تحبيب الأفلام، وتصدير المشاهد."""
-
     @staticmethod
     def render_scene_clip(
         image_path: Path,
@@ -888,7 +872,6 @@ class CinematicRendererEngine:
         fps = CONFIG.video_fps
         total_frames = max(1, int(duration * fps))
 
-        # حركات كاميرا ناعمة محسوبة مباشرة بدقة 1080p لتسريع الرندرة مع الحفاظ على الفخامة
         if camera_move == "zoom_out":
             zoom_expr = "max(1.0, 1.10 - 0.0003*on)"
             pan_expr = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
@@ -905,7 +888,6 @@ class CinematicRendererEngine:
             zoom_expr = "min(1.10, 1.0 + 0.0003*on)"
             pan_expr = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
 
-        # تلوين نوار جنائي احترافي
         if media_category == "PRIMARY_ARCHIVE":
             color_grading = "hue=s=0.75,eq=contrast=1.14:brightness=-0.02,vignette=PI/3.6"
         else:
@@ -939,8 +921,6 @@ class CinematicRendererEngine:
 # ==================================================================================================
 
 class CloudDistributionEngine:
-    """محرك الرفع التلقائي إلى YouTube و Google Drive مع توليد الفصول الزمنية والوصف الاستقصائي."""
-
     @staticmethod
     def upload_to_youtube(video_path: Path, title: str, description: str, tags: List[str]) -> Optional[str]:
         if not (CONFIG.google_client_id and CONFIG.google_client_secret and CONFIG.youtube_refresh_token):
@@ -963,7 +943,7 @@ class CloudDistributionEngine:
                     "title": title,
                     "description": description,
                     "tags": tags,
-                    "categoryId": "27"  # فئة التعليم والتوثيق
+                    "categoryId": "27"
                 },
                 "status": {
                     "privacyStatus": "public",
@@ -1034,10 +1014,7 @@ class CloudDistributionEngine:
 # ==================================================================================================
 
 class MasterDocumentaryPipeline:
-    """المايسترو المركزي: يربط كافة الأنظمة من استلام الموضوع وحتى الرندرة والتوزيع السحابي."""
-
     def __init__(self):
-        CONFIG.setup_directories()
         self.checkpoint_manager = ProductionCheckpointManager(CONFIG.base_build_dir / CONFIG.checkpoint_file)
         self.director = MultiKeyIntelligenceDirector(CONFIG.api_key_pool)
         self.harvester = ArchivalMediaHarvester()
@@ -1047,7 +1024,6 @@ class MasterDocumentaryPipeline:
         start_time = datetime.now()
         logger.info(f"🎬 [بدء الإنتاج التلفزيوني الاستقصائي]: العمل الوثائقي: {CONFIG.topic}")
 
-        # المرحلة 1: صياغة أو استرجاع سيناريو التحقيق المعتمد
         manifest_path = CONFIG.base_build_dir / CONFIG.manifest_file
         scenes_manifest: List[Dict[str, Any]] = []
 
@@ -1064,7 +1040,6 @@ class MasterDocumentaryPipeline:
             with open(manifest_path, "w", encoding="utf-8") as f:
                 json.dump(scenes_manifest, f, ensure_ascii=False, indent=2)
 
-        # المرحلة 2: معالجة المشاهد بشكل تسلسلي متين
         rendered_clips: List[Path] = []
         scene_durations: List[float] = []
         total_scenes = len(scenes_manifest)
@@ -1086,7 +1061,6 @@ class MasterDocumentaryPipeline:
 
             logger.info(f"⏳ معالجة المشهد ({idx + 1}/{total_scenes}) [النوع: {req_type}]...")
 
-            # الاستفادة من مدير الـ Checkpoint لتخطي المشاهد الجاهزة
             if clip_path.exists() and clip_path.stat().st_size > 50000 and self.checkpoint_manager.is_completed(idx):
                 logger.info(f"المشهد {idx + 1} مكتمل وجاهز مسبقاً. تخطي المعالجة.")
                 rendered_clips.append(clip_path)
@@ -1094,12 +1068,10 @@ class MasterDocumentaryPipeline:
                 scene_durations.append(float(subprocess.check_output(dur_cmd).decode().strip()))
                 continue
 
-            # استراتيجية جلب وتوليد الوسائط الحقيقية (صفر تزييف)
             source_attribution = ""
             actual_category = req_type
 
             if req_type == "FORENSIC_ANALYSIS" or not search_q:
-                # توليد لوحة أدلة جنائية ديناميكية للمشهد بناءً على بيانات السيناريو
                 b_type = b_data.get("board_type", "DOSSIER")
                 b_title = b_data.get("title", f"فحص أدلة المشهد {idx + 1}")
 
@@ -1121,12 +1093,10 @@ class MasterDocumentaryPipeline:
                 source_attribution = "Forensic Records Division"
                 actual_category = "FORENSIC_ANALYSIS"
             else:
-                # البحث في الأرشيف الحقيقي لوثائق الموضوع
                 got_archive, source_attribution = self.harvester.query_wikimedia_commons(search_q, visual_path)
                 if not got_archive:
                     got_archive, source_attribution = self.harvester.query_wikipedia_records(search_q, visual_path)
 
-                # إذا لم تتوفر وثيقة أرشيفية مطابقة للبحث، نولد لوحة أدلة جنائية ديناميكية فوراً
                 if not got_archive:
                     actual_category = "FORENSIC_ANALYSIS"
                     ProceduralForensicBoardEngine.render_dossier_board(
@@ -1137,15 +1107,12 @@ class MasterDocumentaryPipeline:
                     )
                     source_attribution = "Historical Evidence Archive"
 
-            # توليد صوت المعلق الجنائي Charon بنموذج gemini-3.8-flash-tts
             if not voice_raw_wav.exists() or voice_raw_wav.stat().st_size < 1000:
                 self.director.synthesize_charon_voice(narration, voice_raw_wav)
 
-            # دمج الصوت المحيطي وهندسة السكتات الدرامية
             duration = self.sound_studio.mix_scene_audio_with_ducking(voice_raw_wav, mixed_audio_mp3, actual_category)
             scene_durations.append(duration)
 
-            # رسم الترويسات والشارات التلفزيونية
             BroadcastOverlayCompositor.render_scene_overlay(
                 narration=narration,
                 media_category=actual_category,
@@ -1153,7 +1120,6 @@ class MasterDocumentaryPipeline:
                 output_png=overlay_png
             )
 
-            # رندرة المشهد النهائي بالمعايير التلفزيونية (24fps Film Grain)
             CinematicRendererEngine.render_scene_clip(
                 image_path=visual_path,
                 overlay_png=overlay_png,
@@ -1167,7 +1133,6 @@ class MasterDocumentaryPipeline:
             rendered_clips.append(clip_path)
             self.checkpoint_manager.mark_completed(idx, duration)
 
-        # المرحلة 3: التجميع النهائي الصارم للفيلم
         logger.info("🪡 تجميع مقاطع التحقيق الـ 16 دقيقة بدقة متطابقة بنسبة 100%...")
         concat_manifest = CONFIG.base_build_dir / "concat_manifest.txt"
         with open(concat_manifest, "w", encoding="utf-8") as f:
@@ -1189,7 +1154,6 @@ class MasterDocumentaryPipeline:
         secs = int(total_seconds % 60)
         logger.info(f"✨ اكتمل إنتاج الفيلم الاستقصائي بالكامل! المدة الإجمالية: {mins} دقيقة و {secs} ثانية.")
 
-        # المرحلة 4: توليد الفصول الزمنية (Chapters) للوصف
         current_time = 0.0
         chapters_block = "الفصول الزمنية للتحقيق:\n00:00 - المقدمة والافتتاح\n"
         last_title = ""
@@ -1203,7 +1167,6 @@ class MasterDocumentaryPipeline:
                 last_title = c_title
             current_time += s_dur
 
-        # المرحلة 5: النشر والأرشفة السحابية بناءً على الموضوع المختار
         doc_title = f"تحقيق استقصائي: {CONFIG.topic} (الملف والوثائق الكاملة)"
         doc_description = (
             f"تحقيق وثائقي استقصائي شامل يفتح الملفات والأدلة الأرشيفية الموثقة حول: {CONFIG.topic}.\n\n"
