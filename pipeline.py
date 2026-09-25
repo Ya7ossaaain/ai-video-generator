@@ -62,7 +62,7 @@ TOPIC = os.getenv(
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
 
-GEMINI_RESEARCH_MODEL = os.getenv("GEMINI_RESEARCH_MODEL", "gemini-3.8-flash")
+GEMINI_RESEARCH_MODEL = os.getenv("GEMINI_RESEARCH_MODEL", "gemini-3-flash")
 GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-3.8-flash-tts")
 GEMINI_TTS_VOICE = os.getenv("GEMINI_TTS_VOICE", "Charon")
 
@@ -1239,6 +1239,7 @@ def main():
         GEMINI_RETRY_BASE_SECONDS
     )
     log.info("💾 Research cache: %s", RESEARCH_CACHE)
+    log.info("🧠 Text model: %s | TTS model: %s", GEMINI_RESEARCH_MODEL, GEMINI_TTS_MODEL)
 
     research = research_topic()
     scenes = build_scenes(research)
