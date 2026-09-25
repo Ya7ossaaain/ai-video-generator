@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-FORENSIC & HISTORICAL DOCUMENTARY AUTOMATION ENGINE (PRODUCTION PIPELINE V4.8 - DEDICATED MODELS)
+FORENSIC & HISTORICAL DOCUMENTARY AUTOMATION ENGINE (PRODUCTION PIPELINE V4.9)
 ====================================================================================================
 نظام متكامل ومؤتمت لإنتاج الأفلام الوثائقية الاستقصائية والجنائية بدقة سينمائية ومعايير صحفية صارمة.
 - المحرك الصوتي: gemini-3.8-flash-tts حصرياً (بصوت Charon التوثيقي).
-- محرك السيناريو والنصوص: gemini-3.8-flash و gemini-3-flash-preview حصرياً.
+- محرك السيناريو والنصوص: gemini-3-flash-preview حصرياً.
 - إدارة الحصص المتعددة (API Key Rotation): التبديل الفوري بين المفاتيح المستقلة عند ظهور 429.
 - محرك التحقق الأرشيفي: جلب وفحص الأدلة والمصادر (Wikimedia & Wikipedia APIs).
-- محرك النزاهة التوثيقية: تصنيف مرئي بين الوثائق الأصلية وإعادة التمثيل الرقمية.
+- محرك النزاهة التوثيقية: تصنيف مرئي صريح بين الوثائق الأصلية وإعادة التمثيل الرقمية.
 - محرك الرسوميات: معالجة النصوص العربية وحساب التفاف الأسطر بالبكسل مع طبقات ألفا شفافة.
 - هندسة الصوت التكتيكية: مؤثرات واقعية خافتة (Tactile Archival SFX) خالية من الموسيقى المصطنعة.
 - استوديو المونتاج: FFmpeg بمعالجة لونية وحركة كاميرا ناعمة (Ken Burns) وتوحيد زمني صارم.
@@ -94,15 +94,15 @@ class PipelineConfig:
     video_crf: int = 19
     video_preset: str = "veryfast"
     
-    # نماذج الذكاء الاصطناعي المعتمدة بدقة
-    text_generation_models: List[str] = field(default_factory=lambda: ["gemini-3.8-flash", "gemini-3-flash-preview"])
+    # حصر النماذج وفق التفضيل المحدد
+    text_generation_models: List[str] = field(default_factory=lambda: ["gemini-3-flash-preview"])
     tts_models: List[str] = field(default_factory=lambda: ["gemini-3.8-flash-tts"])
     gemini_voice_name: str = "Charon"
     
     # تدوير المفاتيح وإدارة سرعة التوليد
     audio_sample_rate: int = 48000
     audio_bitrate: str = "192k"
-    post_tts_cooldown: int = 10     # فاصل أمان 10 ثوانٍ بفضل توزيع الحمل على المفاتيح
+    post_tts_cooldown: int = 10     # فاصل أمان بفضل توزيع الحمل بين المفاتيح
     max_rotation_attempts: int = 16 # محاولات كافية للدوران عبر كافة المفاتيح
     
     # مسارات الملفات والمجلدات
@@ -386,7 +386,7 @@ class GeminiDocumentaryDirector:
            - "AI_REENACTMENT": لتمثيل اللحظات التخيلية التي لم توثقها كاميرا.
            - "STOCK_BROLL": للقطات العامة (أمطار ليلية، آلة كاتبة، دوران أشرطة الكاسيت).
         3. كلمات البحث (search_query) للوثائق الأصلية يجب أن تكون مكتوبة باللغة الإنجليزية الأرشيفية المعتمدة في السجلات الأمريكية والفيدرالية.
-        4. السرد (narration): جملتان مكثفتان وقويتان باللغة العربية الفصحى الرصينة تحكي الواقعة بإثارة وواقعية.
+        4. السرد (narration): جملتان مكثفتان وقويتان باللغة العربية الفصحى الرصينة تحكي الواقعة بإثارة وتشويق وواقعية.
         5. حركة الكاميرا (camera_move): اختر من ("zoom_in", "zoom_out", "tilt_down", "pan_left", "pan_right").
 
         أخرج النتيجة بصيغة JSON Array نقية ومباشرة فقط:
@@ -479,7 +479,7 @@ class ForensicAssetHarvester:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "ForensicDocumentaryEngine/4.8 (contact: historical_investigation@gmail.com)"
+            "User-Agent": "ForensicDocumentaryEngine/4.9 (contact: historical_investigation@gmail.com)"
         })
 
     def search_wikimedia_archive(self, query: str, output_path: Path) -> Tuple[bool, str]:
