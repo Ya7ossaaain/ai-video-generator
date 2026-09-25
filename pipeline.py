@@ -70,6 +70,12 @@ SCENE_COUNT = int(os.getenv("SCENE_COUNT", "42"))
 MIN_REAL_SCENES = float(os.getenv("MIN_REAL_SCENES", "0.55"))
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "3"))
 
+# Conservative Gemini 429 handling. The SDK already retries transient
+# failures, so this outer layer only adds a small controlled retry window.
+GEMINI_MAX_RETRIES = int(os.getenv("GEMINI_MAX_RETRIES", "4"))
+GEMINI_RETRY_BASE_SECONDS = float(os.getenv("GEMINI_RETRY_BASE_SECONDS", "8"))
+GEMINI_MAX_BACKOFF_SECONDS = float(os.getenv("GEMINI_MAX_BACKOFF_SECONDS", "90"))
+
 ENABLE_YOUTUBE = os.getenv("ENABLE_YOUTUBE", "false").lower() == "true"
 ENABLE_DRIVE = os.getenv("ENABLE_DRIVE", "false").lower() == "true"
 
@@ -203,6 +209,89 @@ def write_arabic_text(text, path, max_chars=46):
 
 
 # -----------------------------
+# Gemini resilience / local cache
+# -----------------------------
+
+def is_retryable_gemini_error(exc):
+    """Return True for transient 429/408/5xx-style errors."""
+    msg = str(exc).upper()
+    return any(token in msg for token in (
+        "429", "RESOURCE_EXHAUSTED", "TOO MANY REQUESTS",
+        "408", "503", "UNAVAILABLE", "500 INTERNAL",
+        "502 BAD GATEWAY", "504", "DEADLINE_EXCEEDED",
+    ))
+
+
+def looks_like_hard_quota_error(exc):
+    """Daily/fully exhausted quota should not be retried repeatedly."""
+    msg = str(exc).lower()
+    return (
+        "quota_exceeded" in msg
+        or "exceeded your current quota" in msg
+        or "daily quota" in msg
+        or "quota has been exceeded" in msg
+    )
+
+
+def gemini_generate_with_backoff(*, model, contents, config, label="Gemini"):
+    """Controlled retry wrapper around generate_content."""
+    last_exc = None
+
+    for attempt in range(1, GEMINI_MAX_RETRIES + 1):
+        try:
+            return client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+        except Exception as exc:
+            last_exc = exc
+
+            if not is_retryable_gemini_error(exc):
+                raise
+
+            # Do not waste more requests when Google explicitly says the
+            # project's daily/current quota is exhausted.
+            if looks_like_hard_quota_error(exc):
+                log.error(
+                    "%s: quota appears exhausted; stopping retries.",
+                    label,
+                )
+                raise
+
+            if attempt >= GEMINI_MAX_RETRIES:
+                break
+
+            delay = min(
+                GEMINI_MAX_BACKOFF_SECONDS,
+                GEMINI_RETRY_BASE_SECONDS * (2 ** (attempt - 1))
+            )
+            delay += min(3.0, attempt * 0.5)
+
+            log.warning(
+                "%s: transient error %d/%d; retrying in %.1fs",
+                label, attempt, GEMINI_MAX_RETRIES, delay
+            )
+            time.sleep(delay)
+
+    raise last_exc
+
+
+def load_json_cache(path):
+    try:
+        if path.exists() and path.stat().st_size > 20:
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        log.warning("تعذر قراءة cache %s: %s", path, exc)
+    return None
+
+
+def save_json_cache(path, data):
+    atomic_write_json(path, data)
+    log.info("💾 تم حفظ cache: %s", path)
+
+
+# -----------------------------
 # Research
 # -----------------------------
 
@@ -245,9 +334,10 @@ def extract_grounding_sources(response):
 
 
 def research_topic():
-    if RESEARCH_CACHE.exists():
-        log.info("استئناف: تم العثور على بحث سابق.")
-        return json.loads(RESEARCH_CACHE.read_text(encoding="utf-8"))
+    cached = load_json_cache(RESEARCH_CACHE)
+    if cached:
+        log.info("♻️ استخدام البحث المخزن — لن يتم استدعاء Gemini للبحث.")
+        return cached
 
     prompt = f"""
 أنت باحث وثائقي محترف. ابحث في الويب عن الموضوع التالي:
@@ -291,34 +381,45 @@ def research_topic():
 
     tool = types.Tool(google_search=types.GoogleSearch())
 
-    for attempt in range(3):
-        try:
-            response = client.models.generate_content(
-                model=GEMINI_RESEARCH_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    tools=[tool],
-                    temperature=0.2
-                )
-            )
+    try:
+        response = gemini_generate_with_backoff(
+            model=GEMINI_RESEARCH_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                tools=[tool],
+                temperature=0.2
+            ),
+            label="البحث الموثق"
+        )
 
-            text = response.text.strip()
-            text = re.sub(r"^```json\s*", "", text)
-            text = re.sub(r"^```\s*", "", text)
-            text = re.sub(r"\s*```$", "", text)
+        text = response.text.strip()
+        text = re.sub(r"^```json\s*", "", text)
+        text = re.sub(r"^```\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
 
-            data = json.loads(text)
-            data["_grounding_sources"] = extract_grounding_sources(response)
-            data["_generated_at"] = utc_now()
+        data = json.loads(text)
+        data["_grounding_sources"] = extract_grounding_sources(response)
+        data["_generated_at"] = utc_now()
+        data["_cache_key"] = sha256_text(TOPIC)
 
-            atomic_write_json(RESEARCH_CACHE, data)
-            return data
+        save_json_cache(RESEARCH_CACHE, data)
+        return data
 
-        except Exception as exc:
-            log.warning("فشل البحث (%d/3): %s", attempt + 1, exc)
-            time.sleep(4 * (attempt + 1))
+    except Exception as exc:
+        cached = load_json_cache(RESEARCH_CACHE)
+        if cached:
+            log.warning("⚠️ تعذر استدعاء Gemini؛ استخدام cache الموجود.")
+            return cached
 
-    raise RuntimeError("تعذر إنشاء البحث الموثق.")
+        if looks_like_hard_quota_error(exc):
+            raise RuntimeError(
+                "Gemini API quota exhausted أثناء البحث، ولا يوجد بحث محفوظ "
+                "يمكن استئنافه. انتظر إعادة ضبط الحصة ثم أعد التشغيل."
+            ) from exc
+
+        raise RuntimeError(
+            f"تعذر إنشاء البحث الموثق بعد محاولات آمنة: {exc}"
+        ) from exc
 
 
 # -----------------------------
@@ -380,9 +481,8 @@ def build_scenes(research):
 ]
 """
 
-    for attempt in range(3):
-        try:
-            response = client.models.generate_content(
+    try:
+            response = gemini_generate_with_backoff(
                 model=GEMINI_RESEARCH_MODEL,
                 contents=prompt,
                 config=types.GenerateContentConfig(
@@ -420,11 +520,14 @@ def build_scenes(research):
             atomic_write_json(SCENES_CACHE, scenes)
             return scenes
 
-        except Exception as exc:
-            log.warning("فشل تخطيط المشاهد (%d/3): %s", attempt + 1, exc)
-            time.sleep(3 * (attempt + 1))
-
-    raise RuntimeError("تعذر إنشاء مخطط المشاهد.")
+    except Exception as exc:
+        cached = load_json_cache(SCENES_CACHE)
+        if cached:
+            log.warning("⚠️ تعذر تخطيط المشاهد؛ استخدام cache الموجود.")
+            return cached
+        raise RuntimeError(
+            f"تعذر إنشاء مخطط المشاهد بعد محاولات آمنة: {exc}"
+        ) from exc
 
 
 # -----------------------------
@@ -649,8 +752,10 @@ def generate_ai_image(prompt, output_path):
                 data = response.read()
 
             if len(data) > 10000:
-                Path(output_path).write_bytes(data)
-                if sanitize_image(output_path, output_path):
+                raw_path = Path(str(output_path) + ".raw")
+                raw_path.write_bytes(data)
+                if sanitize_image(raw_path, output_path):
+                    raw_path.unlink(missing_ok=True)
                     return {
                         "source_type": "ai_reenactment",
                         "title": "AI-generated reenactment",
@@ -935,7 +1040,7 @@ def render_scene(index, scene):
         "source": source,
         "duration_seconds": round(duration, 3),
         "rendered_at": utc_now(),
-        "pipeline_version": "2.0"
+        "pipeline_version": "2.1-429-cache"
     }
 
     atomic_write_json(manifest_file, scene_manifest)
@@ -976,7 +1081,7 @@ def build_episode_manifest(research, scenes, rendered):
     )
 
     data = {
-        "pipeline_version": "2.0",
+        "pipeline_version": "2.1-429-cache",
         "topic": TOPIC,
         "generated_at": utc_now(),
         "settings": {
@@ -1128,6 +1233,12 @@ def main():
     log.info("🔤 الخط: %s", ARABIC_FONT)
     log.info("🎙️ TTS: %s / %s", GEMINI_TTS_MODEL, GEMINI_TTS_VOICE)
     log.info("🎵 Music: OFF | SFX: OFF")
+    log.info(
+        "🧠 Gemini retry policy: max=%d, base=%.1fs",
+        GEMINI_MAX_RETRIES,
+        GEMINI_RETRY_BASE_SECONDS
+    )
+    log.info("💾 Research cache: %s", RESEARCH_CACHE)
 
     research = research_topic()
     scenes = build_scenes(research)
@@ -1185,4 +1296,3 @@ def main():
 
 if __name__ == "__main__":
     main()
- 
