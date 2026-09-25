@@ -1,38 +1,41 @@
-name: Documentary Production & Render Engine
+name: Enterprise Documentary Pipeline
 
 on:
   workflow_dispatch:
     inputs:
       topic:
-        description: 'اكتب عنوان أو موضوع الوثائقي هنا:'
+        description: 'اكتب عنوان أو موضوع الوثائقي هنا (مثال: لغز اختفاء طائرة دي بي كوبر):'
         required: true
-        default: 'لغز القاتل زودياك: وثائق التحقيق الجنائية وحل الشفرة بعد نصف قرن'
+        default: 'تحقيق استقصائي: لغز القاتل زودياك وحل الشفرة بعد نصف قرن'
         type: string
 
 jobs:
-  build-and-render:
+  production-engine:
     runs-on: ubuntu-latest
+    timeout-minutes: 360 # السماح بالتشغيل حتى 6 ساعات لحماية الرندرة المعقدة من الانقطاع
 
     steps:
-      - name: استدعاء المشروع
+      - name: استدعاء مستودع المشروع
         uses: actions/checkout@v4
 
       - name: إعداد بيئة بايثون 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
-      - name: تثبيت FFmpeg والخطوط الأساسية
+      - name: تثبيت محرك FFmpeg والخطوط التلفزيونية
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-noto-core fonts-dejavu-core
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-dejavu-core fontconfig
+          sudo fc-cache -fv
 
-      - name: تثبيت مكتبات بايثون المطلوبة
+      - name: تثبيت حزم الذكاء الاصطناعي ومكتبات السحابة
         run: |
           python -m pip install --upgrade pip
-          pip install google-genai google-api-python-client google-auth requests pillow arabic-reshaper python-bidi
+          pip install google-genai google-api-python-client google-auth requests
 
-      - name: تشغيل خط الإنتاج الوثائقي
+      - name: تشغيل محرك الإنتاج والمونتاج (Master Director)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
@@ -42,10 +45,12 @@ jobs:
           VIDEO_TOPIC: ${{ inputs.topic }}
         run: python pipeline.py
 
-      - name: أرشفة الفيديو المكتمل في حال تعثر الرفع
+      - name: أرشفة الفيلم المكتمل وملفات الاسترداد (Artifacts Vault)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: completed-documentary
-          path: output_build/*.mp4
-          retention-days: 3
+          name: enterprise-master-vault
+          path: |
+            output_build/*.mp4
+            output_build/*.json
+          retention-days: 5
