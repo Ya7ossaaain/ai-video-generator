@@ -2,15 +2,15 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-FORENSIC & HISTORICAL DOCUMENTARY ENGINE (PRODUCTION PIPELINE V5.2 - 10-KEY POOLING)
+FORENSIC & HISTORICAL DOCUMENTARY ENGINE (PRODUCTION PIPELINE V5.4 - NANO BANANA 2 LITE)
 ====================================================================================================
-- محرك السيناريو: اختبار gemini-3.5-flash عبر جميع المفاتيح (1-10)، ثم التراجع إلى gemini-3-flash-preview.
-- المحرك الصوتي: gemini-3.8-flash-tts حصرياً (بصوت Charon التوثيقي) مع تدوير المفاتيح العشرة.
-- محرك الصور التوثيقية: Google Imagen 3 (imagen-3.0-generate-002) مع محرك FLUX-Realism البديل.
+- محرك الصور المجاني: gemini-3.1-flash-lite-image (Nano Banana 2 Lite) حصرياً عبر Google AI Studio.
+- محرك السيناريو: gemini-3.5-flash عبر كافة المفاتيح، ثم التراجع التلقائي إلى gemini-3-flash-preview.
+- المحرك الصوتي: gemini-3.8-flash-tts حصرياً (بصوت Charon التوثيقي) مع فاصل أمان 25 ثانية.
 - هندسة البرومبت: محاكاة فوتوغرافية أرشيفية حقيقية (1969 35mm Harsh Flash) واستبعاد مظهر الـ 3D.
 - معالجة التناظر: خلفية ضبابية ذكية (Blurred Fit) لحماية الوجوه والوثائق من الاقتصاص.
 - التايبوجرافي: تنزيل وتثبيت خط Amiri-Bold وتصحيح الاتجاه العربي بنسبة 100%.
-- المدة والصوت: 16 دقيقة (62-68 مشهداً)، وقفات درامية (1.4 ثانية)، وفاصل أمان 25 ثانية.
+- المدة والفصول: 16 دقيقة (62-68 مشهداً)، وقفات درامية (1.4 ثانية)، وحقن الفصول تلقائياً.
 ====================================================================================================
 """
 
@@ -92,17 +92,17 @@ class PipelineConfig:
     video_crf: int = 19
     video_preset: str = "veryfast"
     
-    # نماذج الذكاء الاصطناعي المعتمدة
+    # نموذج الصور المجاني الوحيد من Google AI Studio
+    free_image_model: str = "gemini-3.1-flash-lite-image"
     tts_models: List[str] = field(default_factory=lambda: ["gemini-3.8-flash-tts"])
-    image_model: str = "imagen-3.0-generate-002"
     gemini_voice_name: str = "Charon"
     
     # إعدادات الصوت وتدوير المفاتيح
     audio_sample_rate: int = 48000
     audio_bitrate: str = "192k"
-    post_tts_cooldown: int = 25     # فاصل أمان 25 ثانية بعد كل مشهد صوتي ناجح
+    post_tts_cooldown: int = 25     # فاصل أمان 25 ثانية لحماية الحصص
     dramatic_pause_sec: float = 1.4 # سكتة درامية تتيح استيعاب الأدلة
-    max_rotation_attempts: int = 30 # دعم دوران كافٍ لعشرة مفاتيح
+    max_rotation_attempts: int = 30
     
     # مسارات الملفات والمجلدات
     work_dir: Path = field(default_factory=lambda: Path("./output_build"))
@@ -112,7 +112,6 @@ class PipelineConfig:
     sfx_dir: Path = field(default_factory=lambda: Path("./output_build/sfx"))
     script_cache_name: str = "forensic_manifest_v5_pool10.json"
     
-    # مقاييس الفيلم الوثائقي (16 دقيقة)
     min_scenes: int = 62
     max_scenes: int = 68
     max_text_line_pixel_width: int = 1500
@@ -357,7 +356,7 @@ class ForensicSoundStudio:
 
 
 # ==================================================================================================
-# 5. محرك استدعاء الذكاء الاصطناعي مع التدوير الذكي (SMART ROTATION ENGINE)
+# 5. محرك استدعاء وصور الذكاء الاصطناعي (GOOGLE AI STUDIO NANO BANANA 2 LITE CLIENT)
 # ==================================================================================================
 
 class GeminiDocumentaryDirector:
@@ -377,11 +376,6 @@ class GeminiDocumentaryDirector:
         self.client = genai.Client(api_key=new_key)
 
     def draft_forensic_manifest(self, topic: str) -> List[Dict[str, Any]]:
-        """
-        توليد سيناريو الـ 16 دقيقة:
-        1. اختبار gemini-3.5-flash عبر جميع المفاتيح بالكامل.
-        2. إذا تعثرت كافة المفاتيح، الانتقال تلقائياً إلى gemini-3-flash-preview وتجربة جميع المفاتيح.
-        """
         prompt = f"""
         أنت كبير مخرجي ومحققي الوثائقيات الاستقصائية الكبرى (True-Crime Documentaries).
         الموضوع: "{topic}".
@@ -415,17 +409,13 @@ class GeminiDocumentaryDirector:
           }}
         ]
         """
-        
-        # الترتيب الهرمي المطلوب للنماذج
         model_hierarchy = ["gemini-3.5-flash", "gemini-3-flash-preview"]
 
         for model_name in model_hierarchy:
-            logger.info(f"🚀 بدء محاولات توليد السيناريو عبر النموذج الأساسي ({model_name}) على مصفوفة المفاتيح...")
-            
-            # تجربة جميع المفاتيح المتاحة لهذا النموذج بالكامل
-            for key_turn in range(len(self.api_keys)):
+            logger.info(f"🚀 بدء محاولات توليد السيناريو عبر النموذج ({model_name}) على مصفوفة المفاتيح...")
+            for _ in range(len(self.api_keys)):
                 try:
-                    logger.info(f"محاولة توليد السيناريو عبر ({model_name}) باستخدام المفتاح #{self.current_key_idx + 1}...")
+                    logger.info(f"محاولة توليد السيناريو عبر ({model_name}) بالمفتاح #{self.current_key_idx + 1}...")
                     res = self.client.models.generate_content(model=model_name, contents=prompt)
                     clean_text = res.text.strip().replace("```json", "").replace("```", "").strip()
                     parsed = json.loads(clean_text)
@@ -438,9 +428,9 @@ class GeminiDocumentaryDirector:
                     self.rotate_to_next_key()
                     time.sleep(2)
             
-            logger.warning(f"⚠️ استُنفدت كافة المفاتيح مع النموذج ({model_name}). جاري الانتقال للنموذج التالي في الترتيب...")
+            logger.warning(f"⚠️ استُنفدت كافة المفاتيح مع ({model_name}). الانتقال للبديل...")
 
-        raise RuntimeError("فشل توليد السيناريو عبر كلا النموذجين بعد فحص كافة المفاتيح المتاحة.")
+        raise RuntimeError("فشل توليد السيناريو عبر كلا النموذجين بعد فحص كافة المفاتيح.")
 
     def synthesize_charon_voice(self, text: str, output_wav: Path) -> None:
         """توليد صوت Charon بنموذج gemini-3.8-flash-tts مع التدوير وفاصل الأمان."""
@@ -491,28 +481,55 @@ class GeminiDocumentaryDirector:
 
         raise RuntimeError(f"تعذر توليد صوت المشهد بعد استنزاف محاولات التدوير عبر كافة المفاتيح.")
 
-    def generate_imagen3_photo(self, prompt: str, output_path: Path) -> bool:
-        """محاولة التوليد عبر محرك Google Imagen 3 فائق الواقعية."""
-        try:
-            logger.info("محاولة توليد لقطة واقعية عبر Google Imagen 3...")
-            res = self.client.models.generate_images(
-                model=CONFIG.image_model,
-                prompt=prompt,
-                config=types.GenerateImagesConfig(
-                    number_of_images=1,
-                    output_mime_type="image/jpeg",
-                    aspect_ratio="16:9",
-                    person_generation="ALLOW_ADULT"
+    def generate_google_ai_studio_image(self, prompt: str, output_path: Path) -> bool:
+        """
+        توليد الصور مجاناً 100% عبر النموذج المجاني الرسمي:
+        gemini-3.1-flash-lite-image (Nano Banana 2 Lite)
+        """
+        forensic_prompt = (
+            f"Archival 1969 police documentary crime scene evidence photograph of {prompt}. "
+            "Captured on 35mm analog film, direct camera flash, deep dark shadows, Kodak Tri-X grain texture. "
+            "Mundane late 1960s authentic forensic realism, muted period colors. "
+            "No CGI, no 3D render, no plastic skin, no digital drawing, no fantasy neon lights"
+        )
+
+        for attempt in range(len(self.api_keys)):
+            try:
+                logger.info(f"جاري طلب صورة مجانية من Google AI Studio عبر ({CONFIG.free_image_model}) [المفتاح #{self.current_key_idx + 1}]...")
+                response = self.client.models.generate_content(
+                    model=CONFIG.free_image_model,
+                    contents=forensic_prompt,
+                    config=types.GenerateContentConfig(
+                        response_modalities=["IMAGE"],
+                        image_config=types.ImageConfig(
+                            aspect_ratio="16:9"
+                        )
+                    )
                 )
-            )
-            if res.generated_images:
-                img_bytes = res.generated_images[0].image.image_bytes
-                with open(output_path, "wb") as f:
-                    f.write(img_bytes)
-                logger.info("تم التوليد بنجاح عبر Google Imagen 3.")
-                return True
-        except Exception as e:
-            logger.warning(f"تعذر استخدام Imagen 3 ({str(e)[:60]}). الانتقال لمحرك FLUX-Realism...")
+
+                if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+                    for part in response.candidates[0].content.parts:
+                        if part.inline_data and part.inline_data.data:
+                            raw_bytes = part.inline_data.data
+                            bin_data = base64.b64decode(raw_bytes) if isinstance(raw_bytes, str) else raw_bytes
+                            raw_tmp = output_path.with_suffix(".tmp")
+                            with open(raw_tmp, "wb") as f:
+                                f.write(bin_data)
+                            
+                            if ForensicAssetHarvester.process_image_blurred_fit(raw_tmp, output_path):
+                                raw_tmp.unlink(missing_ok=True)
+                                logger.info(f"✨ تم إنتاج صورة أرشيفية بنجاح عبر Nano Banana 2 Lite ({CONFIG.free_image_model}).")
+                                return True
+                            raw_tmp.unlink(missing_ok=True)
+
+            except Exception as e:
+                err_msg = str(e)
+                logger.warning(f"تنبيه صورة Google AI Studio ({CONFIG.free_image_model}): {err_msg[:80]}")
+                if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "503" in err_msg:
+                    self.rotate_to_next_key()
+                    time.sleep(2)
+                else:
+                    break
         return False
 
 
@@ -525,7 +542,7 @@ class ForensicAssetHarvester:
         self.director = director
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "ForensicDocumentaryEngine/5.2 (contact: historical_investigation@gmail.com)"
+            "User-Agent": "ForensicDocumentaryEngine/5.4 (contact: historical_investigation@gmail.com)"
         })
 
     def search_wikimedia_archive(self, query: str, output_path: Path) -> Tuple[bool, str]:
@@ -599,22 +616,17 @@ class ForensicAssetHarvester:
         return False, ""
 
     def generate_ai_reenactment_visual(self, prompt: str, output_path: Path) -> bool:
-        """
-        صياغة توجيه بصري جنائي مضاد للابتذال، ومحاكاة صور الـ 35mm لعام 1969
-        مع الاستبعاد الصارم للرندرة ثلاثية الأبعاد والمظهر الرقمي.
-        """
-        forensic_prompt = (
-            f"Authentic 1969 police crime scene evidence photo of {prompt}. "
-            "Shot on 35mm analog film, harsh direct camera flash, deep shadows, high ISO Kodak Tri-X grain texture. "
-            "Raw unposed documentary photography, period-accurate late 1960s mundane archival realism, desaturated natural tones. "
-            "NOT 3D render, NOT CGI, NOT digital art, NO smooth plastic skin, NO neon fantasy lighting, NO cinematic haze, NO illustration"
-        )
-
-        # المحاولة الأولى: Google Imagen 3
-        if self.director.generate_imagen3_photo(forensic_prompt, output_path):
+        # المحاولة الأساسية: النموذج المجاني المتاح في حسابك
+        if self.director.generate_google_ai_studio_image(prompt, output_path):
             return True
 
-        # المحاولة الثانية: FLUX-Realism بمحددات دقيقة
+        # خطة طوارئ في حال الضغط لضمان عدم توقف الفيلم
+        logger.info("جاري الاستعانة بمحرك FLUX-Realism كبديل طارئ...")
+        forensic_prompt = (
+            f"Authentic 1969 police crime scene evidence photo of {prompt}. "
+            "Shot on 35mm analog film, harsh direct camera flash, deep shadows, Kodak Tri-X grain texture. "
+            "No 3D render, no CGI, no smooth plastic skin, no illustration"
+        )
         encoded = urllib.parse.quote(forensic_prompt)
         url = f"https://image.pollinations.ai/prompt/{encoded}?width={CONFIG.video_width}&height={CONFIG.video_height}&nologo=true&nofeed=true&model=flux-realism&seed={int(time.time()) % 10000}"
 
@@ -642,10 +654,6 @@ class ForensicAssetHarvester:
 
     @staticmethod
     def process_image_blurred_fit(input_path: Path, output_path: Path) -> bool:
-        """
-        عرض الصورة كاملة في المنتصف بدون أي اقتصاص للوجوه أو الوثائق،
-        مع ملء الجانبين بخلفية مموهة ناعمة.
-        """
         try:
             filter_chain = (
                 f"[0:v]scale={CONFIG.video_width}:{CONFIG.video_height}:force_original_aspect_ratio=increase,"
