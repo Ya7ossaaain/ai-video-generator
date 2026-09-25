@@ -2,16 +2,16 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-FORENSIC & HISTORICAL DOCUMENTARY AUTOMATION ENGINE (PRODUCTION PIPELINE V4.4)
+FORENSIC & HISTORICAL DOCUMENTARY AUTOMATION ENGINE (PRODUCTION PIPELINE V4.5 - BATCH PACING)
 ====================================================================================================
 نظام متكامل ومؤتمت لإنتاج الأفلام الوثائقية الاستقصائية والجنائية بدقة سينمائية ومعايير صحفية صارمة.
-- المحرك الصوتي: Google Gemini TTS (gemini-3.8-flash-tts بصوت Charon الحصري).
-- محرك السيناريو والنصوص: gemini-3.8-flash و gemini-3-flash-preview حصرياً.
-- معالجة سقف الاستخدام: نظام تراجع تدريجي موسع (12 محاولة) وفاصل وقائي 22 ثانية لمنع خطأ 429.
-- محرك التحقق الأرشيفي: جلب وفحص الأدلة من كبرى قواعد البيانات المفتوحة (Wikimedia & Wikipedia APIs).
-- محرك النزاهة التوثيقية: تصنيف مرئي صارم بين الوثائق الأصلية وإعادة التمثيل الرقمية.
-- محرك الرسوميات والتايبوجرافي: معالجة النصوص العربية وحساب التفاف الأسطر بالبكسل مع طبقات ألفا شفافة.
-- هندسة الصوت التكتيكية: مؤثرات واقعية خافتة (Tactile Archival SFX) خالية تماماً من الموسيقى المصطنعة.
+- المحرك الصوتي: Google Gemini TTS (gemini-3.8-flash-tts بنبرة Charon التوثيقية).
+- محرك السيناريو: gemini-3.8-flash و gemini-3-flash-preview حصرياً.
+- خوارزمية إدارة الحصة: Batch Pacing بمعدل 3 توليدات كل 90 ثانية لتصفير نافذة الـ RPM تماماً.
+- محرك التحقق الأرشيفي: فحص الأدلة واستخراج المصادر من كبرى السجلات (Wikimedia & Wikipedia APIs).
+- محرك النزاهة التوثيقية: تصنيف مرئي بين الوثائق الأصلية وإعادة التمثيل الرقمية.
+- محرك الرسوميات: معالجة النصوص العربية وقياس التفاف الأسطر بالبكسل مع طبقات ألفا شفافة.
+- هندسة الصوت التكتيكية: مؤثرات واقعية خافتة (Tactile Archival SFX) خالية من الموسيقى المصطنعة.
 - استوديو المونتاج: FFmpeg بمعالجة لونية أرشيفية وحركة كاميرا ناعمة (Ken Burns) وتوحيد زمني صارم.
 ====================================================================================================
 """
@@ -88,19 +88,20 @@ class PipelineConfig:
     video_crf: int = 19
     video_preset: str = "veryfast"
     
-    # نماذج الذكاء الاصطناعي
+    # نماذج الذكاء الاصطناعي المعتمدة
     text_generation_models: List[str] = field(default_factory=lambda: ["gemini-3.8-flash", "gemini-3-flash-preview"])
     tts_models: List[str] = field(default_factory=lambda: ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"])
     gemini_voice_name: str = "Charon"
     
-    # إدارة الحصص وسقف الطلبات الصوتي (RPM & Quota Optimization)
+    # خوارزمية الجدولة بالدفعات (Batch Pacing: 3 توليدات كل 90 ثانية)
+    batch_size: int = 3
+    batch_window_seconds: int = 90
     audio_sample_rate: int = 48000
     audio_bitrate: str = "192k"
-    max_tts_retries: int = 12       # رفع المحاولات لتفادي الانهيار عند الحظر المؤقت
-    tts_backoff_base: int = 20      # بدء الانتظار من 20 ثانية عند التعثر
-    post_tts_cooldown: int = 22     # فاصل وقائي 22 ثانية بعد كل نجاح للبقاء تحت سقف 3 طلبات/دقيقة
+    max_tts_retries: int = 10
+    tts_backoff_base: int = 15
     
-    # مسارات الملفات والمجلدات
+    # مسارات ملفات العمل
     work_dir: Path = field(default_factory=lambda: Path("./output_build"))
     cache_dir: Path = field(default_factory=lambda: Path("./output_build/cache"))
     scenes_dir: Path = field(default_factory=lambda: Path("./output_build/scenes"))
@@ -401,7 +402,7 @@ class GeminiDocumentaryDirector:
         raise RuntimeError("فشل توليد السيناريو الاستقصائي عبر نماذج النصوص المحددة.")
 
     def synthesize_charon_voice(self, text: str, output_wav: Path) -> None:
-        """توليد صوت Charon الحصري مع تحكم صارم بالـ RPM لمنع استنفاد الحصة المؤقتة."""
+        """توليد صوت Charon بنظام تراجع تدريجي ذكي."""
         backoff = CONFIG.tts_backoff_base
 
         for model_name in CONFIG.tts_models:
@@ -433,9 +434,6 @@ class GeminiDocumentaryDirector:
                         binary_data = base64.b64decode(raw_bytes) if isinstance(raw_bytes, str) else raw_bytes
                         with open(output_wav, "wb") as f:
                             f.write(binary_data)
-                        
-                        # فاصل وقائي لتبريد الحصة ومنع حدوث 429 في المشهد القادم
-                        time.sleep(CONFIG.post_tts_cooldown)
                         return
 
                     raise ValueError(f"استجابة الصوت من {model_name} كانت فارغة.")
@@ -446,11 +444,10 @@ class GeminiDocumentaryDirector:
                     if "404" in err_msg or "not found" in err_msg.lower():
                         break
                     
-                    # في حالة الخطأ 429، يتم مضاعفة وقت الانتظار حتى تفتح خوادم جوجل نافذة الدقيقة التالية
                     time.sleep(backoff)
                     backoff = min(backoff + 10, 60)
 
-        raise RuntimeError(f"تعذر توليد صوت المشهد عبر كافة نماذج TTS المتاحة بعد {CONFIG.max_tts_retries} محاولة.")
+        raise RuntimeError(f"تعذر توليد صوت المشهد عبر نماذج TTS المتاحة بعد {CONFIG.max_tts_retries} محاولة.")
 
 
 # ==================================================================================================
@@ -461,7 +458,7 @@ class ForensicAssetHarvester:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "ForensicDocumentaryEngine/4.4 (contact: historical_investigation@gmail.com)"
+            "User-Agent": "ForensicDocumentaryEngine/4.5 (contact: historical_investigation@gmail.com)"
         })
 
     def search_wikimedia_archive(self, query: str, output_path: Path) -> Tuple[bool, str]:
@@ -735,7 +732,7 @@ class CloudDistributionEngine:
 
 
 # ==================================================================================================
-# 9. المايسترو ومنظم خط الإنتاج الكامل (MASTER ORCHESTRATOR)
+# 9. المايسترو ومنظم خط الإنتاج بالدفعات (MASTER BATCH PACING ORCHESTRATOR)
 # ==================================================================================================
 
 class MasterDocumentaryPipeline:
@@ -766,9 +763,12 @@ class MasterDocumentaryPipeline:
             with open(manifest_path, "w", encoding="utf-8") as f:
                 json.dump(scenes_manifest, f, ensure_ascii=False, indent=2)
 
-        # المرحلة 2: معالجة المشاهد بشكل تسلسلي متين
+        # المرحلة 2: معالجة المشاهد بنظام الجدولة على دفعات (Batch Pacing)
         rendered_scene_clips: List[Path] = []
         total_scenes = len(scenes_manifest)
+        
+        batch_counter = 0
+        batch_start_time = time.time()
 
         for idx, scene in enumerate(scenes_manifest):
             scene_num = scene.get("scene_num", idx + 1)
@@ -808,7 +808,7 @@ class MasterDocumentaryPipeline:
                 source_attribution = ""
                 self.harvester.generate_ai_reenactment_visual(ai_prompt, image_path)
 
-            # توليد صوت Charon الحصري مع نظام إدارة الـ Quota المعدل
+            # توليد صوت Charon بنموذج gemini-3.8-flash-tts
             if not voice_raw_wav.exists() or voice_raw_wav.stat().st_size < 1000:
                 self.director.synthesize_charon_voice(narration, voice_raw_wav)
 
@@ -832,6 +832,20 @@ class MasterDocumentaryPipeline:
             )
 
             rendered_scene_clips.append(clip_path)
+            batch_counter += 1
+
+            # تطبيق الجدولة بالدفعات: كل 3 مشاهد يتم التحقق من انقضاء 90 ثانية كاملة
+            if batch_counter % CONFIG.batch_size == 0 and (idx + 1) < total_scenes:
+                elapsed_batch = time.time() - batch_start_time
+                if elapsed_batch < CONFIG.batch_window_seconds:
+                    wait_for_window = CONFIG.batch_window_seconds - elapsed_batch
+                    logger.info(
+                        f"⏳ [الجدولة بالدفعات]: اكتملت الدفعة ({batch_counter // CONFIG.batch_size}). "
+                        f"انتظار {int(wait_for_window)} ثانية لتصفير نافذة الدقيقة لدى Google بالكامل..."
+                    )
+                    time.sleep(wait_for_window)
+                # تصفير عداد زمن الدفعة الجديدة
+                batch_start_time = time.time()
 
         # المرحلة 3: التجميع النهائي والربط الزمني الحاسم
         logger.info("🪡 تجميع مقاطع التحقيق بدقة زمنية متطابقة بنسبة 100%...")
