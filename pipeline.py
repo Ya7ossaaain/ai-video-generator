@@ -8,7 +8,7 @@ print("=" * 60)
 print("🔍 بدء الفحص الشامل لبيانات الاعتماد والمفاتيح...")
 print("=" * 60)
 
-# 1. فحص مفتاح Gemini API
+# 1. فحص مفتاح Gemini API باستخدام نموذج Gemini 3 Flash
 print("\n[1/4] 🧠 فحص Gemini API:")
 gemini_key = os.environ.get("GEMINI_API_KEY")
 if not gemini_key:
@@ -16,9 +16,19 @@ if not gemini_key:
 else:
     try:
         genai.configure(api_key=gemini_key)
-        m = genai.GenerativeModel("gemini-1.5-flash")
-        res = m.generate_content("قل مرحباً في كلمة واحدة")
-        print(f"✅ Gemini متصل ويعمل بنجاح! رد النموذج: '{res.text.strip()}'")
+        target_models = ["gemini-3-flash-preview", "gemini-3.5-flash", "gemini-2.5-flash"]
+        connected = False
+        for m_name in target_models:
+            try:
+                m = genai.GenerativeModel(m_name)
+                res = m.generate_content("أكد الاتصال بكلمة واحدة")
+                print(f"✅ Gemini متصل ويعمل بنجاح عبر ({m_name})! الرد: '{res.text.strip()}'")
+                connected = True
+                break
+            except Exception:
+                continue
+        if not connected:
+            print("❌ تعذر العثور على النموذج المطلوب، تأكد من تفعيل Gemini API في المشروع.")
     except Exception as e:
         print(f"❌ فشل الاتصال بـ Gemini: {e}")
 
@@ -26,7 +36,7 @@ else:
 print("\n[2/4] 🎥 فحص Pexels API:")
 pexels_key = os.environ.get("PEXELS_API_KEY")
 if not pexels_key:
-    print("⚠️ تنبيه: PEXELS_API_KEY غير موجود (اختياري، سيتم الاعتماد على الأرشيف فقط).")
+    print("⚠️ تنبيه: PEXELS_API_KEY غير موجود.")
 else:
     try:
         r = requests.get(
@@ -37,7 +47,7 @@ else:
         if r.status_code == 200:
             print("✅ Pexels API صالح ومتصل بنجاح!")
         else:
-            print(f"❌ خطأ في Pexels: كود الاستجابة {r.status_code} - {r.text}")
+            print(f"❌ خطأ في Pexels: كود {r.status_code}")
     except Exception as e:
         print(f"❌ فشل الاتصال بـ Pexels: {e}")
 
@@ -47,10 +57,10 @@ client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
 yt_token = os.environ.get("YOUTUBE_REFRESH_TOKEN")
 drive_token = os.environ.get("DRIVE_REFRESH_TOKEN")
 
-# 3. فحص صلاحية قناة YouTube
+# 3. فحص الاتصال بقناة YouTube
 print("\n[3/4] 📺 فحص الاتصال بقناة YouTube:")
 if not (client_id and client_secret and yt_token):
-    print("❌ نقص في مفاتيح يوتيوب (تأكد من GOOGLE_CLIENT_ID و GOOGLE_CLIENT_SECRET و YOUTUBE_REFRESH_TOKEN).")
+    print("❌ نقص في مفاتيح يوتيوب (تأكد من تمريرها داخل env في ملف render.yml).")
 else:
     try:
         creds_yt = Credentials(
@@ -72,10 +82,10 @@ else:
     except Exception as e:
         print(f"❌ فشل الاتصال بـ YouTube: {e}")
 
-# 4. فحص صلاحية حساب Google Drive
+# 4. فحص الاتصال بحساب Google Drive
 print("\n[4/4] ☁️ فحص الاتصال بحساب Google Drive:")
 if not (client_id and client_secret and drive_token):
-    print("❌ نقص في مفاتيح درايف (تأكد من GOOGLE_CLIENT_ID و GOOGLE_CLIENT_SECRET و DRIVE_REFRESH_TOKEN).")
+    print("❌ نقص في مفاتيح درايف (تأكد من تمريرها داخل env في ملف render.yml).")
 else:
     try:
         creds_drive = Credentials(
@@ -89,7 +99,7 @@ else:
         about_request = drive_service.about().get(fields="user(displayName,emailAddress)")
         about_response = about_request.execute()
         user_info = about_response.get("user", {})
-        print(f"✅ تم الاتصال بـ Google Drive بنجاح! المستخدم: [{user_info.get('displayName')} - {user_info.get('emailAddress')}]")
+        print(f"✅ تم الاتصال بـ Google Drive بنجاح! الحساب: [{user_info.get('displayName')} - {user_info.get('emailAddress')}]")
     except Exception as e:
         print(f"❌ فشل الاتصال بـ Google Drive: {e}")
 
