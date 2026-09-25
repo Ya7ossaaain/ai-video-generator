@@ -2,17 +2,17 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-FORENSIC & HISTORICAL DOCUMENTARY AUTOMATION ENGINE (PRODUCTION PIPELINE V4.6)
+FORENSIC & HISTORICAL DOCUMENTARY AUTOMATION ENGINE (PRODUCTION PIPELINE V4.7 - KEY POOLING)
 ====================================================================================================
 نظام متكامل ومؤتمت لإنتاج الأفلام الوثائقية الاستقصائية والجنائية بدقة سينمائية ومعايير صحفية صارمة.
 - المحرك الصوتي: Google Gemini TTS (gemini-3.8-flash-tts بنبرة Charon التوثيقية).
-- محرك السيناريو والنصوص: gemini-3.8-flash و gemini-3-flash-preview حصرياً.
-- التحكم الصارم بالحصة: فاصل أمان إلزامي (25 ثانية) بعد كل توليد صوت لمنع خطأ 429 نهائياً.
-- محرك التحقق الأرشيفي: فحص الأدلة واستخراج المصادر من كبرى السجلات (Wikimedia & Wikipedia APIs).
-- محرك النزاهة التوثيقية: تصنيف مرئي صريح بين الوثائق الأصلية وإعادة التمثيل الرقمية.
-- محرك الرسوميات: معالجة النصوص العربية وقياس التفاف الأسطر بالبكسل مع طبقات ألفا شفافة.
+- إدارة الحصص المتعددة (API Key Rotation): التبديل الفوري بين 4 مفاتيح مستقلة عند ظهور 429.
+- محرك السيناريو: gemini-3.8-flash و gemini-3-flash-preview بدعم التدوير الآلي.
+- محرك التحقق الأرشيفي: جلب وفحص الأدلة والمصادر (Wikimedia & Wikipedia APIs).
+- محرك النزاهة التوثيقية: تصنيف مرئي بين الوثائق الأصلية وإعادة التمثيل الرقمية.
+- محرك الرسوميات: معالجة النصوص العربية وحساب التفاف الأسطر بالبكسل مع طبقات ألفا شفافة.
 - هندسة الصوت التكتيكية: مؤثرات واقعية خافتة (Tactile Archival SFX) خالية من الموسيقى المصطنعة.
-- استوديو المونتاج: FFmpeg بمعالجة لونية أرشيفية وحركة كاميرا ناعمة (Ken Burns) وتوحيد زمني صارم.
+- استوديو المونتاج: FFmpeg بمعالجة لونية وحركة كاميرا ناعمة (Ken Burns) وتوحيد زمني صارم.
 ====================================================================================================
 """
 
@@ -80,6 +80,13 @@ console_handler.setFormatter(ColoredFormatter())
 logger.addHandler(console_handler)
 
 
+def parse_api_keys() -> List[str]:
+    raw = os.environ.get("GEMINI_API_KEY", "")
+    # دعم الفصل بالفواصل العادية أو السطور الجديدة
+    keys = [k.strip() for k in raw.replace("\n", ",").split(",") if k.strip()]
+    return keys
+
+
 @dataclass
 class PipelineConfig:
     video_width: int = 1920
@@ -93,12 +100,11 @@ class PipelineConfig:
     tts_models: List[str] = field(default_factory=lambda: ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"])
     gemini_voice_name: str = "Charon"
     
-    # إدارة الحصص وسقف الطلبات الصوتي (RPM & Quota Optimization)
+    # تدوير المفاتيح وإدارة سرعة التوليد
     audio_sample_rate: int = 48000
     audio_bitrate: str = "192k"
-    max_tts_retries: int = 12
-    tts_backoff_base: int = 20
-    post_tts_cooldown: int = 25     # فاصل أمان فوري 25 ثانية بعد كل توليد صوت ناجح
+    post_tts_cooldown: int = 10     # مع وجود عدة مفاتيح تكفي 10 ثوانٍ كفاصل أمان
+    max_rotation_attempts: int = 16 # محاولات كافية للدوران عبر كافة المفاتيح
     
     # مسارات الملفات والمجلدات
     work_dir: Path = field(default_factory=lambda: Path("./output_build"))
@@ -114,7 +120,7 @@ class PipelineConfig:
     max_text_line_pixel_width: int = 1520
     
     topic: str = os.environ.get("VIDEO_TOPIC", "لغز القاتل زودياك: وثائق التحقيق والشفرات الجنائية المفقودة")
-    gemini_api_key: str = os.environ.get("GEMINI_API_KEY", "")
+    gemini_api_keys: List[str] = field(default_factory=parse_api_keys)
     google_client_id: str = os.environ.get("GOOGLE_CLIENT_ID", "")
     google_client_secret: str = os.environ.get("GOOGLE_CLIENT_SECRET", "")
     yt_refresh_token: str = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
@@ -347,14 +353,25 @@ class ForensicSoundStudio:
 
 
 # ==================================================================================================
-# 5. محرك استدعاء وصوت الذكاء الاصطناعي (GEMINI COGNITIVE & TTS CLIENT)
+# 5. محرك استدعاء الذكاء الاصطناعي مع التدوير الذاتي (KEY-ROTATING GEMINI CLIENT)
 # ==================================================================================================
 
 class GeminiDocumentaryDirector:
-    def __init__(self, api_key: str):
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY مفقود في البيئة! يرجى إضافته في إعدادات الأمان.")
-        self.client = genai.Client(api_key=api_key)
+    def __init__(self, api_keys: List[str]):
+        if not api_keys:
+            raise ValueError("لم يتم العثور على أي GEMINI_API_KEY! يرجى وضع المفاتيح في Secrets.")
+        self.api_keys = api_keys
+        self.current_key_idx = 0
+        self.client = genai.Client(api_key=self.api_keys[self.current_key_idx])
+        logger.info(f"🔑 تم تفعيل مصفوفة المفاتيح: تم تحميل {len(self.api_keys)} مفتاح(مفاتيح) بنجاح.")
+
+    def rotate_to_next_key(self):
+        """التبديل إلى المفتاح التالي في القائمة فوراً عند الوصول للحد الأقصى."""
+        self.current_key_idx = (self.current_key_idx + 1) % len(self.api_keys)
+        new_key = self.api_keys[self.current_key_idx]
+        masked = f"{new_key[:5]}...{new_key[-4:]}"
+        logger.info(f"🔄 [تدوير المفاتيح]: التبديل التلقائي إلى المفتاح #{self.current_key_idx + 1} ({masked}).")
+        self.client = genai.Client(api_key=new_key)
 
     def draft_forensic_manifest(self, topic: str) -> List[Dict[str, Any]]:
         prompt = f"""
@@ -385,27 +402,30 @@ class GeminiDocumentaryDirector:
           }}
         ]
         """
-        for candidate_model in CONFIG.text_generation_models:
-            try:
-                logger.info(f"جاري صياغة السرد الاستقصائي والتحقق الأرشيفي عبر ({candidate_model})...")
-                res = self.client.models.generate_content(model=candidate_model, contents=prompt)
-                clean_text = res.text.strip().replace("```json", "").replace("```", "").strip()
-                parsed = json.loads(clean_text)
-                if isinstance(parsed, list) and len(parsed) >= CONFIG.min_scenes:
-                    logger.info(f"تم اعتماد سيناريو التحقيق بنجاح عبر ({candidate_model}): {len(parsed)} مشهداً.")
-                    return parsed
-            except Exception as e:
-                logger.warning(f"محاولة فاشلة مع الموديل {candidate_model}: {e}. جاري تجربة الموديل البديل...")
-                time.sleep(3)
+        for _ in range(len(self.api_keys) * 2):
+            for candidate_model in CONFIG.text_generation_models:
+                try:
+                    logger.info(f"جاري صياغة السرد الاستقصائي والتحقق الأرشيفي عبر ({candidate_model})...")
+                    res = self.client.models.generate_content(model=candidate_model, contents=prompt)
+                    clean_text = res.text.strip().replace("```json", "").replace("```", "").strip()
+                    parsed = json.loads(clean_text)
+                    if isinstance(parsed, list) and len(parsed) >= CONFIG.min_scenes:
+                        logger.info(f"تم اعتماد سيناريو التحقيق بنجاح عبر ({candidate_model}): {len(parsed)} مشهداً.")
+                        return parsed
+                except Exception as e:
+                    err_msg = str(e)
+                    logger.warning(f"تعثر التوليد بالموديل {candidate_model}: {err_msg[:75]}")
+                    if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "503" in err_msg:
+                        self.rotate_to_next_key()
+                        time.sleep(2)
+                        break
 
-        raise RuntimeError("فشل توليد السيناريو الاستقصائي عبر نماذج النصوص المحددة.")
+        raise RuntimeError("فشل توليد السيناريو الاستقصائي عبر كافة المفاتيح المتاحة.")
 
     def synthesize_charon_voice(self, text: str, output_wav: Path) -> None:
-        """توليد صوت Charon مع فاصل أمان إلزامي فوري وتراجع تدريجي عند 429."""
-        backoff = CONFIG.tts_backoff_base
-
-        for model_name in CONFIG.tts_models:
-            for attempt in range(1, CONFIG.max_tts_retries + 1):
+        """توليد صوت Charon مع التدوير التلقائي السريع للمفاتيح عند سقف الحصة."""
+        for attempt in range(1, CONFIG.max_rotation_attempts + 1):
+            for model_name in CONFIG.tts_models:
                 try:
                     response = self.client.models.generate_content(
                         model=model_name,
@@ -434,24 +454,23 @@ class GeminiDocumentaryDirector:
                         with open(output_wav, "wb") as f:
                             f.write(binary_data)
                         
-                        # فاصل الأمان الفوري الإلزامي لتبريد الحصة ومنع الاصطدام بالدقيقة التالية
-                        logger.info(f"تم إنتاج الصوت بنجاح. فترة تهدئة وقائية ({CONFIG.post_tts_cooldown} ثانية)...")
+                        # تبريد قصير جداً (10 ثوانٍ) كافٍ تماماً بفضل توزيع الحمل
                         time.sleep(CONFIG.post_tts_cooldown)
                         return
 
-                    raise ValueError(f"استجابة الصوت من {model_name} كانت فارغة.")
-
                 except Exception as e:
                     err_msg = str(e)
-                    logger.warning(f"تنبيه صوت Charon ({model_name} - محاولة {attempt}/{CONFIG.max_tts_retries}): {err_msg[:80]}")
-                    if "404" in err_msg or "not found" in err_msg.lower():
+                    logger.warning(f"تنبيه صوت ({model_name} - محاولة {attempt}): {err_msg[:80]}")
+                    
+                    # إذا كان الخطأ 429 أو 503، نقوم بالتدوير الفوري للمفتاح التالي دون تعطيل
+                    if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "503" in err_msg:
+                        self.rotate_to_next_key()
+                        time.sleep(2) # تأخير عابر للربط بالمفتاح الجديد
                         break
                     
-                    # تراجع تدريجي تصاعدي في حال الخطأ
-                    time.sleep(backoff)
-                    backoff = min(backoff + 10, 60)
+                    time.sleep(5)
 
-        raise RuntimeError(f"تعذر توليد صوت المشهد عبر نماذج TTS المتاحة بعد {CONFIG.max_tts_retries} محاولة.")
+        raise RuntimeError(f"تعذر توليد صوت المشهد بعد استنزاف محاولات التدوير عبر كافة المفاتيح.")
 
 
 # ==================================================================================================
@@ -462,7 +481,7 @@ class ForensicAssetHarvester:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "ForensicDocumentaryEngine/4.6 (contact: historical_investigation@gmail.com)"
+            "User-Agent": "ForensicDocumentaryEngine/4.7 (contact: historical_investigation@gmail.com)"
         })
 
     def search_wikimedia_archive(self, query: str, output_path: Path) -> Tuple[bool, str]:
@@ -742,7 +761,7 @@ class CloudDistributionEngine:
 class MasterDocumentaryPipeline:
     def __init__(self):
         CONFIG.init_workspace()
-        self.director = GeminiDocumentaryDirector(CONFIG.gemini_api_key)
+        self.director = GeminiDocumentaryDirector(CONFIG.gemini_api_keys)
         self.harvester = ForensicAssetHarvester()
         self.sound_studio = ForensicSoundStudio(CONFIG.sfx_dir)
 
@@ -809,7 +828,7 @@ class MasterDocumentaryPipeline:
                 source_attribution = ""
                 self.harvester.generate_ai_reenactment_visual(ai_prompt, image_path)
 
-            # توليد صوت Charon الحصري مع فاصل الأمان الفوري (25 ثانية)
+            # توليد صوت Charon مع التدوير التلقائي الفوري للمفاتيح
             if not voice_raw_wav.exists() or voice_raw_wav.stat().st_size < 1000:
                 self.director.synthesize_charon_voice(narration, voice_raw_wav)
 
