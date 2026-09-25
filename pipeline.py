@@ -2,11 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-FORENSIC & HISTORICAL DOCUMENTARY AUTOMATION ENGINE (PRODUCTION PIPELINE V4.3)
+FORENSIC & HISTORICAL DOCUMENTARY AUTOMATION ENGINE (PRODUCTION PIPELINE V4.4)
 ====================================================================================================
 نظام متكامل ومؤتمت لإنتاج الأفلام الوثائقية الاستقصائية والجنائية بدقة سينمائية ومعايير صحفية صارمة.
 - المحرك الصوتي: Google Gemini TTS (gemini-3.8-flash-tts بصوت Charon الحصري).
 - محرك السيناريو والنصوص: gemini-3.8-flash و gemini-3-flash-preview حصرياً.
+- معالجة سقف الاستخدام: نظام تراجع تدريجي موسع (12 محاولة) وفاصل وقائي 22 ثانية لمنع خطأ 429.
 - محرك التحقق الأرشيفي: جلب وفحص الأدلة من كبرى قواعد البيانات المفتوحة (Wikimedia & Wikipedia APIs).
 - محرك النزاهة التوثيقية: تصنيف مرئي صارم بين الوثائق الأصلية وإعادة التمثيل الرقمية.
 - محرك الرسوميات والتايبوجرافي: معالجة النصوص العربية وحساب التفاف الأسطر بالبكسل مع طبقات ألفا شفافة.
@@ -87,16 +88,17 @@ class PipelineConfig:
     video_crf: int = 19
     video_preset: str = "veryfast"
     
-    # نماذج الذكاء الاصطناعي المضبوطة بدقة
+    # نماذج الذكاء الاصطناعي
     text_generation_models: List[str] = field(default_factory=lambda: ["gemini-3.8-flash", "gemini-3-flash-preview"])
     tts_models: List[str] = field(default_factory=lambda: ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"])
     gemini_voice_name: str = "Charon"
     
-    # مواصفات الصوت
+    # إدارة الحصص وسقف الطلبات الصوتي (RPM & Quota Optimization)
     audio_sample_rate: int = 48000
     audio_bitrate: str = "192k"
-    max_tts_retries: int = 8
-    tts_backoff_base: int = 10
+    max_tts_retries: int = 12       # رفع المحاولات لتفادي الانهيار عند الحظر المؤقت
+    tts_backoff_base: int = 20      # بدء الانتظار من 20 ثانية عند التعثر
+    post_tts_cooldown: int = 22     # فاصل وقائي 22 ثانية بعد كل نجاح للبقاء تحت سقف 3 طلبات/دقيقة
     
     # مسارات الملفات والمجلدات
     work_dir: Path = field(default_factory=lambda: Path("./output_build"))
@@ -399,7 +401,7 @@ class GeminiDocumentaryDirector:
         raise RuntimeError("فشل توليد السيناريو الاستقصائي عبر نماذج النصوص المحددة.")
 
     def synthesize_charon_voice(self, text: str, output_wav: Path) -> None:
-        """توليد صوت Charon الحصري عبر نماذج Google TTS الرسمية المتوافقة."""
+        """توليد صوت Charon الحصري مع تحكم صارم بالـ RPM لمنع استنفاد الحصة المؤقتة."""
         backoff = CONFIG.tts_backoff_base
 
         for model_name in CONFIG.tts_models:
@@ -431,7 +433,9 @@ class GeminiDocumentaryDirector:
                         binary_data = base64.b64decode(raw_bytes) if isinstance(raw_bytes, str) else raw_bytes
                         with open(output_wav, "wb") as f:
                             f.write(binary_data)
-                        time.sleep(5)
+                        
+                        # فاصل وقائي لتبريد الحصة ومنع حدوث 429 في المشهد القادم
+                        time.sleep(CONFIG.post_tts_cooldown)
                         return
 
                     raise ValueError(f"استجابة الصوت من {model_name} كانت فارغة.")
@@ -440,12 +444,13 @@ class GeminiDocumentaryDirector:
                     err_msg = str(e)
                     logger.warning(f"تنبيه صوت Charon ({model_name} - محاولة {attempt}/{CONFIG.max_tts_retries}): {err_msg[:80]}")
                     if "404" in err_msg or "not found" in err_msg.lower():
-                        # إذا كان الموديل غير متاح في الحساب ننتقل فوراً للنموذج التالي
                         break
+                    
+                    # في حالة الخطأ 429، يتم مضاعفة وقت الانتظار حتى تفتح خوادم جوجل نافذة الدقيقة التالية
                     time.sleep(backoff)
-                    backoff = min(backoff + 8, 45)
+                    backoff = min(backoff + 10, 60)
 
-        raise RuntimeError(f"تعذر توليد صوت المشهد عبر كافة نماذج TTS المتاحة.")
+        raise RuntimeError(f"تعذر توليد صوت المشهد عبر كافة نماذج TTS المتاحة بعد {CONFIG.max_tts_retries} محاولة.")
 
 
 # ==================================================================================================
@@ -456,7 +461,7 @@ class ForensicAssetHarvester:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "ForensicDocumentaryEngine/4.3 (contact: historical_investigation@gmail.com)"
+            "User-Agent": "ForensicDocumentaryEngine/4.4 (contact: historical_investigation@gmail.com)"
         })
 
     def search_wikimedia_archive(self, query: str, output_path: Path) -> Tuple[bool, str]:
@@ -803,7 +808,7 @@ class MasterDocumentaryPipeline:
                 source_attribution = ""
                 self.harvester.generate_ai_reenactment_visual(ai_prompt, image_path)
 
-            # توليد صوت Charon الحصري بدون الحقول المعطلة
+            # توليد صوت Charon الحصري مع نظام إدارة الـ Quota المعدل
             if not voice_raw_wav.exists() or voice_raw_wav.stat().st_size < 1000:
                 self.director.synthesize_charon_voice(narration, voice_raw_wav)
 
