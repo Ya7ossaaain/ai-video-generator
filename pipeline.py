@@ -2,14 +2,15 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-FORENSIC & HISTORICAL DOCUMENTARY ENGINE (PRODUCTION PIPELINE V5.1 - FORENSIC REALISM)
+FORENSIC & HISTORICAL DOCUMENTARY ENGINE (PRODUCTION PIPELINE V5.2 - 10-KEY POOLING)
 ====================================================================================================
+- محرك السيناريو: اختبار gemini-3.5-flash عبر جميع المفاتيح (1-10)، ثم التراجع إلى gemini-3-flash-preview.
+- المحرك الصوتي: gemini-3.8-flash-tts حصرياً (بصوت Charon التوثيقي) مع تدوير المفاتيح العشرة.
 - محرك الصور التوثيقية: Google Imagen 3 (imagen-3.0-generate-002) مع محرك FLUX-Realism البديل.
-- هندسة البرومبت: محاكاة فوتوغرافية أرشيفية حقيقية (1969 35mm Harsh Flash) وحظر مظهر الـ 3D تماماً.
+- هندسة البرومبت: محاكاة فوتوغرافية أرشيفية حقيقية (1969 35mm Harsh Flash) واستبعاد مظهر الـ 3D.
 - معالجة التناظر: خلفية ضبابية ذكية (Blurred Fit) لحماية الوجوه والوثائق من الاقتصاص.
 - التايبوجرافي: تنزيل وتثبيت خط Amiri-Bold وتصحيح الاتجاه العربي بنسبة 100%.
-- المدة والصوت: 16 دقيقة (65 مشهداً)، وقفات درامية (1.4 ثانية)، ونموذج gemini-3.8-flash-tts بصوت Charon.
-- إدارة الحصص: تدوير المفاتيح المستقلة مع فاصل أمان 25 ثانية.
+- المدة والصوت: 16 دقيقة (62-68 مشهداً)، وقفات درامية (1.4 ثانية)، وفاصل أمان 25 ثانية.
 ====================================================================================================
 """
 
@@ -92,17 +93,16 @@ class PipelineConfig:
     video_preset: str = "veryfast"
     
     # نماذج الذكاء الاصطناعي المعتمدة
-    text_generation_models: List[str] = field(default_factory=lambda: ["gemini-3-flash-preview"])
     tts_models: List[str] = field(default_factory=lambda: ["gemini-3.8-flash-tts"])
     image_model: str = "imagen-3.0-generate-002"
     gemini_voice_name: str = "Charon"
     
-    # إعدادات الصوت والتحكم بالحصص
+    # إعدادات الصوت وتدوير المفاتيح
     audio_sample_rate: int = 48000
     audio_bitrate: str = "192k"
-    post_tts_cooldown: int = 25     # فاصل أمان 25 ثانية
+    post_tts_cooldown: int = 25     # فاصل أمان 25 ثانية بعد كل مشهد صوتي ناجح
     dramatic_pause_sec: float = 1.4 # سكتة درامية تتيح استيعاب الأدلة
-    max_rotation_attempts: int = 16
+    max_rotation_attempts: int = 30 # دعم دوران كافٍ لعشرة مفاتيح
     
     # مسارات الملفات والمجلدات
     work_dir: Path = field(default_factory=lambda: Path("./output_build"))
@@ -110,8 +110,9 @@ class PipelineConfig:
     scenes_dir: Path = field(default_factory=lambda: Path("./output_build/scenes"))
     assets_dir: Path = field(default_factory=lambda: Path("./output_build/assets"))
     sfx_dir: Path = field(default_factory=lambda: Path("./output_build/sfx"))
-    script_cache_name: str = "forensic_manifest_v5_realism.json"
+    script_cache_name: str = "forensic_manifest_v5_pool10.json"
     
+    # مقاييس الفيلم الوثائقي (16 دقيقة)
     min_scenes: int = 62
     max_scenes: int = 68
     max_text_line_pixel_width: int = 1500
@@ -356,7 +357,7 @@ class ForensicSoundStudio:
 
 
 # ==================================================================================================
-# 5. محرك استدعاء الذكاء الاصطناعي مع التدوير (KEY-ROTATING GEMINI CLIENT)
+# 5. محرك استدعاء الذكاء الاصطناعي مع التدوير الذكي (SMART ROTATION ENGINE)
 # ==================================================================================================
 
 class GeminiDocumentaryDirector:
@@ -366,16 +367,21 @@ class GeminiDocumentaryDirector:
         self.api_keys = api_keys
         self.current_key_idx = 0
         self.client = genai.Client(api_key=self.api_keys[self.current_key_idx])
-        logger.info(f"🔑 جاهزية مصفوفة المفاتيح: تم تحميل {len(self.api_keys)} مفتاحاً.")
+        logger.info(f"🔑 جاهزية مصفوفة المفاتيح: تم تحميل {len(self.api_keys)} مفتاح(مفاتيح) بنجاح.")
 
     def rotate_to_next_key(self):
         self.current_key_idx = (self.current_key_idx + 1) % len(self.api_keys)
         new_key = self.api_keys[self.current_key_idx]
         masked = f"{new_key[:5]}...{new_key[-4:]}"
-        logger.info(f"🔄 [تدوير المفاتيح]: التبديل التلقائي إلى المفتاح #{self.current_key_idx + 1} ({masked}).")
+        logger.info(f"🔄 [تدوير المفاتيح]: الانتقال إلى المفتاح #{self.current_key_idx + 1} ({masked}).")
         self.client = genai.Client(api_key=new_key)
 
     def draft_forensic_manifest(self, topic: str) -> List[Dict[str, Any]]:
+        """
+        توليد سيناريو الـ 16 دقيقة:
+        1. اختبار gemini-3.5-flash عبر جميع المفاتيح بالكامل.
+        2. إذا تعثرت كافة المفاتيح، الانتقال تلقائياً إلى gemini-3-flash-preview وتجربة جميع المفاتيح.
+        """
         prompt = f"""
         أنت كبير مخرجي ومحققي الوثائقيات الاستقصائية الكبرى (True-Crime Documentaries).
         الموضوع: "{topic}".
@@ -409,25 +415,32 @@ class GeminiDocumentaryDirector:
           }}
         ]
         """
-        for _ in range(len(self.api_keys) * 2):
-            for candidate_model in CONFIG.text_generation_models:
+        
+        # الترتيب الهرمي المطلوب للنماذج
+        model_hierarchy = ["gemini-3.5-flash", "gemini-3-flash-preview"]
+
+        for model_name in model_hierarchy:
+            logger.info(f"🚀 بدء محاولات توليد السيناريو عبر النموذج الأساسي ({model_name}) على مصفوفة المفاتيح...")
+            
+            # تجربة جميع المفاتيح المتاحة لهذا النموذج بالكامل
+            for key_turn in range(len(self.api_keys)):
                 try:
-                    logger.info(f"جاري صياغة السرد الاستقصائي الموسع (16 دقيقة) عبر ({candidate_model})...")
-                    res = self.client.models.generate_content(model=candidate_model, contents=prompt)
+                    logger.info(f"محاولة توليد السيناريو عبر ({model_name}) باستخدام المفتاح #{self.current_key_idx + 1}...")
+                    res = self.client.models.generate_content(model=model_name, contents=prompt)
                     clean_text = res.text.strip().replace("```json", "").replace("```", "").strip()
                     parsed = json.loads(clean_text)
                     if isinstance(parsed, list) and len(parsed) >= CONFIG.min_scenes:
-                        logger.info(f"تم اعتماد سيناريو الـ 16 دقيقة بنجاح: {len(parsed)} مشهداً.")
+                        logger.info(f"تم اعتماد سيناريو الـ 16 دقيقة بنجاح عبر ({model_name}): {len(parsed)} مشهداً.")
                         return parsed
                 except Exception as e:
                     err_msg = str(e)
-                    logger.warning(f"تعثر التوليد بالموديل {candidate_model}: {err_msg[:75]}")
-                    if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "503" in err_msg:
-                        self.rotate_to_next_key()
-                        time.sleep(2)
-                        break
+                    logger.warning(f"تعثر التوليد بـ ({model_name}) عبر المفتاح #{self.current_key_idx + 1}: {err_msg[:80]}")
+                    self.rotate_to_next_key()
+                    time.sleep(2)
+            
+            logger.warning(f"⚠️ استُنفدت كافة المفاتيح مع النموذج ({model_name}). جاري الانتقال للنموذج التالي في الترتيب...")
 
-        raise RuntimeError("فشل توليد السيناريو الموسع عبر كافة المفاتيح المتاحة.")
+        raise RuntimeError("فشل توليد السيناريو عبر كلا النموذجين بعد فحص كافة المفاتيح المتاحة.")
 
     def synthesize_charon_voice(self, text: str, output_wav: Path) -> None:
         """توليد صوت Charon بنموذج gemini-3.8-flash-tts مع التدوير وفاصل الأمان."""
@@ -512,7 +525,7 @@ class ForensicAssetHarvester:
         self.director = director
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "ForensicDocumentaryEngine/5.1 (contact: historical_investigation@gmail.com)"
+            "User-Agent": "ForensicDocumentaryEngine/5.2 (contact: historical_investigation@gmail.com)"
         })
 
     def search_wikimedia_archive(self, query: str, output_path: Path) -> Tuple[bool, str]:
@@ -685,7 +698,6 @@ class CinematicRenderer:
             zoom_expr = "min(1.12, 1.0 + 0.0003*on)"
             pan_expr = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
 
-        # معالجة لونية حقيقية تُزيل النعومة الرقمية وتُضفي ملمس الفيلم الأرشيفي
         if category in ["PRIMARY_ARCHIVE", "HISTORICAL_RECORD"]:
             color_grading = "hue=s=0.72,eq=contrast=1.15:brightness=-0.02,noise=alls=10:allf=t+u,vignette=PI/3.6"
         else:
@@ -896,11 +908,9 @@ class MasterDocumentaryPipeline:
             if not voice_raw_wav.exists() or voice_raw_wav.stat().st_size < 1000:
                 self.director.synthesize_charon_voice(narration, voice_raw_wav)
 
-            # دمج الصوت مع السكتة الدرامية
             duration = self.sound_studio.mix_scene_audio(voice_raw_wav, mixed_audio_mp3, actual_category)
             scene_durations.append(duration)
 
-            # إنشاء القناع البصري بخط Amiri
             GraphicOverlayCompositor.create_scene_overlay(
                 narration=narration,
                 media_category=actual_category,
@@ -908,7 +918,6 @@ class MasterDocumentaryPipeline:
                 output_png=overlay_png
             )
 
-            # رندرة المشهد مع الفلترة التماثلية المضادة للمظهر الرقمي
             CinematicRenderer.render_scene_clip(
                 image_path=image_path,
                 overlay_png=overlay_png,
