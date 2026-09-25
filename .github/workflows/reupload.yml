@@ -1,0 +1,33 @@
+name: إعادة الرفع السريع إلى YouTube
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: 'عنوان الفيديو'
+        required: false
+        default: 'لغز القاتل زودياك: وثائق التحقيق والشفرات الجنائية المفقودة'
+
+jobs:
+  fast-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: استدعاء المشروع
+        uses: actions/checkout@v4
+
+      - name: إعداد بيئة بايثون
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: تثبيت مكتبات جوجل
+        run: pip install google-api-python-client google-auth-oauthlib google-auth-httplib2
+
+      - name: النقل من درايف إلى يوتيوب
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          DRIVE_REFRESH_TOKEN: ${{ secrets.DRIVE_REFRESH_TOKEN }}
+          VIDEO_TOPIC: ${{ github.event.inputs.topic }}
+        run: python reupload.py
