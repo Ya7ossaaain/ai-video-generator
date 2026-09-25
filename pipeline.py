@@ -2,10 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-FORENSIC & HISTORICAL DOCUMENTARY AUTOMATION ENGINE (PRODUCTION PIPELINE V4.0)
+FORENSIC & HISTORICAL DOCUMENTARY AUTOMATION ENGINE (PRODUCTION PIPELINE V4.2)
 ====================================================================================================
 نظام متكامل ومؤتمت لإنتاج الأفلام الوثائقية الاستقصائية والجنائية بدقة سينمائية ومعايير صحفية صارمة.
-- المحرك الصوتي: Google Gemini TTS (صوت Charon الحصري مع معالجة سقف الطلبات الذاتية).
+- المحرك الصوتي: Google Gemini TTS (نموذج gemini-3.8-flash بصوت Charon الحصري).
+- محرك السيناريو والنصوص: gemini-3.8-flash و gemini-3-flash-preview حصرياً.
 - محرك التحقق الأرشيفي: جلب وفحص الأدلة من كبرى قواعد البيانات المفتوحة (Wikimedia & Wikipedia APIs).
 - محرك النزاهة التوثيقية: تصنيف مرئي صارم بين الوثائق الأصلية وإعادة التمثيل الرقمية.
 - محرك الرسوميات والتايبوجرافي: معالجة النصوص العربية وحساب التفاف الأسطر بالبكسل مع طبقات ألفا شفافة.
@@ -30,12 +31,11 @@ import urllib.request
 import subprocess
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
-from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
+from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
 
@@ -43,7 +43,7 @@ from google import genai
 from google.genai import types
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+from googleapiclient.http import MediaFileUpload
 
 
 # ==================================================================================================
@@ -52,7 +52,6 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 class ColoredFormatter(logging.Formatter):
     """منسق مخصص لسجلات النظام بالألوان للتشغيل المريح عبر الطرفية وسيرفرات CI/CD."""
-    GREY = "\x1b[38;20m"
     CYAN = "\x1b[36;20m"
     YELLOW = "\x1b[33;20m"
     RED = "\x1b[31;20m"
@@ -61,7 +60,7 @@ class ColoredFormatter(logging.Formatter):
     FORMAT = "%(asctime)s - [%(levelname)s] - (%(filename)s:%(lineno)d) - %(message)s"
 
     FORMATS = {
-        logging.DEBUG: GREY + FORMAT + RESET,
+        logging.DEBUG: RESET + FORMAT,
         logging.INFO: CYAN + FORMAT + RESET,
         logging.WARNING: YELLOW + FORMAT + RESET,
         logging.ERROR: RED + FORMAT + RESET,
@@ -69,7 +68,7 @@ class ColoredFormatter(logging.Formatter):
     }
 
     def format(self, record):
-        log_fmt = self.FORMATS.get(record.levelno)
+        log_fmt = self.FORMATS.get(record.levelno, self.RESET + self.FORMAT)
         formatter = logging.Formatter(log_fmt, datefmt="%Y-%m-%d %H:%M:%S")
         return formatter.format(record)
 
@@ -91,11 +90,14 @@ class PipelineConfig:
     video_crf: int = 19
     video_preset: str = "veryfast"
     
+    # نماذج الذكاء الاصطناعي (محددة بدقة وفق طلبك)
+    text_generation_models: List[str] = field(default_factory=lambda: ["gemini-3.8-flash", "gemini-3-flash-preview"])
+    tts_model_name: str = "gemini-3.8-flash"
+    gemini_voice_name: str = "Charon"
+    
     # مواصفات الصوت
     audio_sample_rate: int = 48000
     audio_bitrate: str = "192k"
-    gemini_voice_name: str = "Charon"
-    tts_model_name: str = "gemini-2.5-flash"
     max_tts_retries: int = 8
     tts_backoff_base: int = 10
     
@@ -110,7 +112,7 @@ class PipelineConfig:
     # قيود التحرير والمحتوى
     min_scenes: int = 34
     max_scenes: int = 38
-    target_duration_seconds: int = 660  # قرابة 11 دقيقة لضمان الأمان المطلق في يوتيوب
+    target_duration_seconds: int = 660
     max_text_line_pixel_width: int = 1520
     
     # مفاتيح وبيانات الاتصال
@@ -178,10 +180,6 @@ class TypographyEngine:
         font: ImageFont.FreeTypeFont,
         max_pixel_width: int
     ) -> List[str]:
-        """
-        تقسيم النص العربي بناءً على القياس البكسلي الفعلي للكلمات بدلاً من عدد الحروف،
-        لمنع تداخل الكلمات مع أطراف الشاشة أو انقطاعها.
-        """
         words = text.strip().split()
         lines: List[str] = []
         current_words: List[str] = []
@@ -230,22 +228,21 @@ class GraphicOverlayCompositor:
         font_badge = TYPOGRAPHY.get_font(20)
         font_meta = TYPOGRAPHY.get_font(15)
 
-        # 1. تصميم شارة النزاهة التوثيقية في الزاوية العلوية
         badge_text = ""
         bg_color = (0, 0, 0, 0)
         border_color = (0, 0, 0, 0)
 
         if media_category == "PRIMARY_ARCHIVE":
             badge_text = "● وثيقة رسمية أصلية | ملف التحقيق الجنائي"
-            bg_color = (150, 0, 0, 235)       # أحمر أرشيفي داكن
+            bg_color = (150, 0, 0, 235)
             border_color = (255, 255, 255, 140)
         elif media_category == "HISTORICAL_RECORD":
             badge_text = "● مادة تاريخية معاصرة | أرشيف الصحافة والسجلات"
-            bg_color = (145, 75, 0, 235)      # برتقالي وثائقي نحاسي
+            bg_color = (145, 75, 0, 235)
             border_color = (255, 255, 255, 140)
         elif media_category == "AI_REENACTMENT":
             badge_text = "● إعادة تمثيل بصرية | محاكاة تخيلية بالذكاء الاصطناعي"
-            bg_color = (35, 38, 42, 220)      # رمادي تكتيكي محايد
+            bg_color = (35, 38, 42, 220)
             border_color = (180, 180, 180, 100)
 
         if badge_text:
@@ -254,11 +251,9 @@ class GraphicOverlayCompositor:
             badge_h = 48
             bx, by = 60, 50
 
-            # خلفية الشارة وحوافها
             draw.rectangle([bx, by, bx + badge_w, by + badge_h], fill=bg_color, outline=border_color, width=2)
             draw.text((bx + 18, by + 12), reshaped_badge, font=font_badge, fill=(255, 255, 255, 255))
 
-            # بطاقة المصدر الدقيق بجانب الشارة إن وجد
             if source_name and media_category in ["PRIMARY_ARCHIVE", "HISTORICAL_RECORD"]:
                 src_label = f"المصدر: {source_name}"
                 reshaped_src = get_display(arabic_reshaper.reshape(src_label))
@@ -267,7 +262,6 @@ class GraphicOverlayCompositor:
                 draw.rectangle([sx, by + 4, sx + src_w, by + badge_h - 4], fill=(10, 15, 20, 200), outline=(255, 255, 255, 60), width=1)
                 draw.text((sx + 12, by + 14), reshaped_src, font=font_meta, fill=(220, 220, 220, 240))
 
-        # 2. تصميم شريط الترجمة السفلي المتدرج
         gradient_h = 160
         grad_box = Image.new("RGBA", (CONFIG.video_width, gradient_h), (0, 0, 0, 0))
         grad_draw = ImageDraw.Draw(grad_box)
@@ -277,11 +271,10 @@ class GraphicOverlayCompositor:
         
         canvas.paste(grad_box, (0, CONFIG.video_height - gradient_h), grad_box)
 
-        # 3. قياس وطباعة أسطر السرد الصوتي
         lines = TYPOGRAPHY.wrap_arabic_text_by_pixels(
             narration, font=font_sub, max_pixel_width=CONFIG.max_text_line_pixel_width
         )
-        display_lines = lines[:2]  # الحفاظ على سطرين كحد أقصى لمنع حجب الرؤية
+        display_lines = lines[:2]
 
         y_base = 948 if len(display_lines) == 1 else 930
         for idx, raw_line in enumerate(display_lines):
@@ -290,7 +283,6 @@ class GraphicOverlayCompositor:
             x_pos = (CONFIG.video_width - line_w) // 2
             y_pos = y_base + (idx * 48)
 
-            # ظل عميق لضمان مقروئية تامة فوق كافة أنواع الخلفيات
             draw.text((x_pos + 2, y_pos + 2), disp_line, font=font_sub, fill=(0, 0, 0, 255))
             draw.text((x_pos, y_pos), disp_line, font=font_sub, fill=(255, 255, 255, 255))
 
@@ -311,8 +303,6 @@ class ForensicSoundStudio:
         self.init_procedural_sfx()
 
     def init_procedural_sfx(self):
-        """توليد نبرات صوتية نقية باستخدام FFmpeg Lavfi Synthesis لمنع أي مشكلات ترخيص."""
-        # 1. صوت طبعة الختم الأرشيفي / التكة الميكانيكية للعدسة
         if not self.evidence_snap_wav.exists() or self.evidence_snap_wav.stat().st_size < 1000:
             cmd_snap = [
                 "ffmpeg", "-y", "-f", "lavfi",
@@ -322,7 +312,6 @@ class ForensicSoundStudio:
             subprocess.run(cmd_snap, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             logger.info("تم تخليق المؤثر الصوتي: ختام الأرشيف الجنائي.")
 
-        # 2. صوت الانتقال الهوائي الرزين ومنخفض التردد
         if not self.soft_whoosh_wav.exists() or self.soft_whoosh_wav.stat().st_size < 1000:
             cmd_whoosh = [
                 "ffmpeg", "-y", "-f", "lavfi",
@@ -338,13 +327,8 @@ class ForensicSoundStudio:
         output_mixed_mp3: Path,
         category: str
     ) -> float:
-        """
-        دمج صوت المعلق مع المؤثر الصوتي المناسب في مطلع المشهد
-        وتطبيق معايير البث EBU R128 (loudnorm).
-        """
         sfx_source = self.evidence_snap_wav if category == "PRIMARY_ARCHIVE" else self.soft_whoosh_wav
 
-        # دمج الصوت وتطبيع المخرجات
         filter_str = (
             "[1:a]adelay=40|40[sfx];"
             "[0:a][sfx]amix=inputs=2:duration=first:dropout_transition=2,"
@@ -363,7 +347,6 @@ class ForensicSoundStudio:
         ]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
-        # قراءة مدة الصوت الدقيقة باستخدام ffprobe
         cmd_dur = [
             "ffprobe", "-v", "error", "-show_entries",
             "format=duration", "-of", "default=noprint_wrappers=1:nokey=1",
@@ -378,7 +361,7 @@ class ForensicSoundStudio:
 # ==================================================================================================
 
 class GeminiDocumentaryDirector:
-    """كبير مخرجي التحقيقات: صياغة النصوص وتوليد الصوت الحصري (Charon) دون أي بديل هجين."""
+    """كبير مخرجي التحقيقات: صياغة النصوص عبر 3.8/3-preview، وتوليد صوت Charon عبر 3.8."""
 
     def __init__(self, api_key: str):
         if not api_key:
@@ -386,14 +369,13 @@ class GeminiDocumentaryDirector:
         self.client = genai.Client(api_key=api_key)
 
     def draft_forensic_manifest(self, topic: str) -> List[Dict[str, Any]]:
-        """صياغة السيناريو الاستقصائي المقسم بدقة جنائية ونحوية تامة."""
         prompt = f"""
         أنت كبير المحققين والمخرجين للوثائقيات الجنائية والتاريخية الكبرى.
         الموضوع: "{topic}".
         المطلوب: إنتاج سيناريو استقصائي محكم ومضبوط لغوياً ونحوياً بالكامل يتكون من 35 إلى 37 مشهداً.
 
         القواعد الصارمة لإخراج الفيلم:
-        1. السلامة النحوية واللغوية: تجنب أخطاء التأنيث والتذكير نهائياً (مثلاً: قل "زياً أسودَ" ولا تقل "زياً سوداء").
+        1. السلامة النحوية واللغوية: الالتزام التام بتطابق المذكر والمؤنث وضبط النطق (مثال: قل "زياً أسودَ" ولا تقل "زياً سوداء").
         2. تصنيف الوسائط (media_type) بدقة بين 4 فئات:
            - "PRIMARY_ARCHIVE": للوثائق والتقارير الرسمية وصور مسارح الجرائم الأصلية المعتمدة.
            - "HISTORICAL_RECORD": لصفحات الجرائد، صور المشتبه بهم الحقيقية، والخرائط الجغرافية.
@@ -415,26 +397,23 @@ class GeminiDocumentaryDirector:
           }}
         ]
         """
-        for candidate_model in ["gemini-2.5-flash", "gemini-3.8-flash", "gemini-3-flash-preview"]:
+        for candidate_model in CONFIG.text_generation_models:
             try:
                 logger.info(f"جاري صياغة السرد الاستقصائي والتحقق الأرشيفي عبر ({candidate_model})...")
                 res = self.client.models.generate_content(model=candidate_model, contents=prompt)
                 clean_text = res.text.strip().replace("```json", "").replace("```", "").strip()
                 parsed = json.loads(clean_text)
                 if isinstance(parsed, list) and len(parsed) >= CONFIG.min_scenes:
-                    logger.info(f"تم اعتماد سيناريو التحقيق بنجاح: {len(parsed)} مشهداً.")
+                    logger.info(f"تم اعتماد سيناريو التحقيق بنجاح عبر ({candidate_model}): {len(parsed)} مشهداً.")
                     return parsed
             except Exception as e:
-                logger.warning(f"محاولة فاشلة مع الموديل {candidate_model}: {e}. جاري تجربة الموديل البديل...")
+                logger.warning(f"محاولة فاشلة مع الموديل {candidate_model}: {e}. جاري تجربة الموديل البديل المعتمد...")
                 time.sleep(3)
 
-        raise RuntimeError("فشل توليد السيناريو الاستقصائي عبر كافة نماذج Gemini المتاحة.")
+        raise RuntimeError("فشل توليد السيناريو الاستقصائي عبر كافة نماذج النصوص المحددة (gemini-3.8-flash و gemini-3-flash-preview).")
 
     def synthesize_charon_voice(self, text: str, output_wav: Path) -> None:
-        """
-        توليد صوت Charon الحصري مع احترام سقف الطلبات في الدقيقة (RPM)
-        وإعادة المحاولة الذاتية (Exponential Backoff) لمنع أي انقطاع.
-        """
+        """توليد صوت Charon الحصري عبر نموذج gemini-3.8-flash حصراً."""
         backoff = CONFIG.tts_backoff_base
 
         for attempt in range(1, CONFIG.max_tts_retries + 1):
@@ -472,17 +451,16 @@ class GeminiDocumentaryDirector:
                     binary_data = base64.b64decode(raw_bytes) if isinstance(raw_bytes, str) else raw_bytes
                     with open(output_wav, "wb") as f:
                         f.write(binary_data)
-                    # استراحة قصيرة لتفادي الـ 429
                     time.sleep(5)
                     return
 
-                raise ValueError("استجابة الصوت من Gemini كانت فارغة من البيانات الثنائية.")
+                raise ValueError(f"استجابة الصوت من {CONFIG.tts_model_name} كانت فارغة من البيانات الثنائية.")
 
             except Exception as e:
                 err_msg = str(e)
-                logger.warning(f"تنبيه صوت Charon (المحاولة {attempt}/{CONFIG.max_tts_retries}): {err_msg[:80]}")
+                logger.warning(f"تنبيه صوت Charon ({CONFIG.tts_model_name} - محاولة {attempt}/{CONFIG.max_tts_retries}): {err_msg[:80]}")
                 if attempt == CONFIG.max_tts_retries:
-                    raise RuntimeError(f"تعذر توليد صوت المشهد بعد {attempt} محاولات: {err_msg}")
+                    raise RuntimeError(f"تعذر توليد صوت المشهد عبر {CONFIG.tts_model_name} بعد {attempt} محاولات: {err_msg}")
                 time.sleep(backoff)
                 backoff = min(backoff + 8, 45)
 
@@ -497,11 +475,10 @@ class ForensicAssetHarvester:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "ForensicDocumentaryEngine/4.0 (contact: historical_investigation@gmail.com)"
+            "User-Agent": "ForensicDocumentaryEngine/4.2 (contact: historical_investigation@gmail.com)"
         })
 
     def search_wikimedia_archive(self, query: str, output_path: Path) -> Tuple[bool, str]:
-        """البحث في مكتبة ويكيميديا للأدلة التاريخية واستخراج اسم المصدر."""
         try:
             endpoint = "https://commons.wikimedia.org/w/api.php"
             params = {
@@ -523,8 +500,7 @@ class ForensicAssetHarvester:
                         continue
                     meta = info[0].get("extmetadata", {})
                     source_desc = meta.get("Credit", {}).get("value", "") or meta.get("Artist", {}).get("value", "Wikimedia Commons")
-                    # تنظيف وسوم HTML من اسم المصدر إن وجدت
-                    clean_source = re_clean = "".join([c for c in source_desc if c.isalnum() or c in " -_()"])[:35]
+                    clean_source = "".join([c for c in source_desc if c.isalnum() or c in " -_()"])[:35]
                     
                     target_url = info[0].get("thumburl") or info[0].get("url")
                     if target_url and not target_url.endswith(".svg"):
@@ -542,7 +518,6 @@ class ForensicAssetHarvester:
         return False, ""
 
     def search_wikipedia_article_images(self, query: str, output_path: Path) -> Tuple[bool, str]:
-        """البحث عبر مقالات ويكيبيديا باللغة الإنجليزية للأرشيف الجنائي."""
         try:
             endpoint = "https://en.wikipedia.org/w/api.php"
             params = {
@@ -574,7 +549,6 @@ class ForensicAssetHarvester:
         return False, ""
 
     def generate_ai_reenactment_visual(self, prompt: str, output_path: Path) -> bool:
-        """توليد صورة سينمائية تحاكي الواقعة مع شارة إعادة تمثيل رقمية واضحة."""
         full_prompt = f"{prompt}, raw 35mm archival photograph, dark cold cinematography, moody police lighting, 1970s crime scene aesthetic, highly detailed, film grain, no text"
         encoded = urllib.parse.quote(full_prompt)
         url = f"https://image.pollinations.ai/prompt/{encoded}?width={CONFIG.video_width}&height={CONFIG.video_height}&nologo=true&nofeed=true&model=flux"
@@ -589,7 +563,6 @@ class ForensicAssetHarvester:
             except Exception:
                 time.sleep(3)
 
-        # توليد شاشة سينمائية صامتة إذا تعذر الاتصال
         cmd_blank = [
             "ffmpeg", "-y", "-f", "lavfi",
             "-i", f"color=c=0x0a0c10:s={CONFIG.video_width}x{CONFIG.video_height}:d=1",
@@ -600,7 +573,6 @@ class ForensicAssetHarvester:
 
     @staticmethod
     def normalize_aspect_ratio(input_path: Path, output_path: Path) -> bool:
-        """توحيد أبعاد الصورة إلى 1920x1080 وتطبيق Crop ملائم ومساحة ألوان YUV420p."""
         try:
             cmd = [
                 "ffmpeg", "-y", "-i", str(input_path),
@@ -633,7 +605,6 @@ class CinematicRenderer:
         fps = CONFIG.video_fps
         total_frames = max(1, int(duration * fps))
 
-        # 1. معادلات حركة الكاميرا الوثائقية
         if camera_move == "zoom_out":
             zoom_expr = "max(1.0, 1.18 - 0.0006*on)"
             pan_expr = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
@@ -646,17 +617,15 @@ class CinematicRenderer:
         elif camera_move == "pan_left":
             zoom_expr = "1.12"
             pan_expr = f"x='max(0, (1 - on/{total_frames})*(iw-iw/zoom))':y='ih/2-(ih/zoom/2)'"
-        else:  # zoom_in التلقائي
+        else:
             zoom_expr = "min(1.18, 1.0 + 0.0006*on)"
             pan_expr = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
 
-        # 2. الفلتر اللوني وحبيبات الفيلم 35mm
         if category in ["PRIMARY_ARCHIVE", "HISTORICAL_RECORD"]:
             color_grading = "hue=s=0.68,eq=contrast=1.18:brightness=-0.02,noise=alls=8:allf=t+u,vignette=PI/3.4"
         else:
             color_grading = "eq=contrast=1.06:saturation=1.04,vignette=PI/4.5"
 
-        # 3. بناء الفلتر المركب مع توحيد زمني صارم للإطارات والـ Timebase
         filter_complex = (
             f"[0:v]format=yuv420p,scale=3840:2160,"
             f"zoompan=z='{zoom_expr}':{pan_expr}:d={total_frames}:s={CONFIG.video_width}x{CONFIG.video_height}:fps={fps},"
@@ -709,7 +678,7 @@ class CloudDistributionEngine:
                     "title": title,
                     "description": description,
                     "tags": tags,
-                    "categoryId": "27"  # التعليم والتحقيقات
+                    "categoryId": "27"
                 },
                 "status": {
                     "privacyStatus": "public",
@@ -757,7 +726,6 @@ class CloudDistributionEngine:
             )
             drive_service = build("drive", "v3", credentials=creds)
 
-            # البحث عن المجلد أو إنشاؤه
             q_folder = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
             res = drive_service.files().list(q=q_folder, fields="files(id, name)").execute()
             folders = res.get("files", [])
@@ -843,13 +811,12 @@ class MasterDocumentaryPipeline:
 
             logger.info(f"⏳ معالجة المشهد ({idx + 1}/{total_scenes}) [طلب: {req_type}]...")
 
-            # 1. فحص وجود المقطع مسبقاً (Idempotent Resumption)
             if clip_path.exists() and clip_path.stat().st_size > 50000:
                 logger.info(f"المشهد {idx + 1} مكتمل وجاهز مسبقاً. تخطي المعالجة.")
                 rendered_scene_clips.append(clip_path)
                 continue
 
-            # 2. جلب الأصل الأرشيفي وتطبيق مبدأ النزاهة التوثيقية
+            # جلب الأصل الأرشيفي وتطبيق مبدأ النزاهة التوثيقية
             actual_category = req_type
             source_attribution = ""
             got_evidence = False
@@ -862,19 +829,18 @@ class MasterDocumentaryPipeline:
             if got_evidence:
                 actual_category = req_type
             else:
-                # خفض التصنيف صراحة لتمثيل رقمي إذا لم نجد الأصل الحقيقي
                 actual_category = "AI_REENACTMENT"
                 source_attribution = ""
                 self.harvester.generate_ai_reenactment_visual(ai_prompt, image_path)
 
-            # 3. توليد صوت Charon الحصري
+            # توليد صوت Charon الحصري عبر gemini-3.8-flash حصراً
             if not voice_raw_wav.exists() or voice_raw_wav.stat().st_size < 1000:
                 self.director.synthesize_charon_voice(narration, voice_raw_wav)
 
-            # 4. هندسة ومزج المؤثرات الصوتية وحساب مدة المشهد
+            # هندسة ومزج المؤثرات الصوتية وحساب مدة المشهد
             duration = self.sound_studio.mix_scene_audio(voice_raw_wav, mixed_audio_mp3, actual_category)
 
-            # 5. رسم القناع البصري وشارة التوثيق
+            # رسم القناع البصري وشارة التوثيق
             GraphicOverlayCompositor.create_scene_overlay(
                 narration=narration,
                 media_category=actual_category,
@@ -882,7 +848,7 @@ class MasterDocumentaryPipeline:
                 output_png=overlay_png
             )
 
-            # 6. المونتاج ورندرة المقطع الفردي
+            # المونتاج ورندرة المقطع الفردي
             CinematicRenderer.render_scene_clip(
                 image_path=image_path,
                 overlay_png=overlay_png,
@@ -912,7 +878,6 @@ class MasterDocumentaryPipeline:
         ]
         subprocess.run(cmd_concat, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
-        # فحص المدة الإجمالية للفيلم
         dur_cmd = [
             "ffprobe", "-v", "error", "-show_entries",
             "format=duration", "-of", "default=noprint_wrappers=1:nokey=1",
@@ -936,10 +901,8 @@ class MasterDocumentaryPipeline:
         )
         video_tags = ["وثائقي", "تحقيقات", "أدلة جنائية", "غموض", "قضايا تاريخية", "شفرات"]
 
-        # رفع المقطع إلى درايف أولاً كنسخة أصلية
         CloudDistributionEngine.upload_to_google_drive(master_film_mp4)
 
-        # نشر المقطع على يوتيوب
         CloudDistributionEngine.upload_to_youtube(
             video_path=master_film_mp4,
             title=video_title,
