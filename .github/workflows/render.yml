@@ -4,43 +4,108 @@ on:
   workflow_dispatch:
     inputs:
       topic:
-        description: 'موضوع الفيلم الوثائقي'
+        description: "موضوع الفيلم الوثائقي"
         required: false
-        default: 'حادثة ممر دياتلوف: اللغز الذي حيّر العالم'
+        default: "حادثة ممر دياتلوف: اللغز الذي حيّر العالم"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: documentary-render
+  cancel-in-progress: false
 
 jobs:
   build-and-render:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
       - name: استدعاء المشروع
         uses: actions/checkout@v4
 
-      - name: تثبيت بيئة بايثون
+      - name: تثبيت Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
+          cache: "pip"
 
-      - name: تثبيت FFmpeg والخطوط العربية والمكتبات
+      - name: تثبيت FFmpeg والخطوط العربية
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg fonts-noto-core fonts-dejavu-core
-          pip install --upgrade pip
-          pip install google-genai requests google-api-python-client google-auth-oauthlib google-auth-httplib2 edge-tts arabic-reshaper python-bidi
+          sudo apt-get update
+          sudo apt-get install -y \
+            ffmpeg \
+            fonts-noto-core \
+            fonts-noto-cjk \
+            fonts-dejavu-core
 
-      - name: تشغيل التوليد والمونتاج السحابي
+      - name: تثبيت مكتبات Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            "google-genai>=1.50.0" \
+            requests \
+            google-api-python-client \
+            google-auth-oauthlib \
+            google-auth-httplib2 \
+            arabic-reshaper \
+            python-bidi
+
+      - name: تشغيل Pipeline
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           DRIVE_REFRESH_TOKEN: ${{ secrets.DRIVE_REFRESH_TOKEN }}
-          VIDEO_TOPIC: ${{ github.event.inputs.topic }}
-        run: python -u pipeline.py
 
-      - name: حفظ وتجهيز الفيديو للتحميل المباشر
+          VIDEO_TOPIC: ${{ github.event.inputs.topic }}
+
+          GEMINI_RESEARCH_MODEL: gemini-3.8-flash
+          GEMINI_TTS_MODEL: gemini-3.8-flash-tts
+          GEMINI_TTS_VOICE: Charon
+
+          SCENE_COUNT: "42"
+          MIN_REAL_SCENES: "0.55"
+          MAX_WORKERS: "3"
+
+          # Intentionally disabled: user requested no music/SFX.
+          ENABLE_YOUTUBE: "true"
+          ENABLE_DRIVE: "true"
+        run: |
+          python -u pipeline.py
+
+      - name: التحقق من الناتج
+        if: success()
+        run: |
+          test -s output/final_documentary.mp4
+          test -s output/../data/manifests/*.json 2>/dev/null || true
+          ffprobe -v error \
+            -show_entries format=duration,size \
+            -of default=noprint_wrappers=1 \
+            output/final_documentary.mp4
+
+      - name: رفع الفيديو كـ Artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: documentary-video
-          path: final_documentary.mp4
+          path: |
+            output/final_documentary.mp4
+            data/manifests/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: رفع سجلات المصادر والمشاهد
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentary-project-data
+          path: |
+            data/cache/
+            data/manifests/
+            output/scene_*/manifest.json
+          if-no-files-found: warn
+          retention-days: 7
