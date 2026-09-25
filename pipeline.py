@@ -50,8 +50,8 @@ def get_arabic_font():
 ARABIC_FONT = get_arabic_font()
 print(f"🔤 تم اعتماد الخط العربي: {ARABIC_FONT}")
 
-# دالة إعادة تشكيل النصوص العربية وحفظها في ملف نصي UTF-8 لتفادي مشاكل الرموز في FFmpeg
-def write_arabic_text_file(text, file_path, max_chars_per_line=50):
+# دالة كتابة النصوص العربية المجهزة لـ FFmpeg في ملف نصي UTF-8
+def write_arabic_text_file(text, file_path, max_chars_per_line=48):
     words = text.split()
     lines, cur_line, cur_len = [], [], 0
     for w in words:
@@ -74,11 +74,23 @@ def write_arabic_text_file(text, file_path, max_chars_per_line=50):
     with open(file_path, "w", encoding="utf-8") as f:
         f.write("\n".join(reshaped_lines))
 
-# تجهيز ملف شارة الأدلة الجنائية
 EVIDENCE_BADGE_FILE = "badge_evidence.txt"
 write_arabic_text_file("● وثائق وأدلة حقيقية | ملف التحقيق", EVIDENCE_BADGE_FILE, max_chars_per_line=40)
 
-# 1. صياغة السيناريو الاستقصائي المركز على الأدلة
+# دالة تنقية وضمان معيارية الصور (تمنع انهيار FFmpeg بسبب تباين الأبعاد أو أنظمة الألوان)
+def sanitize_image(raw_path, clean_path):
+    try:
+        cmd = [
+            "ffmpeg", "-y", "-i", raw_path,
+            "-vf", "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,format=yuv420p",
+            "-frames:v", "1", clean_path
+        ]
+        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return (res.returncode == 0 and os.path.exists(clean_path) and os.path.getsize(clean_path) > 3000)
+    except Exception:
+        return False
+
+# 1. صياغة السيناريو الاستقصائي
 script_cache_file = "cached_scenes_evidence.json"
 scenes = None
 
@@ -105,7 +117,7 @@ if not scenes:
        - "video": لمشاهد الحركة الواقعية في Pexels (أمطار، كتابة على الآلة الكاتبة، سيارات شرطة، شوارع ليلية).
        - "ai": لتجسيد الفرضيات اللحظية المستعصية.
     4. كل فقرة سردية (narration) تتكون من جملتين أو 3 جمل محبوكة ومكثفة (مدة إلقائها 14-16 ثانية) باللغة العربية الفصحى الرصينة والمشكولة.
-    5. حركة الكاميرا (camera_move): استخدم ("tilt_down", "zoom_in", "pan_left", "pan_right")، واحرص على استخدام tilt_down خصيصاً مع الوثائق لمسحها من الأعلى للأسفل.
+    5. حركة الكاميرا (camera_move): استخدم ("tilt_down", "zoom_in", "zoom_out", "pan_left", "pan_right").
 
     أخرج النتيجة بصيغة JSON Array نقية فقط:
     [
@@ -119,7 +131,7 @@ if not scenes:
       }}
     ]
     """
-    for model_candidate in ["gemini-3.8-flash", "gemini-3-flash-preview"]:
+    for model_candidate in ["gemini-3-flash-preview", "gemini-3.8-flash", "gemini-2.5-flash"]:
         try:
             print(f"✍️ جاري صياغة السرد الوثائقي القائم على الأدلة عبر ({model_candidate})...")
             res = client.models.generate_content(model=model_candidate, contents=director_prompt)
@@ -131,7 +143,7 @@ if not scenes:
             break
         except Exception as e:
             print(f"⏳ محاولة توليد بديلة ({e})...")
-            time.sleep(4)
+            time.sleep(3)
 
 if not scenes:
     raise RuntimeError("تعذر توليد السيناريو.")
@@ -195,6 +207,7 @@ def get_audio_duration(file_path):
 # 3. محرك أرشيف الأدلة والوثائق الجنائية (Wikimedia Commons + Wikipedia)
 def fetch_evidence_photo(query, output_path):
     headers = {"User-Agent": "ForensicDocEngine/3.0 (historical_investigation@gmail.com)"}
+    temp_raw = output_path + ".raw"
     try:
         url_comm = "https://commons.wikimedia.org/w/api.php"
         params_comm = {
@@ -214,12 +227,14 @@ def fetch_evidence_photo(query, output_path):
                 img_info = page.get("imageinfo", [])
                 if img_info:
                     thumb = img_info[0].get("thumburl") or img_info[0].get("url")
-                    if thumb:
+                    if thumb and not thumb.endswith(".svg"):
                         resp = requests.get(thumb, headers=headers, timeout=10)
-                        if resp.status_code == 200 and len(resp.content) > 20000:
-                            with open(output_path, "wb") as f:
+                        if resp.status_code == 200 and len(resp.content) > 15000:
+                            with open(temp_raw, "wb") as f:
                                 f.write(resp.content)
-                            return True
+                            if sanitize_image(temp_raw, output_path):
+                                if os.path.exists(temp_raw): os.remove(temp_raw)
+                                return True
     except Exception:
         pass
 
@@ -239,14 +254,20 @@ def fetch_evidence_photo(query, output_path):
             pages = r.json().get("query", {}).get("pages", {})
             for _, page in pages.items():
                 thumb = page.get("thumbnail", {}).get("source")
-                if thumb:
+                if thumb and not thumb.endswith(".svg"):
                     resp = requests.get(thumb, headers=headers, timeout=10)
                     if resp.status_code == 200 and len(resp.content) > 15000:
-                        with open(output_path, "wb") as f:
+                        with open(temp_raw, "wb") as f:
                             f.write(resp.content)
-                        return True
+                        if sanitize_image(temp_raw, output_path):
+                            if os.path.exists(temp_raw): os.remove(temp_raw)
+                            return True
     except Exception:
         pass
+
+    if os.path.exists(temp_raw):
+        try: os.remove(temp_raw)
+        except Exception: pass
     return False
 
 # 4. محرك مقاطع Pexels السينمائية
@@ -295,9 +316,12 @@ def fetch_pexels_photo(query, output_path):
                 img_url = photos[0]["src"].get("large2x") or photos[0]["src"].get("original")
                 img_data = requests.get(img_url, timeout=10).content
                 if len(img_data) > 15000:
-                    with open(output_path, "wb") as f:
+                    temp_raw = output_path + ".raw"
+                    with open(temp_raw, "wb") as f:
                         f.write(img_data)
-                    return True
+                    if sanitize_image(temp_raw, output_path):
+                        if os.path.exists(temp_raw): os.remove(temp_raw)
+                        return True
     except Exception:
         pass
     return False
@@ -307,7 +331,7 @@ def generate_ai_photo(prompt_text, output_path):
     encoded = urllib.parse.quote(f"{prompt_text}, raw historical forensic photo, dark cinematography, 35mm film grain, 8k, no text")
     for _ in range(2):
         try:
-            url = f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1120&nologo=true&nofeed=true&model=flux"
+            url = f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1080&nologo=true&nofeed=true&model=flux"
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = resp.read()
@@ -323,7 +347,7 @@ def generate_ai_photo(prompt_text, output_path):
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return True
 
-# 7. استوديو المونتاج الملحمي (فلاتر الأرشيف + الشارة الحمراء + الترجمة عبر textfile)
+# 7. استوديو المونتاج الملحمي المحصن
 scene_videos = []
 
 for i, scene in enumerate(scenes):
@@ -341,10 +365,10 @@ for i, scene in enumerate(scenes):
     evidence_tag = " [🔍 دليل حقيقي]" if is_real_evidence else ""
     print(f"\n🎬 معالجة المشهد {i+1}/{len(scenes)}{evidence_tag}...")
 
-    # حفظ النص في ملف textfile لتجنب تعارض الفواصل
-    write_arabic_text_file(scene["narration"], sub_file, max_chars_per_line=50)
+    # تجهيز ملف الترجمة
+    write_arabic_text_file(scene["narration"], sub_file, max_chars_per_line=48)
 
-    # توليد الصوت
+    # توليد وضبط الصوت
     if not (os.path.exists(audio_norm) and os.path.getsize(audio_norm) > 1000):
         generate_gemini_audio(scene["narration"], audio_raw)
         subprocess.run([
@@ -356,16 +380,15 @@ for i, scene in enumerate(scenes):
 
     duration = get_audio_duration(audio_norm)
     fps = 25
-    total_frames = int(duration * fps) + 12
+    total_frames = int(duration * fps) + 15
 
-    # فلتر الترجمة عبر قراءة الملف مباشرة
+    # فلاتر النصوص والشارات
     sub_filter = (
         f",drawbox=x=0:y=ih-155:w=iw:h=155:color=black@0.65:t=fill,"
         f"drawtext=fontfile='{ARABIC_FONT}':textfile='{sub_file}':fontcolor=white:fontsize=32:"
         f"line_spacing=12:x=(w-text_w)/2:y=h-130"
     )
 
-    # شارة الدليل الحقيقي
     badge_filter = ""
     if is_real_evidence:
         badge_filter = (
@@ -375,11 +398,10 @@ for i, scene in enumerate(scenes):
             f"x=70:y=62"
         )
 
-    # فلتر التلوين الأرشيفي
     if is_real_evidence:
-        archival_grading = "hue=s=0.65,eq=contrast=1.20:brightness=-0.03,noise=alls=11:allf=t+u,vignette=PI/3.2"
+        archival_grading = "hue=s=0.65,eq=contrast=1.18:brightness=-0.02,noise=alls=9:allf=t+u,vignette=PI/3.4"
     else:
-        archival_grading = "eq=contrast=1.07:brightness=-0.01:saturation=1.05,vignette=PI/4.5"
+        archival_grading = "eq=contrast=1.06:brightness=-0.01:saturation=1.04,vignette=PI/4.5"
 
     video_encode_params = [
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "19",
@@ -402,8 +424,9 @@ for i, scene in enumerate(scenes):
                 "-filter_complex", filter_chain,
                 "-map", "[v]", "-map", "1:a"
             ] + video_encode_params + ["-t", str(duration), video_out]
-            subprocess.run(cmd_v, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-            is_video_ready = True
+            res_v = subprocess.run(cmd_v, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if res_v.returncode == 0:
+                is_video_ready = True
 
     if not is_video_ready:
         image_path = f"image_{i}.jpg"
@@ -419,27 +442,26 @@ for i, scene in enumerate(scenes):
             generate_ai_photo(scene.get("ai_prompt", scene.get("search_query", "")), image_path)
 
         camera_move = scene.get("camera_move", "zoom_in")
-        step = 0.20 / total_frames
 
+        # معادلات حركة الكاميرا المحصنة رياضياً ضد أي قيم خارج الحدود
         if camera_move == "zoom_out":
-            zoom_expr = f"max(1.20-{step:.6f}*on,1.0)"
+            zoom_expr = "max(1.0, 1.18 - 0.0006*on)"
             pan_expr = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
         elif camera_move == "tilt_down":
-            zoom_expr = "1.18"
-            pan_expr = "x='iw/2-(iw/zoom/2)':y='(on/d)*(ih-ih/zoom)'"
+            zoom_expr = "1.15"
+            pan_expr = f"x='iw/2-(iw/zoom/2)':y='max(0, min(ih-ih/zoom, (on/{total_frames})*(ih-ih/zoom)))'"
         elif camera_move == "pan_left":
-            zoom_expr = "1.18"
-            pan_expr = "x='(1-on/d)*(iw-iw/zoom)':y='ih/2-(ih/zoom/2)'"
+            zoom_expr = "1.15"
+            pan_expr = f"x='max(0, min(iw-iw/zoom, (1.0 - on/{total_frames})*(iw-iw/zoom)))':y='ih/2-(ih/zoom/2)'"
         elif camera_move == "pan_right":
-            zoom_expr = "1.18"
-            pan_expr = "x='(on/d)*(iw-iw/zoom)':y='ih/2-(ih/zoom/2)'"
+            zoom_expr = "1.15"
+            pan_expr = f"x='max(0, min(iw-iw/zoom, (on/{total_frames})*(iw-iw/zoom)))':y='ih/2-(ih/zoom/2)'"
         else:
-            zoom_expr = f"min(1.0+{step:.6f}*on,1.20)"
+            zoom_expr = "min(1.18, 1.0 + 0.0006*on)"
             pan_expr = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
 
         filter_chain = (
-            f"[0:v]scale=w=1920:h=1120:force_original_aspect_ratio=increase,crop=1920:1080:0:0,"
-            f"scale=3840:-1,"
+            f"[0:v]format=yuv420p,scale=3840:2160,"
             f"zoompan=z='{zoom_expr}':{pan_expr}:d={total_frames}:s=1920x1080:fps={fps},"
             f"{archival_grading}{badge_filter}{sub_filter}[v]"
         )
@@ -454,8 +476,19 @@ for i, scene in enumerate(scenes):
 
         res = subprocess.run(cmd_i, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
         if res.returncode != 0:
-            print(f"❌ خطأ FFmpeg في المشهد {i}: {res.stderr[-300:]}")
-            raise RuntimeError("فشل تصيير المشهد")
+            print(f"⚠️ تطبيق الوضع المستقر للمشهد {i+1}...")
+            fallback_filter = (
+                f"[0:v]format=yuv420p,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,"
+                f"{archival_grading}{badge_filter}{sub_filter}[v]"
+            )
+            cmd_fallback = [
+                "ffmpeg", "-y",
+                "-loop", "1", "-i", image_path,
+                "-i", audio_norm,
+                "-filter_complex", fallback_filter,
+                "-map", "[v]", "-map", "1:a"
+            ] + video_encode_params + ["-t", str(duration), video_out]
+            subprocess.run(cmd_fallback, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
     scene_videos.append(video_out)
 
