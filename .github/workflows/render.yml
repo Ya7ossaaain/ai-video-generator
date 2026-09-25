@@ -1,51 +1,41 @@
-name: إنتاج الفيلم الوثائقي الاستقصائي (Forensic Pipeline V4)
+name: "إنتاج الفيلم الوثائقي الاستقصائي"
 
 on:
   workflow_dispatch:
     inputs:
       topic:
-        description: 'موضوع التحقيق الوثائقي'
+        description: "موضوع التحقيق الوثائقي"
         required: false
-        default: 'لغز القاتل زودياك: وثائق التحقيق والشفرات الجنائية المفقودة'
+        default: "لغز القاتل زودياك: وثائق التحقيق والشفرات الجنائية المفقودة"
 
 jobs:
   build-and-render:
     runs-on: ubuntu-latest
-    timeout-minutes: 90  # مهلة كافية لمعالجة الصوت وحركة الكاميرا لجميع المشاهد
+    timeout-minutes: 90
 
     steps:
-      - name: استدعاء المشروع (Checkout)
+      - name: استدعاء المشروع
         uses: actions/checkout@v4
 
-      - name: تثبيت FFmpeg والخطوط العربية في النظام
+      - name: تثبيت FFmpeg والخطوط العربية
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-noto-core fonts-dejavu-core
 
-      - name: إعداد بيئة Python 3.11
+      - name: إعداد بيئة بايثون
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
 
-      - name: تثبيت المكتبات البرمجية المتوافقة
-        run: |
-          python -m pip install --upgrade pip
-          pip install google-genai \
-                      google-api-python-client \
-                      google-auth-httplib2 \
-                      google-auth-oauthlib \
-                      requests \
-                      pillow \
-                      arabic-reshaper \
-                      python-bidi
+      - name: تثبيت المكتبات
+        run: pip install google-genai google-api-python-client google-auth-httplib2 google-auth-oauthlib requests pillow arabic-reshaper python-bidi
 
-      - name: تشغيل محرك الإنتاج الوثائقي
+      - name: تشغيل خط الإنتاج
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           DRIVE_REFRESH_TOKEN: ${{ secrets.DRIVE_REFRESH_TOKEN }}
-          VIDEO_TOPIC: ${{ github.event.inputs.topic || 'لغز القاتل زودياك: وثائق التحقيق والشفرات الجنائية المفقودة' }}
+          VIDEO_TOPIC: ${{ inputs.topic }}
         run: python pipeline.py
