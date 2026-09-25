@@ -2,11 +2,6 @@ name: إنتاج الفيلم الوثائقي السحابي
 
 on:
   workflow_dispatch:
-    inputs:
-      topic:
-        description: 'موضوع الفيلم الوثائقي'
-        required: false
-        default: 'حادثة ممر دياتلوف: اللغز الذي حيّر العالم'
 
 jobs:
   build-and-render:
@@ -21,23 +16,17 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: تثبيت FFmpeg والمكتبات
+      - name: تثبيت المكتبات المطلوبة
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg
           pip install --upgrade pip
-          pip install edge-tts google-generativeai requests
+          pip install google-generativeai requests google-api-python-client google-auth-oauthlib google-auth-httplib2
 
-      - name: تشغيل التوليد والمونتاج السحابي
+      - name: تشغيل الفحص
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          DRIVE_UPLOAD_URL: ${{ secrets.DRIVE_UPLOAD_URL }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-          VIDEO_TOPIC: ${{ github.event.inputs.topic }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          DRIVE_REFRESH_TOKEN: ${{ secrets.DRIVE_REFRESH_TOKEN }}
         run: python -u pipeline.py
-
-      - name: حفظ وتجهيز الفيديو للتحميل المباشر
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: documentary-video
-          path: final_documentary.mp4
