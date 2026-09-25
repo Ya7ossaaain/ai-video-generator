@@ -25,8 +25,8 @@ if not api_key:
     raise ValueError("GEMINI_API_KEY غير موجود في Secrets!")
 
 client = genai.Client(api_key=api_key)
-topic = os.environ.get("VIDEO_TOPIC", "حادثة ممر دياتلوف: اللغز الذي حيّر العالم")
-print(f"🎬 [المخرج الوثائقي]: بدء إنتاج وثائقي استقصائي مكثف بالأدلة الحقيقية والترجمة عن: {topic}")
+topic = os.environ.get("VIDEO_TOPIC", "لغز القاتل زودياك: وثائق التحقيق والشفرات الجنائية المفقودة")
+print(f"🎬 [المخرج الوثائقي]: بدء إنتاج وثائقي استقصائي مدعم بالأدلة الحقيقية عن: {topic}")
 
 # البحث التلقائي عن خط عربي متوفر في نظام Ubuntu
 def get_arabic_font():
@@ -48,10 +48,10 @@ def get_arabic_font():
     return "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
 ARABIC_FONT = get_arabic_font()
-print(f"🔤 تم اعتماد الخط للترجمة والشارات: {ARABIC_FONT}")
+print(f"🔤 تم اعتماد الخط العربي: {ARABIC_FONT}")
 
-# دالة تشكيل وتنسيق النصوص العربية لـ FFmpeg
-def format_arabic_for_ffmpeg(text, max_chars_per_line=50):
+# دالة إعادة تشكيل النصوص العربية وحفظها في ملف نصي UTF-8 لتفادي مشاكل الرموز في FFmpeg
+def write_arabic_text_file(text, file_path, max_chars_per_line=50):
     words = text.split()
     lines, cur_line, cur_len = [], [], 0
     for w in words:
@@ -65,13 +65,18 @@ def format_arabic_for_ffmpeg(text, max_chars_per_line=50):
     if cur_line:
         lines.append(" ".join(cur_line))
 
-    formatted = []
+    reshaped_lines = []
     for line in lines:
         reshaped = arabic_reshaper.reshape(line)
         bidi_line = get_display(reshaped)
-        escaped = bidi_line.replace("'", "\\'").replace(":", "\\:").replace("%", "\\%")
-        formatted.append(escaped)
-    return "\n".join(formatted)
+        reshaped_lines.append(bidi_line)
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(reshaped_lines))
+
+# تجهيز ملف شارة الأدلة الجنائية
+EVIDENCE_BADGE_FILE = "badge_evidence.txt"
+write_arabic_text_file("● وثائق وأدلة حقيقية | ملف التحقيق", EVIDENCE_BADGE_FILE, max_chars_per_line=40)
 
 # 1. صياغة السيناريو الاستقصائي المركز على الأدلة
 script_cache_file = "cached_scenes_evidence.json"
@@ -93,11 +98,11 @@ if not scenes:
 
     شروط الأدلة والإخراج الصارمة:
     1. اجعل 70% على الأقل من المشاهد تعتمد على أدلة حقيقية ("media_type": "real") تشمل:
-       (تقارير التشريح، صور مسرح الجريمة الحقيقي، برقيات اللاسلكي، وثائق الاستجواب، صور الضحايا قبل الحادث، المقتنيات الشخصية).
+       (تقارير التشريح، صور مسرح الجريمة الحقيقي، برقيات اللاسلكي، وثائق الاستجواب، صور الضحايا قبل الحادث، المقتنيات الشخصية، رسائل وخطابات الجاني الأصلية).
     2. كلمات البحث (search_query) للوسائط الحقيقية يجب أن تكون بالإنجليزية الدقيقة جداً للأرشيف الجنائي والتاريخي:
-       (أمثلة: "Dyatlov Pass abandoned tent cut from inside 1959 original", "Soviet criminal case file KGB autopsy Dyatlov", "Kholat Syakhl search party telegram document").
+       (أمثلة: "Zodiac killer cipher 340 original letter", "San Francisco police department Zodiac sketch 1969", "Lake Berryessa crime scene evidence photo").
     3. بقية المشاهد تتوزع بين:
-       - "video": لمشاهد الحركة الواقعية في Pexels (ثلوج، مسير، مختبر، رياح عاصفة).
+       - "video": لمشاهد الحركة الواقعية في Pexels (أمطار، كتابة على الآلة الكاتبة، سيارات شرطة، شوارع ليلية).
        - "ai": لتجسيد الفرضيات اللحظية المستعصية.
     4. كل فقرة سردية (narration) تتكون من جملتين أو 3 جمل محبوكة ومكثفة (مدة إلقائها 14-16 ثانية) باللغة العربية الفصحى الرصينة والمشكولة.
     5. حركة الكاميرا (camera_move): استخدم ("tilt_down", "zoom_in", "pan_left", "pan_right")، واحرص على استخدام tilt_down خصيصاً مع الوثائق لمسحها من الأعلى للأسفل.
@@ -108,13 +113,13 @@ if not scenes:
         "scene_num": 1,
         "narration": "نص السرد الوثائقي المتقن هنا...",
         "media_type": "real",
-        "search_query": "Dyatlov expedition group final official diary 1959",
-        "ai_prompt": "Vintage 1950s documentary archive investigation",
+        "search_query": "Zodiac killer Vallejo police archive evidence",
+        "ai_prompt": "Vintage 1960s forensic typewriter crime investigation",
         "camera_move": "tilt_down"
       }}
     ]
     """
-    for model_candidate in ["gemini-2.5-flash", "gemini-3-flash-preview"]:
+    for model_candidate in ["gemini-3.8-flash", "gemini-3-flash-preview"]:
         try:
             print(f"✍️ جاري صياغة السرد الوثائقي القائم على الأدلة عبر ({model_candidate})...")
             res = client.models.generate_content(model=model_candidate, contents=director_prompt)
@@ -125,8 +130,8 @@ if not scenes:
             print(f"✨ تم اعتماد سيناريو الأدلة بنجاح: {len(scenes)} مشهداً!")
             break
         except Exception as e:
-            print(f"⏳ محاولة مع نموذج بديل ({e})...")
-            time.sleep(5)
+            print(f"⏳ محاولة توليد بديلة ({e})...")
+            time.sleep(4)
 
 if not scenes:
     raise RuntimeError("تعذر توليد السيناريو.")
@@ -135,7 +140,7 @@ if not scenes:
 def generate_gemini_audio(narration_text, output_wav_path):
     models_to_try = ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"]
     for tts_model in models_to_try:
-        for attempt in range(4):
+        for attempt in range(3):
             try:
                 response = client.models.generate_content(
                     model=tts_model,
@@ -190,7 +195,6 @@ def get_audio_duration(file_path):
 # 3. محرك أرشيف الأدلة والوثائق الجنائية (Wikimedia Commons + Wikipedia)
 def fetch_evidence_photo(query, output_path):
     headers = {"User-Agent": "ForensicDocEngine/3.0 (historical_investigation@gmail.com)"}
-    # 1. فحص مستودع ملفات ويكيميديا للأدلة الميدانية
     try:
         url_comm = "https://commons.wikimedia.org/w/api.php"
         params_comm = {
@@ -219,7 +223,6 @@ def fetch_evidence_photo(query, output_path):
     except Exception:
         pass
 
-    # 2. فحص موسوعة ويكيبيديا للصور الموثقة
     try:
         url_wiki = "https://en.wikipedia.org/w/api.php"
         params_wiki = {
@@ -320,16 +323,14 @@ def generate_ai_photo(prompt_text, output_path):
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return True
 
-# 7. استوديو المونتاج الملحمي (فلاتر الأرشيف + الشارة الحمراء + الترجمة المباشرة)
+# 7. استوديو المونتاج الملحمي (فلاتر الأرشيف + الشارة الحمراء + الترجمة عبر textfile)
 scene_videos = []
-
-# نص الشارة الحمراء للأدلة التاريخية
-EVIDENCE_BADGE_TEXT = format_arabic_for_ffmpeg("● وثائق وأدلة حقيقية | ملف التحقيق")
 
 for i, scene in enumerate(scenes):
     video_out = f"scene_{i}.mp4"
     audio_norm = f"audio_{i}.mp3"
     audio_raw = f"audio_raw_{i}.wav"
+    sub_file = f"sub_{i}.txt"
 
     if os.path.exists(video_out) and os.path.getsize(video_out) > 50000:
         print(f"⏩ [استئناف]: المشهد {i+1}/{len(scenes)} مكتمل مسبقاً.")
@@ -340,7 +341,10 @@ for i, scene in enumerate(scenes):
     evidence_tag = " [🔍 دليل حقيقي]" if is_real_evidence else ""
     print(f"\n🎬 معالجة المشهد {i+1}/{len(scenes)}{evidence_tag}...")
 
-    # توليد وضبط الصوت
+    # حفظ النص في ملف textfile لتجنب تعارض الفواصل
+    write_arabic_text_file(scene["narration"], sub_file, max_chars_per_line=50)
+
+    # توليد الصوت
     if not (os.path.exists(audio_norm) and os.path.getsize(audio_norm) > 1000):
         generate_gemini_audio(scene["narration"], audio_raw)
         subprocess.run([
@@ -354,27 +358,24 @@ for i, scene in enumerate(scenes):
     fps = 25
     total_frames = int(duration * fps) + 12
 
-    # تجهيز شريط الترجمة السفلي
-    subtitle_text = format_arabic_for_ffmpeg(scene["narration"], max_chars_per_line=52)
-
-    # بناء شريط الترجمة مع خلفية سينمائية داكنة
+    # فلتر الترجمة عبر قراءة الملف مباشرة
     sub_filter = (
         f",drawbox=x=0:y=ih-155:w=iw:h=155:color=black@0.65:t=fill,"
-        f"drawtext=fontfile='{ARABIC_FONT}':text='{subtitle_text}':fontcolor=white:fontsize=32:"
+        f"drawtext=fontfile='{ARABIC_FONT}':textfile='{sub_file}':fontcolor=white:fontsize=32:"
         f"line_spacing=12:x=(w-text_w)/2:y=h-130"
     )
 
-    # بناء الشارة الحمراء العريضة في أعلى الشاشة عند عرض دليل حقيقي
+    # شارة الدليل الحقيقي
     badge_filter = ""
     if is_real_evidence:
         badge_filter = (
             f",drawbox=x=50:y=45:w=440:h=56:color=0x990000@0.90:t=fill,"
             f"drawbox=x=50:y=45:w=440:h=56:color=white@0.40:t=2,"
-            f"drawtext=fontfile='{ARABIC_FONT}':text='{EVIDENCE_BADGE_TEXT}':fontcolor=white:fontsize=22:"
+            f"drawtext=fontfile='{ARABIC_FONT}':textfile='{EVIDENCE_BADGE_FILE}':fontcolor=white:fontsize=22:"
             f"x=70:y=62"
         )
 
-    # فلتر التلوين الأرشيفي التاريخي (حبيبات الفيلم + الألوان الباردة + التظليل)
+    # فلتر التلوين الأرشيفي
     if is_real_evidence:
         archival_grading = "hue=s=0.65,eq=contrast=1.20:brightness=-0.03,noise=alls=11:allf=t+u,vignette=PI/3.2"
     else:
@@ -418,27 +419,27 @@ for i, scene in enumerate(scenes):
             generate_ai_photo(scene.get("ai_prompt", scene.get("search_query", "")), image_path)
 
         camera_move = scene.get("camera_move", "zoom_in")
-        step = 0.22 / total_frames
+        step = 0.20 / total_frames
 
         if camera_move == "zoom_out":
-            zoom_expr = f"max(1.24-{step:.6f}*on,1.0)"
+            zoom_expr = f"max(1.20-{step:.6f}*on,1.0)"
             pan_expr = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
         elif camera_move == "tilt_down":
-            zoom_expr = "1.20"
+            zoom_expr = "1.18"
             pan_expr = "x='iw/2-(iw/zoom/2)':y='(on/d)*(ih-ih/zoom)'"
         elif camera_move == "pan_left":
-            zoom_expr = "1.20"
+            zoom_expr = "1.18"
             pan_expr = "x='(1-on/d)*(iw-iw/zoom)':y='ih/2-(ih/zoom/2)'"
         elif camera_move == "pan_right":
-            zoom_expr = "1.20"
+            zoom_expr = "1.18"
             pan_expr = "x='(on/d)*(iw-iw/zoom)':y='ih/2-(ih/zoom/2)'"
         else:
-            zoom_expr = f"min(1.0+{step:.6f}*on,1.24)"
+            zoom_expr = f"min(1.0+{step:.6f}*on,1.20)"
             pan_expr = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
 
         filter_chain = (
             f"[0:v]scale=w=1920:h=1120:force_original_aspect_ratio=increase,crop=1920:1080:0:0,"
-            f"scale=8000:-1,"
+            f"scale=3840:-1,"
             f"zoompan=z='{zoom_expr}':{pan_expr}:d={total_frames}:s=1920x1080:fps={fps},"
             f"{archival_grading}{badge_filter}{sub_filter}[v]"
         )
@@ -450,7 +451,11 @@ for i, scene in enumerate(scenes):
             "-filter_complex", filter_chain,
             "-map", "[v]", "-map", "1:a"
         ] + video_encode_params + ["-t", str(duration), video_out]
-        subprocess.run(cmd_i, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+        res = subprocess.run(cmd_i, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        if res.returncode != 0:
+            print(f"❌ خطأ FFmpeg في المشهد {i}: {res.stderr[-300:]}")
+            raise RuntimeError("فشل تصيير المشهد")
 
     scene_videos.append(video_out)
 
@@ -540,7 +545,7 @@ if client_id and client_secret and drive_token:
     except Exception as e:
         print(f"⚠️ تنبيه درايف: {e}")
 
-# رابط بديل مؤقت أونلاين
+# رابط بديل أونلاين
 print("\n🌐 جاري استخراج رابط مشاهدة أونلاين بديل...")
 try:
     with open(final_output, "rb") as f_vid:
