@@ -2,7 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (ENTERPRISE MASTER V13.2 - NETFLIX STANDARD)
+UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (ENTERPRISE MASTER V13.3 - NETFLIX STANDARD)
+====================================================================================================
+- تم إضافة نظام التراجع المتدرج للنماذج (Model Fallback Matrix).
+- تم استبعاد نماذج Lite نهائياً.
+- السكربت يجرب النماذج من الأقوى للأضعف لتفادي انهيار الحصة (Quota Exhaustion).
 ====================================================================================================
 """
 
@@ -90,8 +94,14 @@ class BroadcastStandards:
 
 @dataclass
 class AIModels:
-    architect_model: str = "gemini-flash-latest"
-    writer_model: str = "gemini-flash-latest"
+    # مصفوفة النماذج مرتبة من الأقوى للأضعف (بدون نماذج Lite) لتوليد السيناريو
+    writer_models: List[str] = field(default_factory=lambda: [
+        "gemini-3.1-pro-preview",
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash",
+        "gemini-3.0-flash"
+    ])
     tts_model: str = "gemini-3.8-flash-tts"
     tts_voice: str = "Charon"
     tts_temp: float = 0.15
@@ -161,7 +171,7 @@ class PipelineState:
             json.dump(self.data, f, ensure_ascii=False, indent=2)
 
 # ==================================================================================================
-# 4. AI MULTI-AGENT ARCHITECTURE
+# 4. AI MULTI-AGENT ARCHITECTURE (WITH MODEL FALLBACK MATRIX)
 # ==================================================================================================
 
 class MultiAgentDirector:
@@ -184,7 +194,6 @@ class MultiAgentDirector:
         if is_json:
             kwargs["response_mime_type"] = "application/json"
             
-        # تعطيل فلاتر الأمان لضمان عدم حظر قضايا الجرائم والغموض (إلزامية للوثائقيات)
         kwargs["safety_settings"] = [
             types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
             types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
@@ -193,7 +202,9 @@ class MultiAgentDirector:
         ]
         
         cfg = types.GenerateContentConfig(**kwargs)
-        max_retries = len(self.keys) * 3
+        
+        # تجربة جميع المفاتيح المتاحة للنموذج الحالي قبل إعلان فشله
+        max_retries = len(self.keys)
         
         for attempt in range(max_retries):
             try:
@@ -207,17 +218,17 @@ class MultiAgentDirector:
                 return res.text
             except Exception as e:
                 err = str(e)
-                log.error(f"API Error ({model} - Attempt {attempt+1}): {err[:250]}")
+                log.warning(f"API Error ({model} - Key {self.key_idx}): {err[:150]}")
                 if "429" in err or "quota" in err.lower() or "503" in err:
                     self._rotate_key()
                     time.sleep(3)
                 else:
                     time.sleep(5)
-        log.critical("FATAL: Multi-agent system collapse. All keys exhausted.")
-        sys.exit(1)
+                    
+        # إذا استنفدت جميع المفاتيح للنموذج الحالي، ارفع خطأ لينتقل الكود للنموذج البديل
+        raise RuntimeError(f"Exhausted all keys/retries for model {model}")
 
     def orchestrate_script_generation(self, topic: str) -> List[Dict[str, Any]]:
-        log.info(f"Agent [Writer]: Constructing Narrative Architecture via {CONFIG.models.writer_model}...")
         sys_prompt = f"""
         أنت كبير مخرجي التحقيقات الوثائقيات في شبكات البث العالمية (Executive Documentary Director).
         الموضوع: "{topic}".
@@ -241,11 +252,22 @@ class MultiAgentDirector:
           }}
         ]
         """
-        script_data = self._robust_call(CONFIG.models.writer_model, sys_prompt, is_json=True)
-        if not isinstance(script_data, list) or len(script_data) < CONFIG.min_scenes:
-            log.warning("Agent [Writer] failed to hit scene count. Re-orchestrating...")
-            script_data = self._robust_call(CONFIG.models.writer_model, sys_prompt + "\nIMPORTANT: YOU MUST GENERATE AT LEAST 64 SCENES.", is_json=True)
-        return script_data
+        
+        # حلقة الطوارئ: المرور على قائمة النماذج من الأقوى للأضعف
+        for model_name in CONFIG.models.writer_models:
+            log.info(f"Agent [Writer]: Attempting Narrative Architecture via {model_name}...")
+            try:
+                script_data = self._robust_call(model_name, sys_prompt, is_json=True)
+                if isinstance(script_data, list) and len(script_data) >= CONFIG.min_scenes:
+                    log.info(f"✔ Successfully generated script using {model_name}!")
+                    return script_data
+                else:
+                    log.warning(f"Model {model_name} generated insufficient scenes. Falling back...")
+            except Exception as e:
+                log.error(f"Model {model_name} failed completely. Falling back to the next model in line...")
+                
+        log.critical("FATAL: All fallback models (Pro & Flash) failed to generate the script. Please check your Quota or network.")
+        sys.exit(1)
 
     def generate_theatrical_voice(self, text: str, output_wav: Path) -> None:
         cue = (
@@ -285,7 +307,7 @@ class MultiAgentDirector:
                         return
             except Exception as e:
                 err = str(e)
-                log.error(f"TTS API Error (Attempt {attempt+1}): {err[:150]}")
+                log.warning(f"TTS API Error (Attempt {attempt+1}): {err[:150]}")
                 if "429" in err or "503" in err:
                     self._rotate_key()
                     time.sleep(2)
@@ -300,7 +322,7 @@ class MultiAgentDirector:
 
 class AsyncArchiveHarvester:
     def __init__(self):
-        self.headers = {"User-Agent": "BroadcastPipeline/13.2 (research@broadcaster.internal)"}
+        self.headers = {"User-Agent": "BroadcastPipeline/13.3 (research@broadcaster.internal)"}
         
     def harvest_sync(self, query: str, output_path: Path) -> Tuple[bool, str]:
         return asyncio.run(self._harvest_async(query, output_path))
