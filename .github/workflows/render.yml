@@ -22,7 +22,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+          # تم حذف سطر الكاش نهائياً من هنا لتفادي خطأ requirements.txt
 
       - name: تثبيت محرك FFmpeg والخطوط التلفزيونية
         run: |
