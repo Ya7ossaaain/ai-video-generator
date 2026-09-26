@@ -95,12 +95,8 @@ class BroadcastStandards:
 @dataclass
 class AIModels:
     # مصفوفة النماذج مرتبة من الأقوى للأضعف (بدون نماذج Lite) لتوليد السيناريو
-    writer_models: List[str] = field(default_factory=lambda: [
-        "gemini-3.1-pro-preview",
-        "gemini-3.8-flash",
-        "gemini-3.7-flash",
-        "gemini-3.5-flash",
-        "gemini-3.0-flash"
+    writer_models: List[str] = field(default_factory=lambda: 
+        "gemini-3-flash-preview"
     ])
     tts_model: str = "gemini-3.8-flash-tts"
     tts_voice: str = "Charon"
