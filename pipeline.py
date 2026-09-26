@@ -2,20 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (ENTERPRISE MASTER V13.0 - NETFLIX STANDARD)
-====================================================================================================
-Architect: Senior Multimedia & Python Systems Architect
-Director: Executive True-Crime Documentary Director
-
-DESCRIPTION:
-A massive, highly robust, enterprise-grade automated pipeline for producing 16-minute cinematic 
-true-crime documentaries. 
-Features:
-- Multi-Agent AI System (Researcher -> Writer -> Voice Director).
-- Asynchronous Media Harvesting (aiohttp & asyncio).
-- Dynamic FFmpeg Filtergraph Builder (Glitches, Cinematic Shakes, Multi-track Ducking).
-- EBU R128 Broadcast Audio Mastering.
-- Pydantic-style Schema Enforcement for AI outputs.
+UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (ENTERPRISE MASTER V13.2 - NETFLIX STANDARD)
 ====================================================================================================
 """
 
@@ -24,6 +11,7 @@ import sys
 import json
 import time
 import math
+import re
 import logging
 import asyncio
 import base64
@@ -42,13 +30,11 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-
 # ==================================================================================================
 # 1. ADVANCED TELEMETRY, LOGGING & OBSERVABILITY
 # ==================================================================================================
 
 class ForensicTelemetryFormatter(logging.Formatter):
-    """Enterprise-grade colored logging for real-time observability of complex pipelines."""
     COLORS = {
         'DEBUG': "\x1b[38;5;240m",
         'INFO': "\x1b[38;5;39m",
@@ -75,7 +61,6 @@ def setup_enterprise_logger(name: str) -> logging.Logger:
 
 log = setup_enterprise_logger("BroadcastEngine")
 
-
 # ==================================================================================================
 # 2. ENTERPRISE CONFIGURATION & CREDENTIAL MANAGEMENT
 # ==================================================================================================
@@ -97,6 +82,7 @@ class BroadcastStandards:
     fps: int = 24
     crf: int = 17
     preset: str = "fast"
+    tune: str = "film"
     audio_sample_rate: int = 48000
     audio_bitrate: str = "320k"
     ebu_lufs_target: float = -23.0
@@ -104,11 +90,13 @@ class BroadcastStandards:
 
 @dataclass
 class AIModels:
-    architect_model: str = "gemini-3.1-pro"
-    writer_model: str = "gemini-3.1-pro"
+    architect_model: str = "gemini-3.1-pro-preview"
+    writer_model: str = "gemini-3.1-pro-preview"
     tts_model: str = "gemini-3.8-flash-tts"
     tts_voice: str = "Charon"
     tts_temp: float = 0.15
+    post_tts_cooldown: int = 5
+    dramatic_pause_sec: float = 1.5
 
 @dataclass
 class PipelinePaths:
@@ -139,13 +127,11 @@ class MasterConfig:
 CONFIG = MasterConfig()
 CONFIG.paths.initialize()
 
-
 # ==================================================================================================
 # 3. ROBUST STATE MACHINE & FAULT TOLERANCE
 # ==================================================================================================
 
 class PipelineState:
-    """Manages the persistence layer to allow resume-on-failure execution."""
     def __init__(self, path: Path):
         self.path = path
         self.data = self._load()
@@ -174,16 +160,11 @@ class PipelineState:
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump(self.data, f, ensure_ascii=False, indent=2)
 
-
 # ==================================================================================================
-# 4. AI MULTI-AGENT ARCHITECTURE (RESEARCHER -> WRITER -> DIRECTOR)
+# 4. AI MULTI-AGENT ARCHITECTURE
 # ==================================================================================================
 
 class MultiAgentDirector:
-    """
-    Implements a multi-agent AI pipeline using Gemini Pro.
-    Rotates keys automatically on 429 Resource Exhausted.
-    """
     def __init__(self, keys: List[str]):
         self.keys = keys
         self.key_idx = 0
@@ -199,21 +180,34 @@ class MultiAgentDirector:
         self.client = self._get_client()
 
     def _robust_call(self, model: str, prompt: str, is_json: bool = False, config_kwargs: dict = None) -> Any:
-        cfg = types.GenerateContentConfig(**(config_kwargs or {}))
+        kwargs = config_kwargs or {}
         if is_json:
-            cfg.response_mime_type = "application/json"
+            kwargs["response_mime_type"] = "application/json"
             
+        # تعطيل فلاتر الأمان لضمان عدم حظر قضايا الجرائم والغموض (إلزامية للوثائقيات)
+        kwargs["safety_settings"] = [
+            types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
+            types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
+            types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
+            types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+        ]
+        
+        cfg = types.GenerateContentConfig(**kwargs)
         max_retries = len(self.keys) * 3
+        
         for attempt in range(max_retries):
             try:
                 res = self.client.models.generate_content(model=model, contents=prompt, config=cfg)
                 if is_json:
-                    clean = res.text.strip().replace("```json", "").replace("```", "").strip()
+                    clean = res.text.strip()
+                    match = re.search(r'\[.*\]', clean, re.DOTALL)
+                    if match:
+                        clean = match.group(0)
                     return json.loads(clean)
                 return res.text
             except Exception as e:
                 err = str(e)
-                log.debug(f"API Error: {err[:100]}")
+                log.error(f"API Error ({model} - Attempt {attempt+1}): {err[:250]}")
                 if "429" in err or "quota" in err.lower() or "503" in err:
                     self._rotate_key()
                     time.sleep(3)
@@ -223,11 +217,7 @@ class MultiAgentDirector:
         sys.exit(1)
 
     def orchestrate_script_generation(self, topic: str) -> List[Dict[str, Any]]:
-        """
-        Phase 1: Generates the strict 64-scene manifest.
-        Enforces Six-Act structure and Arabic phonetics natively.
-        """
-        log.info("Agent [Writer]: Constructing 16-Minute Narrative Architecture...")
+        log.info(f"Agent [Writer]: Constructing Narrative Architecture via {CONFIG.models.writer_model}...")
         sys_prompt = f"""
         أنت كبير مخرجي التحقيقات الوثائقيات في شبكات البث العالمية (Executive Documentary Director).
         الموضوع: "{topic}".
@@ -235,14 +225,10 @@ class MultiAgentDirector:
         المهمة:
         بناء سيناريو استقصائي من {CONFIG.min_scenes} إلى {CONFIG.max_scenes} مشهداً.
         
-        القيود الصارمة (Enterprise Constraints):
+        القيود الصارمة:
         1. كثافة السرد: كل مشهد يحتوي على نص من 35-45 كلمة مشكولة بالحركات بشكل كامل.
-        2. التعريب الصوتي: اكتب الأسماء الأجنبية صوتياً بالحروف العربية (مثال: 'جُون كِينِيدِي').
-        3. هيكل الفصول الستة: 
-           - افتتح بـ (Cold Open) صادم.
-           - تدرج في طرح الأدلة الجنائية والتقارير.
-           - اختم بسؤال مفتوح.
-        4. الحظر: لا تستخدم التشبيهات الرخيصة مثل "شبح الخوف"، "الأسطورة". اعتمد لغة تقريرية، محايدة، ومرعبة.
+        2. التعريب الصوتي: اكتب الأسماء الأجنبية صوتياً بالحروف العربية.
+        3. الحظر: لا تستخدم التشبيهات الرخيصة. اعتمد لغة تقريرية، محايدة، ومرعبة.
         
         المخرجات المطلوبة (JSON Array Only):
         [
@@ -256,18 +242,12 @@ class MultiAgentDirector:
         ]
         """
         script_data = self._robust_call(CONFIG.models.writer_model, sys_prompt, is_json=True)
-        
         if not isinstance(script_data, list) or len(script_data) < CONFIG.min_scenes:
             log.warning("Agent [Writer] failed to hit scene count. Re-orchestrating...")
             script_data = self._robust_call(CONFIG.models.writer_model, sys_prompt + "\nIMPORTANT: YOU MUST GENERATE AT LEAST 64 SCENES.", is_json=True)
-            
         return script_data
 
     def generate_theatrical_voice(self, text: str, output_wav: Path) -> None:
-        """
-        Phase 2: Voice Director Agent.
-        Injects precise persona cues into the TTS engine to ensure emotional resonance.
-        """
         cue = (
             "You are a master true-crime documentary narrator. Deliver this text with a chilling, "
             "authoritative, deep, and measured tone. Slow down for emphasis on facts. "
@@ -275,14 +255,26 @@ class MultiAgentDirector:
         )
         prompt = f"[DIRECTOR INSTRUCTION: {cue}]\n\n{text}"
         
-        cfg = {"response_modalities": ["AUDIO"], "temperature": CONFIG.models.tts_temp, 
-               "speech_config": types.SpeechConfig(voice_config=types.VoiceConfig(
-                   prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=CONFIG.models.tts_voice)))}
+        cfg = types.GenerateContentConfig(
+            response_modalities=["AUDIO"], 
+            temperature=CONFIG.models.tts_temp,
+            safety_settings=[
+                types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
+                types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
+                types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
+                types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+            ],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=CONFIG.models.tts_voice)
+                )
+            )
+        )
         
         max_retries = len(self.keys) * 2
         for attempt in range(max_retries):
             try:
-                res = self.client.models.generate_content(model=CONFIG.models.tts_model, contents=prompt, config=types.GenerateContentConfig(**cfg))
+                res = self.client.models.generate_content(model=CONFIG.models.tts_model, contents=prompt, config=cfg)
                 for part in res.candidates[0].content.parts:
                     if part.inline_data and part.inline_data.data:
                         raw = part.inline_data.data
@@ -292,37 +284,32 @@ class MultiAgentDirector:
                         time.sleep(CONFIG.models.post_tts_cooldown)
                         return
             except Exception as e:
-                if "429" in str(e) or "503" in str(e):
+                err = str(e)
+                log.error(f"TTS API Error (Attempt {attempt+1}): {err[:150]}")
+                if "429" in err or "503" in err:
                     self._rotate_key()
                     time.sleep(2)
+                else:
+                    time.sleep(5)
         log.error("Failed to generate TTS audio.")
         raise RuntimeError("TTS Generation Failure")
 
-
 # ==================================================================================================
-# 5. ASYNCHRONOUS MEDIA HARVESTER (HIGH-PERFORMANCE ARCHIVE FETCHING)
+# 5. ASYNCHRONOUS MEDIA HARVESTER
 # ==================================================================================================
 
 class AsyncArchiveHarvester:
-    """
-    Uses modern asynchronous patterns to fetch historical archives rapidly.
-    Falls back to procedurally generated Noir backdrops if needed.
-    """
     def __init__(self):
-        self.headers = {"User-Agent": "BroadcastPipeline/13.0 (research@broadcaster.internal)"}
+        self.headers = {"User-Agent": "BroadcastPipeline/13.2 (research@broadcaster.internal)"}
         
     def harvest_sync(self, query: str, output_path: Path) -> Tuple[bool, str]:
-        # Wrapper for pipeline sequential execution
         return asyncio.run(self._harvest_async(query, output_path))
 
     async def _harvest_async(self, query: str, output_path: Path) -> Tuple[bool, str]:
-        # Tries Wikimedia first, then Wikipedia
         success, attr = await self._search_wikimedia(query, output_path)
         if success: return True, attr
-        
         success, attr = await self._search_wikipedia(query, output_path)
         if success: return True, attr
-        
         return False, ""
 
     async def _search_wikimedia(self, query: str, output_path: Path) -> Tuple[bool, str]:
@@ -373,8 +360,6 @@ class AsyncArchiveHarvester:
             if res.status_code == 200 and len(res.content) > 15000:
                 tmp = output_path.with_suffix(".tmp")
                 with open(tmp, "wb") as f: f.write(res.content)
-                
-                # Apply FFmpeg Smart Blur
                 filter_chain = f"[0:v]scale={CONFIG.standards.width}:{CONFIG.standards.height}:force_original_aspect_ratio=increase,crop={CONFIG.standards.width}:{CONFIG.standards.height},boxblur=30:5[bg];[0:v]scale={CONFIG.standards.width}:{CONFIG.standards.height}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p"
                 cmd = ["ffmpeg", "-y", "-i", str(tmp), "-filter_complex", filter_chain, "-frames:v", "1", str(output_path)]
                 proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -386,20 +371,14 @@ class AsyncArchiveHarvester:
         return False
 
     def generate_procedural_backdrop(self, output_path: Path) -> None:
-        """Fallback to a rich cinematic noir backdrop."""
         cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=0x0a0c11:s={CONFIG.standards.width}x{CONFIG.standards.height}", "-frames:v", "1", str(output_path)]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
 
 # ==================================================================================================
 # 6. EBU R128 AUDIO MASTERING & PROCEDURAL FOLEY STUDIO
 # ==================================================================================================
 
 class AudioMasteringRack:
-    """
-    Broadcast-standard audio engineering.
-    Generates analog SFX mathematically and mixes them with sidechain ducking.
-    """
     def __init__(self):
         self.sfx = CONFIG.paths.sfx
         self.fx_snap = self.sfx / "snap.wav"
@@ -422,9 +401,6 @@ class AudioMasteringRack:
                 subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", lavfi, str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def master_scene_audio(self, voice_wav: Path, out_mp3: Path, is_primary: bool, idx: int, cut_sec: float) -> float:
-        """
-        Applies acompressor for voice consistency, adds Foley, and enforces Loudness Normalization.
-        """
         start_sfx = self.fx_snap if is_primary else (self.fx_type if idx % 2 == 0 else self.fx_radio)
         delay_ms = max(500, int(cut_sec * 1000))
 
@@ -450,14 +426,11 @@ class AudioMasteringRack:
         dur_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(out_mp3)]
         return float(subprocess.check_output(dur_cmd).decode().strip())
 
-
 # ==================================================================================================
 # 7. TYPOGRAPHY & BROADCAST SUBTITLES (LIBASS)
 # ==================================================================================================
 
 class SubtitleRenderer:
-    """Enterprise typography engine generating SubStation Alpha scripts."""
-    
     @staticmethod
     def _format_time(s: float) -> str:
         return f"{int(s//3600)}:{int((s%3600)//60):02d}:{s%60:05.2f}"
@@ -490,27 +463,20 @@ Dialogue: 1,0:00:00.00,{cls._format_time(duration)},MainSub,,0,0,0,,{text}
 """
         with open(out_ass, "w", encoding="utf-8") as f: f.write(ass_content)
 
-
 # ==================================================================================================
 # 8. CINEMATIC VIDEO COMPOSITOR & TRANSITION MATRIX
 # ==================================================================================================
 
 class VideoCompositor:
-    """
-    Advanced mathematical filtergraph builder for cinematic transitions.
-    Implements Flash Cuts, Forensic Split Screens, and Color Grading.
-    """
     @staticmethod
     def render_scene(img: Path, ass: Path, audio: Path, out_mp4: Path, dur: float, idx: int, is_forensic: bool, cut_sec: float) -> None:
         fps = CONFIG.standards.fps
         frames = max(1, int(dur * fps))
         ass_esc = str(ass.resolve().as_posix()).replace('\\', '/').replace(':', r'\:').replace("'", r"\'")
 
-        # Color Grading Logic
         cg = "eq=contrast=1.12:brightness=-0.02:saturation=0.85,vignette=PI/3.6"
 
         if is_forensic or (idx % 4 == 2):
-            # FORENSIC SPLIT SCREEN (With Crimson Laser)
             fc = (
                 f"[0:v]split=2[L][R];"
                 f"[L]zoompan=z='min(1.05, 1.0+0.0002*on)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s=960x1080:fps={fps}[vl];"
@@ -520,7 +486,6 @@ class VideoCompositor:
                 f"subtitles='{ass_esc}',fps={fps},settb=1/{fps},setpts=PTS-STARTPTS[v]"
             )
         elif idx % 3 == 0:
-            # CINEMATIC PAN WITH GLITCH EFFECT
             g_f = int(cut_sec * fps)
             fc = (
                 f"[0:v]zoompan=z='min(1.15, 1.05+0.0003*on)':x='min(iw-iw/zoom, (on/{frames})*(iw-iw/zoom))':y='ih/2-(ih/zoom/2)':d={frames}:s=1920x1080:fps={fps},"
@@ -528,7 +493,6 @@ class VideoCompositor:
                 f"{cg},subtitles='{ass_esc}',fps={fps},settb=1/{fps},setpts=PTS-STARTPTS[v]"
             )
         else:
-            # MULTI-SHOT FLASH PUNCH-IN
             f1 = int(cut_sec * fps)
             f2 = frames - f1
             fc = (
@@ -548,7 +512,6 @@ class VideoCompositor:
             "-t", str(dur), str(out_mp4)
         ]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-
 
 # ==================================================================================================
 # 9. CLOUD DISTRIBUTION ENGINE (GCP INTEGRATION)
@@ -596,7 +559,6 @@ class CloudPublisher:
             log.error(f"Drive Error: {e}")
             return None
 
-
 # ==================================================================================================
 # 10. ENTERPRISE PIPELINE ORCHESTRATOR
 # ==================================================================================================
@@ -612,10 +574,8 @@ class PipelineOrchestrator:
         start_time = datetime.now()
         log.info(f"▶ INITIATING ENTERPRISE PIPELINE. TOPIC: {CONFIG.topic}")
 
-        # PHASE 1: SCRIPT ARCHITECTURE
         manifest = self._get_or_create_manifest()
         
-        # PHASE 2: SCENE RENDER LOOP
         clips, durs = [], []
         total = len(manifest)
 
@@ -638,43 +598,36 @@ class PipelineOrchestrator:
 
             log.info(f"Processing Sequence [{i+1}/{total}]")
 
-            # 1. Harvest Media
             ok, src = self.harvester.harvest_sync(query, c_img)
             if not ok:
                 self.harvester.generate_procedural_backdrop(c_img)
                 src = "Historical Archive"
 
-            # 2. Voice Generation
             if not c_wav.exists() or c_wav.stat().st_size < 1000:
                 self.ai.generate_theatrical_voice(text, c_wav)
 
-            # 3. Audio Mastering & Ducking
             probe = subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(c_wav)])
             cut_s = float(probe.decode().strip()) * 0.42
             dur = self.audio.master_scene_audio(c_wav, c_mp3, cat == "PRIMARY_ARCHIVE", i, cut_s)
             durs.append(dur)
 
-            # 4. Typography
             SubtitleRenderer.generate_ass(text, cat, src, dur, c_ass)
 
-            # 5. Cinematic Compositing
             is_f = any(k in text for k in ["شفرة", "تحليل", "دليل", "مقارنة"]) or cat == "FORENSIC_ANALYSIS"
             VideoCompositor.render_scene(c_img, c_ass, c_mp3, c_mp4, dur, i, is_f, cut_s)
 
             clips.append(c_mp4)
             self.state.mark_done(i, dur)
 
-        # PHASE 3: MASTER SPLICING
         log.info("Splicing Master Reel...")
         txt_list = CONFIG.paths.base / "list.txt"
         with open(txt_list, "w", encoding="utf-8") as f:
             for c in clips: f.write(f"file '{c.resolve().as_posix()}'\n")
 
         out_name = f"Master_{''.join([c for c in CONFIG.topic[:15] if c.isalnum()]).strip()}_{int(time.time())}.mp4"
-        final_mp4 = CONFIG.base_build_dir / out_name
-        subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(txt_list), "-c", "copy", str(final_film_mp4)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        final_mp4 = CONFIG.paths.base / out_name
+        subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(txt_list), "-c", "copy", str(final_mp4)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
-        # PHASE 4: METADATA & PUBLISHING
         chapters = "الفصول الزمنية:\n00:00 - المقدمة\n"
         curr_t = 0.0
         last_t = ""
@@ -705,7 +658,6 @@ class PipelineOrchestrator:
         data = self.ai.orchestrate_script_generation(CONFIG.topic)
         with open(mf, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=2)
         return data
-
 
 if __name__ == "__main__":
     try:
