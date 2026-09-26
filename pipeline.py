@@ -90,8 +90,8 @@ class BroadcastStandards:
 
 @dataclass
 class AIModels:
-    architect_model: str = "gemini-3.1-pro-preview"
-    writer_model: str = "gemini-3.1-pro-preview"
+    architect_model: str = "gemini-pro-latest"
+    writer_model: str = "gemini-pro-latest"
     tts_model: str = "gemini-3.8-flash-tts"
     tts_voice: str = "Charon"
     tts_temp: float = 0.15
