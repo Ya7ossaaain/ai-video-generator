@@ -2,12 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V17.3 - Multi-Key)
+UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V17.4 - Anti-Silent Death)
 - السيناريو: حصرياً عبر وكيل Google Antigravity (agy CLI).
-- الصوت: يولد عبر Google AI Studio (Gemini TTS) مع نظام التبديل التلقائي للمفاتيح.
-- الوسائط: Pexels, Pixabay, Mapbox, Wikipedia, Freesound.
-- المونتاج: FFmpeg + Groq (لصناعة الترجمة).
-- النشر: YouTube + Google Drive.
+- الصوت: يولد عبر Google AI Studio (Gemini TTS) مع التدوير.
+- حماية ضد الموت الصامت: تم إضافة Timeouts صارمة وفحص لسلامة الملفات (Mapbox).
 ====================================================================================================
 """
 
@@ -72,7 +70,6 @@ class HybridConfig:
     topic = os.environ.get("VIDEO_TOPIC", "لغز اختفاء طائرة دي بي كوبر")
     paths = PipelinePaths()
     
-    # جلب جميع المفاتيح مفصولة بفاصلة وتحويلها إلى قائمة
     gemini_keys = [k.strip() for k in os.environ.get("GEMINI_API_KEY", "").split(",") if k.strip()]
     
     pexels = os.environ.get("PEXELS_API_KEY", "")
@@ -92,7 +89,7 @@ if not CONFIG.gemini_keys:
     sys.exit("🛑 حرج: لم يتم العثور على أي مفاتيح في GEMINI_API_KEY!")
 
 # ==================================================================================================
-# 3. العقل الهجين (Antigravity للسيناريو + AI Studio للصوت)
+# 3. العقل الهجين
 # ==================================================================================================
 class Hybrid_Director:
     def plan_documentary(self) -> List[Dict]:
@@ -124,38 +121,28 @@ class Hybrid_Director:
         
         for attempt in range(3):
             try:
-                log.info(f"جاري الطلب من Antigravity (المحاولة {attempt + 1}/3)...")
                 cmd = ["agy", "--model", "gemini-3.1-pro", "--effort", "high", "-p", prompt]
-                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-                
+                # إضافة Timeout لسطر الأوامر حتى لا يعلق
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=120)
                 clean = re.search(r'\[.*\]', result.stdout.strip(), re.DOTALL).group(0)
                 data = json.loads(clean)
-                
                 CONFIG.paths.manifest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-                log.info("✅ تم توليد السيناريو عبر Antigravity بنجاح!")
                 return data
-                
+            except subprocess.TimeoutExpired:
+                log.warning(f"⚠️ انتهى وقت انتظار Antigravity (المحاولة {attempt+1})")
             except subprocess.CalledProcessError as e:
-                log.warning(f"⚠️ فشل Antigravity في الاستجابة: {e.stderr}")
+                log.warning(f"⚠️ فشل Antigravity: {e.stderr}")
                 time.sleep(5)
             except Exception as e:
-                log.warning(f"⚠️ فشل في قراءة أو استخراج الرد: {e}")
+                log.warning(f"⚠️ خطأ: {e}")
                 time.sleep(5)
                 
-        sys.exit("🛑 فشل Antigravity نهائياً في توليد السيناريو بعد 3 محاولات.")
+        sys.exit("🛑 فشل Antigravity نهائياً في توليد السيناريو.")
 
     def generate_voice(self, text: str, out_wav: Path):
         prompt = f"[INSTRUCTION: Documentary narrator. Deep, chilling voice. Read normally.]\n\n{text}"
-        cfg = types.GenerateContentConfig(
-            response_modalities=["AUDIO"], 
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Charon")
-                )
-            )
-        )
+        cfg = types.GenerateContentConfig(response_modalities=["AUDIO"], speech_config=types.SpeechConfig(voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Charon"))))
         
-        # نظام تدوير المفاتيح (Key Rotation)
         total_keys = len(CONFIG.gemini_keys)
         for i, key in enumerate(CONFIG.gemini_keys):
             try:
@@ -163,27 +150,26 @@ class Hybrid_Director:
                 res = temp_client.models.generate_content(model="gemini-3.8-flash-tts", contents=prompt, config=cfg)
                 raw = res.candidates[0].content.parts[0].inline_data.data
                 out_wav.write_bytes(base64.b64decode(raw) if isinstance(raw, str) else raw)
-                return # تم توليد الصوت بنجاح، اخرج من الحلقة
+                return 
             except Exception as e:
-                log.warning(f"⚠️ فشل المفتاح ({i+1}/{total_keys}) - جاري التبديل للمفتاح التالي... | السبب المباشر: {str(e)[:100]}")
+                log.warning(f"⚠️ فشل المفتاح ({i+1}/{total_keys}) | السبب: {str(e)[:100]}")
                 time.sleep(2)
-                
-        log.error("❌ استنفدت جميع المفاتيح ولم نتمكن من توليد الصوت لهذا المشهد!")
+        log.error("❌ استنفدت جميع المفاتيح ولم نتمكن من توليد الصوت!")
 
 # ==================================================================================================
-# 4. محرك استدعاء الوسائط
+# 4. محرك استدعاء الوسائط (مع حماية ضد الملفات الفاسدة)
 # ==================================================================================================
 class MediaFetcher:
     def __init__(self):
-        self.h = {"User-Agent": "HybridPipeline/17.3"}
+        self.h = {"User-Agent": "HybridPipeline/17.4"}
 
     def get_pexels_video(self, query: str, out: Path) -> bool:
         if not CONFIG.pexels: return False
         try:
-            r = requests.get(f"https://api.pexels.com/videos/search?query={query}&orientation=landscape", headers={"Authorization": CONFIG.pexels}, timeout=10).json()
+            r = requests.get(f"https://api.pexels.com/videos/search?query={query}&orientation=landscape", headers={"Authorization": CONFIG.pexels}, timeout=15).json()
             if r.get("videos"):
                 url = sorted(r["videos"][0]["video_files"], key=lambda x: x.get("width", 0), reverse=True)[0]["link"]
-                out.write_bytes(requests.get(url, timeout=15).content)
+                out.write_bytes(requests.get(url, timeout=30).content)
                 return True
         except: pass
         return False
@@ -191,10 +177,10 @@ class MediaFetcher:
     def get_pixabay_video(self, query: str, out: Path) -> bool:
         if not CONFIG.pixabay: return False
         try:
-            r = requests.get(f"https://pixabay.com/api/videos/?key={CONFIG.pixabay}&q={query}", timeout=10).json()
+            r = requests.get(f"https://pixabay.com/api/videos/?key={CONFIG.pixabay}&q={query}", timeout=15).json()
             if int(r.get("totalHits", 0)) > 0:
                 url = r["hits"][0]["videos"]["large"]["url"]
-                out.write_bytes(requests.get(url, timeout=15).content)
+                out.write_bytes(requests.get(url, timeout=30).content)
                 return True
         except: pass
         return False
@@ -202,20 +188,23 @@ class MediaFetcher:
     def get_mapbox(self, query: str, out: Path) -> bool:
         if not CONFIG.mapbox: return False
         try:
+            # حماية Mapbox: التأكد من أن الرد هو صورة وليس ملف JSON يحمل خطأ (والذي سيجمد FFmpeg)
             url = f"https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/{query},14,0,0/1920x1080?access_token={CONFIG.mapbox}"
-            out.write_bytes(requests.get(url, timeout=10).content)
-            return True
+            res = requests.get(url, timeout=15)
+            if res.status_code == 200 and b"{" not in res.content[:10]:
+                out.write_bytes(res.content)
+                return True
         except: pass
         return False
 
     def get_wikipedia(self, query: str, out: Path) -> bool:
         try:
-            r = requests.get(f"https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch={query}&prop=pageimages&pithumbsize=1920&format=json", headers=self.h, timeout=10).json()
+            r = requests.get(f"https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch={query}&prop=pageimages&pithumbsize=1920&format=json", headers=self.h, timeout=15).json()
             pages = r.get("query", {}).get("pages", {})
             for _, p in pages.items():
                 img_url = p.get("thumbnail", {}).get("source")
                 if img_url and not img_url.endswith((".svg", ".webm")):
-                    out.write_bytes(requests.get(img_url, headers=self.h, timeout=15).content)
+                    out.write_bytes(requests.get(img_url, headers=self.h, timeout=20).content)
                     return True
         except: pass
         return False
@@ -223,10 +212,10 @@ class MediaFetcher:
     def get_freesound_foley(self, query: str, out: Path) -> bool:
         if not CONFIG.freesound or query.lower() == "none": return False
         try:
-            r = requests.get(f"https://freesound.org/apiv2/search/text/?query={query}&token={CONFIG.freesound}&fields=previews", timeout=10).json()
+            r = requests.get(f"https://freesound.org/apiv2/search/text/?query={query}&token={CONFIG.freesound}&fields=previews", timeout=15).json()
             if r.get("results"):
                 url = r["results"][0]["previews"]["preview-hq-mp3"]
-                out.write_bytes(requests.get(url, timeout=10).content)
+                out.write_bytes(requests.get(url, timeout=20).content)
                 return True
         except: pass
         return False
@@ -244,14 +233,18 @@ def groq_transcribe(audio_path: Path) -> List[Dict]:
     if not CONFIG.groq: return []
     try:
         with open(audio_path, "rb") as f:
+            # [الإصلاح الجذري]: إضافة timeout = 60 لتجنب الموت الصامت لسيرفر Groq
             res = requests.post(
                 "https://api.groq.com/openai/v1/audio/transcriptions", 
                 headers={"Authorization": f"Bearer {CONFIG.groq}"}, 
                 files={"file": (audio_path.name, f, "audio/mpeg")}, 
-                data={"model": "whisper-large-v3", "response_format": "verbose_json", "timestamp_granularities[]": "word"}
+                data={"model": "whisper-large-v3", "response_format": "verbose_json", "timestamp_granularities[]": "word"},
+                timeout=60
             )
         return res.json().get("words", [])
-    except: return []
+    except Exception as e:
+        log.warning(f"⚠️ فشل أو تأخر Groq في التفريغ: {e}")
+        return []
 
 def generate_ass(words_data: List[Dict], fallback_text: str, duration: float, out_ass: Path, badge: str):
     def ft(s: float) -> str: return f"{int(s//3600)}:{int((s%3600)//60):02d}:{s%60:05.2f}"
@@ -301,7 +294,12 @@ def render_scene(media: Path, is_video: bool, ass: Path, audio: Path, out_mp4: P
         media = media.with_suffix(".jpg") if media.suffix == ".png" else media
         fc = f"[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,zoompan=z='min(1.15, 1.05+0.0003*on)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={int(dur*fps)}:s=1920x1080,eq=contrast=1.12,vignette=PI/3.6,subtitles='{ass}',fps={fps}[v]"
         cmd = ["ffmpeg", "-y", "-loop", "1", "-i", str(media), "-i", str(audio), "-filter_complex", fc, "-map", "[v]", "-map", "1:a", "-c:v", "libx264", "-c:a", "aac", "-shortest", str(out_mp4)]
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    
+    # إضافة Timeout للمونتاج لتجنب تعليق FFmpeg
+    try:
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+    except subprocess.TimeoutExpired:
+        log.error("⚠️ FFmpeg استغرق وقتاً طويلاً جداً! تم تخطي رندر هذا المشهد.")
 
 # ==================================================================================================
 # 6. النشر والأرشفة السحابية
@@ -337,7 +335,7 @@ def upload_youtube(vid: Path, title: str):
 # ==================================================================================================
 def main():
     start = datetime.now()
-    log.info(f"▶ بدء محرك الإنتاج الهجين V17.3 | القضية: {CONFIG.topic}")
+    log.info(f"▶ بدء محرك الإنتاج الهجين V17.4 | القضية: {CONFIG.topic}")
     
     director = Hybrid_Director()
     fetcher = MediaFetcher()
