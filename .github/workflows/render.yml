@@ -24,7 +24,7 @@ jobs:
       - name: ⚙️ تثبيت محرك المونتاج (FFmpeg) والخطوط
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-noto-arabic fonts-dejavu
+          sudo apt-get install -y ffmpeg fonts-noto fonts-dejavu
 
       - name: 📦 تثبيت مكتبات الذكاء الاصطناعي والميديا
         run: |
