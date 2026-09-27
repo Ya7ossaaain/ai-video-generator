@@ -130,8 +130,8 @@ class Hybrid_Director:
         for attempt in range(3):
             try:
                 log.info(f"جاري الطلب من Antigravity (المحاولة {attempt + 1}/3)...")
-                # إرسال الطلب لسطر أوامر agy
-                cmd = ["agy", "ask", "--model", "gemini-3.1-pro", prompt]
+                # إرسال الطلب لسطر أوامر agy بدون كلمة ask ومع استخدام -p
+                cmd = ["agy", "--model", "gemini-3.1-pro", "-p", prompt]
                 result = subprocess.run(cmd, capture_output=True, text=True, check=True)
                 
                 # استخراج JSON من رد الوكيل
