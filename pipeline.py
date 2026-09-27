@@ -2,9 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V17.1)
-- السيناريو: يولد عبر وكيل Google Antigravity (agy CLI) لتخطي قيود الحصص واستغلال Gemini 3.1 Pro.
+UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V17.2)
+- السيناريو: حصرياً عبر وكيل Google Antigravity (agy CLI) - لا يوجد أي بديل لـ AI Studio.
 - الصوت: يولد عبر Google AI Studio (Gemini TTS).
+- الوسائط: Pexels, Pixabay, Mapbox, Wikipedia, Freesound.
+- المونتاج: FFmpeg + Groq (لصناعة الترجمة).
+- النشر: YouTube + Google Drive.
 ====================================================================================================
 """
 
@@ -54,7 +57,7 @@ def setup_logger() -> logging.Logger:
 log = setup_logger()
 
 # ==================================================================================================
-# 2. الإعدادات والمسارات
+# 2. الإعدادات والمسارات (جلب المفاتيح من GitHub Secrets)
 # ==================================================================================================
 @dataclass
 class PipelinePaths:
@@ -69,7 +72,7 @@ class HybridConfig:
     topic = os.environ.get("VIDEO_TOPIC", "لغز اختفاء طائرة دي بي كوبر")
     paths = PipelinePaths()
     
-    # مفتاح استوديو الذكاء الاصطناعي (يُستخدم للصوت فقط الآن)
+    # مفتاح استوديو الذكاء الاصطناعي (يُستخدم للصوت فقط)
     gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
     
     pexels = os.environ.get("PEXELS_API_KEY", "")
@@ -86,14 +89,14 @@ CONFIG = HybridConfig()
 CONFIG.paths.initialize()
 
 if not CONFIG.gemini_key:
-    sys.exit("🛑 حرج: مفتاح GEMINI_API_KEY مفقود!")
+    sys.exit("🛑 حرج: مفتاح GEMINI_API_KEY مفقود من البيئة!")
 
 # ==================================================================================================
 # 3. العقل الهجين (Antigravity للسيناريو + AI Studio للصوت)
 # ==================================================================================================
 class Hybrid_Director:
     def __init__(self):
-        # عميل AI Studio يُستخدم حصرياً لدالة توليد الصوت (TTS)
+        # عميل AI Studio يُستخدم حصرياً لتوليد الصوت
         self.audio_client = genai.Client(api_key=CONFIG.gemini_key)
 
     def plan_documentary(self) -> List[Dict]:
@@ -101,7 +104,7 @@ class Hybrid_Director:
             log.info("استعادة خطة السيناريو من الملف المحلي...")
             return json.loads(CONFIG.paths.manifest.read_text(encoding="utf-8"))
 
-        log.info(f"تخطيط الوثائقي عبر وكيل Google Antigravity | الموضوع: {CONFIG.topic}")
+        log.info(f"تخطيط الوثائقي حصرياً عبر وكيل Google Antigravity | الموضوع: {CONFIG.topic}")
         
         prompt = f"""
         أنت كبير مخرجي الوثائقيات الجنائية. موضوعنا هو: "{CONFIG.topic}".
@@ -123,28 +126,33 @@ class Hybrid_Director:
         ]
         """
         
-        try:
-            # توجيه الطلب إلى أداة سطر أوامر Antigravity (agy) بدلاً من AI Studio
-            # يتم استدعاء النموذج بصلاحيات البيئة مباشرة لتخطي Rate Limits
-            cmd = ["agy", "ask", "--model", "gemini-3.1-pro", prompt]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            
-            # استخراج مصفوفة JSON من رد الوكيل
-            clean = re.search(r'\[.*\]', result.stdout.strip(), re.DOTALL).group(0)
-            data = json.loads(clean)
-            
-            CONFIG.paths.manifest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-            log.info("✅ تم توليد السيناريو عبر Antigravity بنجاح!")
-            return data
-            
-        except subprocess.CalledProcessError as e:
-            sys.exit(f"🛑 فشل Antigravity في الاستجابة. تأكد من تثبيت أداة `agy`: {e.stderr}")
-        except Exception as e:
-            sys.exit(f"🛑 خطأ في معالجة مخرجات Antigravity: {e}")
+        # نظام المحاولات الذاتي (3 مرات) لـ Antigravity دون الانتقال لـ AI Studio
+        for attempt in range(3):
+            try:
+                log.info(f"جاري الطلب من Antigravity (المحاولة {attempt + 1}/3)...")
+                # إرسال الطلب لسطر أوامر agy
+                cmd = ["agy", "ask", "--model", "gemini-3.1-pro", prompt]
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                
+                # استخراج JSON من رد الوكيل
+                clean = re.search(r'\[.*\]', result.stdout.strip(), re.DOTALL).group(0)
+                data = json.loads(clean)
+                
+                CONFIG.paths.manifest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                log.info("✅ تم توليد السيناريو عبر Antigravity بنجاح!")
+                return data
+                
+            except subprocess.CalledProcessError as e:
+                log.warning(f"⚠️ فشل Antigravity في الاستجابة: {e.stderr}")
+                time.sleep(5)
+            except Exception as e:
+                log.warning(f"⚠️ فشل في قراءة أو استخراج الرد: {e}")
+                time.sleep(5)
+                
+        # إيقاف السكربت بالكامل إذا فشل Antigravity 3 مرات
+        sys.exit("🛑 فشل Antigravity نهائياً في توليد السيناريو بعد 3 محاولات. (لن يتم استخدام AI Studio كبديل).")
 
     def generate_voice(self, text: str, out_wav: Path):
-        # لم يتم تغيير هذه الدالة - لا تزال تستخدم AI Studio
         prompt = f"[INSTRUCTION: Documentary narrator. Deep, chilling voice. Read normally.]\n\n{text}"
         cfg = types.GenerateContentConfig(
             response_modalities=["AUDIO"], 
@@ -162,11 +170,11 @@ class Hybrid_Director:
             log.error(f"فشل توليد الصوت للمشهد: {e}")
 
 # ==================================================================================================
-# 4. محرك استدعاء الوسائط 
+# 4. محرك استدعاء الوسائط (الفيديو، الخرائط، الصور، المؤثرات الصوتية)
 # ==================================================================================================
 class MediaFetcher:
     def __init__(self):
-        self.h = {"User-Agent": "HybridPipeline/17.1"}
+        self.h = {"User-Agent": "HybridPipeline/17.2"}
 
     def get_pexels_video(self, query: str, out: Path) -> bool:
         if not CONFIG.pexels: return False
@@ -229,7 +237,7 @@ class MediaFetcher:
         canvas.save(out, "JPEG")
 
 # ==================================================================================================
-# 5. المزامنة والمونتاج (FFmpeg)
+# 5. المزامنة والتفريغ الصوتي والمونتاج (FFmpeg & Groq)
 # ==================================================================================================
 def groq_transcribe(audio_path: Path) -> List[Dict]:
     if not CONFIG.groq: return []
@@ -295,7 +303,7 @@ def render_scene(media: Path, is_video: bool, ass: Path, audio: Path, out_mp4: P
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 # ==================================================================================================
-# 6. النشر والأرشفة (YouTube & Drive)
+# 6. النشر والأرشفة السحابية (YouTube & Google Drive)
 # ==================================================================================================
 def upload_drive(vid: Path):
     if not (CONFIG.yt_id and CONFIG.drive_token): return
@@ -324,24 +332,31 @@ def upload_youtube(vid: Path, title: str):
     except Exception as e: log.error(f"فشل الرفع ليوتيوب: {e}")
 
 # ==================================================================================================
-# 7. وحدة التحكم المركزية
+# 7. وحدة التحكم المركزية (Main Engine Flow)
 # ==================================================================================================
 def main():
     start = datetime.now()
-    log.info(f"▶ بدء محرك الإنتاج الهجين V17.1 | القضية: {CONFIG.topic}")
+    log.info(f"▶ بدء محرك الإنتاج الهجين V17.2 | القضية: {CONFIG.topic}")
     
     director = Hybrid_Director()
     fetcher = MediaFetcher()
+    
+    # 1. استدعاء السيناريو
     script = director.plan_documentary()
     clips = []
 
+    # 2. بناء المشاهد
     for i, s in enumerate(script):
         typ, q, foley = s.get("media_type", "WIKIPEDIA"), s.get("search_query", ""), s.get("foley_type", "none")
         txt = s.get("narration", "")
         pfx = CONFIG.paths.cache / f"s_{i:03d}"
         c_mp4, c_wav, c_foley, c_mp3, c_ass = pfx.with_suffix(".mp4"), pfx.with_suffix(".wav"), pfx.with_suffix("_foley.mp3"), pfx.with_suffix(".mp3"), pfx.with_suffix(".ass")
         
-        if c_mp4.exists() and c_mp4.stat().st_size > 50000: clips.append(c_mp4); continue
+        # تخطي المشاهد المبنية مسبقاً (Cache)
+        if c_mp4.exists() and c_mp4.stat().st_size > 50000: 
+            clips.append(c_mp4)
+            continue
+            
         log.info(f"المشهد {i+1} | الأداة: {typ} | المؤثر: {foley}")
 
         director.generate_voice(txt, c_wav)
@@ -375,11 +390,14 @@ def main():
     txt_list = CONFIG.paths.base / "list.txt"
     txt_list.write_text("\n".join(f"file '{c.resolve().as_posix()}'" for c in clips), encoding="utf-8")
     
+    # 3. دمج المقاطع
     final_vid = CONFIG.paths.base / f"MasterDoc_{int(time.time())}.mp4"
     subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(txt_list), "-c", "copy", str(final_vid)], stdout=subprocess.DEVNULL)
     
+    # 4. الرفع والنشر
     upload_drive(final_vid)
     upload_youtube(final_vid, CONFIG.topic)
+    
     log.info(f"✔ اكتمل الفيلم بنجاح! الوقت المستغرق: {datetime.now() - start}")
 
 if __name__ == "__main__": 
