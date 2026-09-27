@@ -1,56 +1,72 @@
-name: Enterprise Documentary Pipeline
+name: 🎬 The Mastermind - Hybrid Engine
 
 on:
   workflow_dispatch:
     inputs:
       topic:
-        description: 'اكتب عنوان أو موضوع الوثائقي هنا (مثال: لغز اختفاء طائرة دي بي كوبر):'
+        description: 'موضوع الفيلم الوثائقي (اكتب القضية أو اللغز هنا)'
         required: true
-        default: 'تحقيق استقصائي: لغز القاتل زودياك وحل الشفرة بعد نصف قرن'
-        type: string
+        default: 'لغز اختفاء طائرة دي بي كوبر'
 
 jobs:
-  production-engine:
+  build-documentary:
     runs-on: ubuntu-latest
-    timeout-minutes: 360 # السماح بالتشغيل حتى 6 ساعات لحماية الرندرة المعقدة من الانقطاع
-
+    
     steps:
-      - name: استدعاء مستودع المشروع
+      - name: 📥 جلب ملفات المستودع
         uses: actions/checkout@v4
 
-      - name: إعداد بيئة بايثون 3.11
+      - name: 🐍 تجهيز بيئة Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          # تم حذف سطر الكاش نهائياً من هنا لتفادي خطأ requirements.txt
 
-      - name: تثبيت محرك FFmpeg والخطوط التلفزيونية
+      - name: ⚙️ تثبيت محرك المونتاج (FFmpeg) والخطوط
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-noto-core fonts-dejavu-core fontconfig
-          sudo fc-cache -fv
+          sudo apt-get install -y ffmpeg fonts-noto-arabic fonts-dejavu
 
-      - name: تثبيت حزم الذكاء الاصطناعي ومكتبات السحابة
+      - name: 📦 تثبيت مكتبات الذكاء الاصطناعي والميديا
         run: |
           python -m pip install --upgrade pip
-          pip install google-genai google-api-python-client google-auth requests
+          pip install requests pillow arabic-reshaper python-bidi yt-dlp
+          pip install google-genai
+          pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
-      - name: تشغيل محرك الإنتاج والمونتاج (Master Director)
+      - name: 🚀 تثبيت وكيل Google Antigravity (agy)
+        run: |
+          curl -fsSL https://antigravity.google/cli/install.sh | bash
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: 🔐 زرع مفاتيح تسجيل الدخول (Pro Authentication)
+        run: |
+          # إنشاء المجلد المخفي الذي تبحث فيه الأداة عن الأسرار
+          mkdir -p ~/.gemini/antigravity-cli/
+          # زرع التوكن السري الذي استخرجته من Termux
+          echo '${{ secrets.AGY_CREDENTIALS }}' > ~/.gemini/antigravity-cli/antigravity-oauth-token
+          # تأمين الملف بصلاحيات القراءة فقط
+          chmod 600 ~/.gemini/antigravity-cli/antigravity-oauth-token
+
+      - name: 🎬 إطلاق المخرج الهجين (Antigravity + AI Studio)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          MAPBOX_API_KEY: ${{ secrets.MAPBOX_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           DRIVE_REFRESH_TOKEN: ${{ secrets.DRIVE_REFRESH_TOKEN }}
           VIDEO_TOPIC: ${{ inputs.topic }}
-        run: python pipeline.py
+        run: |
+          python pipeline.py
 
-      - name: أرشفة الفيلم المكتمل وملفات الاسترداد (Artifacts Vault)
-        if: always()
+      - name: 💾 حفظ نسخة احتياطية للتحميل المباشر (Artifacts)
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: enterprise-master-vault
-          path: |
-            output_build/*.mp4
-            output_build/*.json
-          retention-days: 5
+          name: Master-Documentary-Vault
+          path: output_build/*.mp4
+          retention-days: 3
