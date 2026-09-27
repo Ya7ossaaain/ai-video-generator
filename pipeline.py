@@ -350,7 +350,13 @@ def main():
         typ, q, foley = s.get("media_type", "WIKIPEDIA"), s.get("search_query", ""), s.get("foley_type", "none")
         txt = s.get("narration", "")
         pfx = CONFIG.paths.cache / f"s_{i:03d}"
-        c_mp4, c_wav, c_foley, c_mp3, c_ass = pfx.with_suffix(".mp4"), pfx.with_suffix(".wav"), pfx.with_suffix("_foley.mp3"), pfx.with_suffix(".mp3"), pfx.with_suffix(".ass")
+        
+        # [الإصلاح]: تم تعديل بناء مسار المؤثرات الصوتية ليكون صحيحاً برمجياً
+        c_mp4 = pfx.with_suffix(".mp4")
+        c_wav = pfx.with_suffix(".wav")
+        c_foley = Path(f"{pfx}_foley.mp3") 
+        c_mp3 = pfx.with_suffix(".mp3")
+        c_ass = pfx.with_suffix(".ass")
         
         # تخطي المشاهد المبنية مسبقاً (Cache)
         if c_mp4.exists() and c_mp4.stat().st_size > 50000: 
