@@ -2,10 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V22.6 - Absolute Perfection)
-- لا توجد خطة بديلة: حلقة بحث لا نهائية بين (Pexels, Pixabay, Wiki) حتى يقبل المراجع المشهد.
-- الناقد الناطق: طباعة ردود المراجع الفوري (Raw Output) لتشاهد أسباب الرفض والقبول فوراً.
-- المراجع النهائي يشاهد الفيلم: تقييم فيديو MP4 المدمج بالكامل بصوت وصورة لتحليل الأخطاء وإصلاح الكود.
+UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V22.7 - The Official SDK)
+- المراجع البصري والنهائي: تم الانتقال إلى google.antigravity SDK الرسمي للتعامل مع الوسائط.
+- إرفاق الوسائط: استخدام Image.from_file و Video.from_file لإرسال الوسائط كـ Multimodal Inputs حقيقية.
+- المخرج النصي: الحفاظ على أداة agy (CLI) لمهام كتابة السيناريو النصية فقط.
+- الدقة والشفافية: طباعة قرارات Antigravity الخام واستخدام JSON دقيق.
+- حلقة البحث: لا توجد خطة بديلة، النظام سيبحث بلا توقف حتى يرضى المخرج.
 ====================================================================================================
 """
 
@@ -17,19 +19,29 @@ import re
 import logging
 import subprocess
 import base64
+import asyncio
 from pathlib import Path
 from typing import List, Dict
 from datetime import datetime
 
 import requests
-from PIL import Image, ImageDraw
+from PIL import Image as PILImage, ImageDraw
 import arabic_reshaper
 from bidi.algorithm import get_display
+
+# TTS & Cloud APIs
 from google import genai
 from google.genai import types
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+
+# Antigravity Official SDK
+try:
+    from google.antigravity import Agent, LocalAgentConfig
+    from google.antigravity.media import Image as AgImage, Video as AgVideo, Audio as AgAudio
+except ImportError:
+    sys.exit("🛑 حرج: حزمة google-antigravity غير مثبتة. يرجى تنفيذ: pip install google-antigravity")
 
 # ==================================================================================================
 # 1. إعدادات النظام وتوثيق السجلات
@@ -78,13 +90,14 @@ CONFIG = HybridConfig()
 for p in [CONFIG.paths.base, CONFIG.paths.cache]: p.mkdir(parents=True, exist_ok=True)
 
 # ==================================================================================================
-# 3. العقل المدبر والمراجع الفوري والمراجع النهائي
+# 3. العقل المدبر (Antigravity CLI + SDK)
 # ==================================================================================================
 class Hybrid_Director:
     def plan_documentary(self) -> List[Dict]:
+        """استخدام agy CLI للمهام النصية البحتة (كتابة السيناريو)"""
         if CONFIG.paths.manifest.exists(): return json.loads(CONFIG.paths.manifest.read_text(encoding="utf-8"))
 
-        log.info(f"كتابة السيناريو (gemini-3.1-pro-high) | القضية: {CONFIG.topic}")
+        log.info(f"كتابة السيناريو (agy CLI: gemini-3.1-pro) | القضية: {CONFIG.topic}")
         prompt = f"""أنت كبير المخرجين. قضيتنا: "{CONFIG.topic}".
         قم ببناء سيناريو ضخم (40-50 مشهداً، كل مشهد 60-80 كلمة).
         استخدم PEXELS, PIXABAY, WIKIPEDIA.
@@ -92,8 +105,13 @@ class Hybrid_Director:
         
         for _ in range(3):
             try:
-                result = self.run_antigravity("gemini-3.1-pro-high", "high", prompt)
-                match = re.search(r'\[.*\]', result, re.DOTALL)
+                cmd = ["agy", "--model", "gemini-3.1-pro", "--effort", "high", "--dangerously-skip-permissions", "-p", prompt]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+                if result.returncode != 0:
+                    log.warning(f"Agy Error: {result.stderr.strip()}")
+                    continue
+                    
+                match = re.search(r'\[.*\]', result.stdout.strip(), re.DOTALL)
                 if match:
                     data = json.loads(match.group(0))
                     CONFIG.paths.manifest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -101,59 +119,59 @@ class Hybrid_Director:
             except Exception as e: log.warning(f"⚠️ خطأ السيناريو: {e}"); time.sleep(5)
         sys.exit("🛑 فشل كتابة السيناريو.")
 
-    def run_antigravity(self, model: str, effort: str, prompt: str, media_path: Path = None, timeout: int = 180) -> str:
-        """تشغيل agy بتمرير مباشر للملفات المدعومة (MP4, JPG)"""
-        cmd = [
-            "agy", 
-            "--model", model, 
-            "--effort", effort, 
-            "--dangerously-skip-permissions", 
-            "-p", prompt
-        ]
+    async def _async_evaluate_scout(self, media_path: Path, narration: str, source: str) -> str:
+        """القلب النابض للمراجع الفوري: استخدام SDK لإرفاق الوسائط والمحادثة"""
+        config = LocalAgentConfig(model="gemini-3.6-flash", effort="high")
+        agent = Agent(config=config)
         
-        if media_path and media_path.exists():
-            cmd.append(str(media_path.resolve()))
-            
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        if result.returncode != 0:
-            log.warning(f"Agy Error: {result.stderr.strip()}")
-        return result.stdout.strip()
+        prompt = f"""أنت مراجع بصري فوري لمشروع وثائقي تحقيقي بعنوان: "{CONFIG.topic}".
+مهمتك التأكد من التطابق المرئي للملف المرفق مع النص.
 
-    def evaluate_scene_with_scout(self, media_path: Path, narration: str, source: str) -> Dict:
-        """تقييم المشهد فورياً وطباعة تفكير الذكاء الاصطناعي الخام"""
-        log.info(f"👁️ المراجع الفوري يحلل لقطة من {source}...")
+نوع المصدر: {source}
+التعليق الصوتي المرافق للمشهد: "{narration}"
 
-        prompt = f"""أنت مراجع بصري صارم لفيلم وثائقي تحقيقي بعنوان: "{CONFIG.topic}".
-النص الصوتي الذي سيُقال في هذا المشهد: "{narration}"
+شاهد الوسيط المرفق بعناية. هل يتطابق مرئياً وحرفياً مع النص؟
+قواعد:
+1. اختر ACCEPT فقط إذا كان المحتوى مرتبطاً ارتباطاً مباشراً.
+2. إذا كان التطابق غير مؤكد، اختر REJECT.
+3. اشرح تبريرك بدقة (reason).
+4. اقترح (new_query) بالإنجليزية إذا رفضت اللقطة.
 
-شاهد الوسيط المرفق (فيديو/صورة). هل يتطابق مرئياً وحرفياً مع النص وجو الجريمة؟
-- اشرح تفكيرك وأسبابك بوضوح باللغة العربية أولاً.
-- ثم أخرج قرارك في كود JSON فقط في النهاية.
-- اقترح (new_query) بالإنجليزية إذا رفضت اللقطة.
-
-مطلوب JSON بهذا الشكل:
+أخرج JSON فقط بالهيكلة التالية:
 {{
   "decision": "ACCEPT" أو "REJECT",
-  "relevance_score": 0-100,
-  "reason": "سببك بالعربية",
+  "score": 0.95,
+  "reason": "وصف مختصر يوضح التطابق بالعربية",
   "montage": "ZOOM_IN أو NORMAL أو BW",
-  "new_query": "creepy dark street"
+  "new_query": "كلمة بحث بديلة للبحث"
 }}"""
 
-        try:
-            result = self.run_antigravity("gemini-3.6-flash-high", "high", prompt, media_path, 120)
+        # إرفاق كائن الوسائط الحقيقي ليتلقاه النموذج
+        if media_path.suffix.lower() in [".mp4", ".mov", ".webm", ".avi"]:
+            media_input = AgVideo.from_file(str(media_path.resolve()))
+        else:
+            media_input = AgImage.from_file(str(media_path.resolve()))
             
-            # طباعة الرد الخام لكي لا يكون صامتاً أبداً!
-            log.info(f"🗣️ المراجع الفوري يقول:\n{result}")
+        return await agent.chat([prompt, media_input])
 
-            match = re.search(r'\{.*\}', result, re.DOTALL)
+    def evaluate_scene_with_scout(self, media_path: Path, narration: str, source: str) -> Dict:
+        """واجهة المراجع الفوري المتزامنة"""
+        log.info(f"👁️ المراجع الفوري (Antigravity SDK) يحلل الوسيط من {source}...")
+        try:
+            # تشغيل الـ Async Agent
+            result_text = asyncio.run(self._async_evaluate_scout(media_path, narration, source))
+            
+            # طباعة رأي المخرج الخام بشفافية
+            log.info(f"🗣️ المراجع الفوري يقول:\n{result_text}")
+
+            match = re.search(r'\{.*\}', result_text, re.DOTALL)
             if not match:
-                log.warning("⚠️ لم أتمكن من استخراج JSON من رد المراجع، سيتم اعتباره REJECT لتجربة مشهد آخر.")
+                log.warning("⚠️ فشل استخراج JSON، سيتم الرفض للبحث عن مشهد أوضح.")
                 return {"accepted": False, "montage": "ZOOM_IN", "new_query": ""}
                 
             data = json.loads(match.group(0))
-            score = int(data.get("relevance_score", 0))
-            accepted = (data.get("decision") == "ACCEPT" and score >= 70)
+            score = float(data.get("score", 0.0))
+            accepted = (data.get("decision") == "ACCEPT" and score >= 0.70)
 
             return {
                 "accepted": accepted,
@@ -162,42 +180,45 @@ class Hybrid_Director:
             }
 
         except Exception as e:
-            log.error(f"⚠️ انهيار المراجع الفوري أثناء التقييم: {e}")
+            log.error(f"⚠️ انهيار المراجع الفوري: {e}")
             return {"accepted": False, "montage": "ZOOM_IN", "new_query": ""}
 
-    def self_critique_and_recode(self, final_video: Path) -> bool:
-        """يراجع الفيديو النهائي كاملاً (صوت وصورة) ويصلح الكود إن لزم الأمر"""
-        log.info(f"🧠 المراجع النهائي يشاهد الفيلم الكامل ({final_video.name}) للتحليل الشامل...")
-        logs = Path("production_logs.txt").read_text()[-2500:] if Path("production_logs.txt").exists() else "No logs"
+    async def _async_critique(self, final_video: Path, logs: str) -> str:
+        """تشغيل المراجع النهائي عبر الـ SDK لمشاهدة الفيديو المدمج"""
+        config = LocalAgentConfig(model="gemini-3.1-pro", effort="high")
+        agent = Agent(config=config)
         
-        prompt = f"""أنت الذكاء الاصطناعي المؤسس (Gemini Pro).
-إليك سجلات أخطاء الجلسة الحالية:
+        prompt = f"""أنت الذكاء الاصطناعي المؤسس والمراجع النهائي للفيلم.
+إليك سجلات النظام:
 {logs}
 
-شاهد الفيلم الوثائقي النهائي المرفق بصيغة MP4 واستمع للصوت.
-1. هل الفيديو والصوت متزامنان ويعملان بشكل سليم؟
-2. هل ظهرت أخطاء برمجية أدت إلى شاشات معطوبة أو انقطاع صوتي؟
+شاهد الفيلم الوثائقي النهائي المرفق (Video+Audio) بالكامل.
+1. هل الفيديو والصوت متزامنان؟
+2. هل ظهرت أخطاء برمجية أدت إلى شاشات معطوبة؟
 
-تحدث باللغة العربية واشرح رأيك في جودة الإنتاج.
-إذا كان هناك خلل برمجي جذري في هندسة الإنتاج يحتاج لإصلاح، فاكتب كود `pipeline.py` جديد بالكامل ومعدل داخل كتلة ```python .
-إذا كان الفيلم يعمل بكفاءة ولا يوجد ما يستدعي تعديل الكود، فاكتب في النهاية كلمة PERFECT فقط."""
+إذا كان هناك خلل برمجي يحتاج لإصلاح جذري، اكتب كود `pipeline.py` جديد داخل كتلة ```python .
+إذا كان الفيلم مثالياً، أجب بكلمة PERFECT فقط."""
+
+        media_input = AgVideo.from_file(str(final_video.resolve()))
+        return await agent.chat([prompt, media_input])
+
+    def self_critique_and_recode(self, final_video: Path) -> bool:
+        log.info(f"🧠 المراجع النهائي يشاهد الفيلم الكامل ({final_video.name}) عبر SDK...")
+        logs = Path("production_logs.txt").read_text()[-2500:] if Path("production_logs.txt").exists() else "No logs"
         
         try:
-            # تمرير الفيديو النهائي (mp4) للمراجع ليقرأه ويشاهده
-            result = self.run_antigravity("gemini-3.1-pro-high", "high", prompt, final_video, 900)
+            result_text = asyncio.run(self._async_critique(final_video, logs))
+            log.info(f"🗣️ المراجع النهائي يقول:\n{result_text}")
             
-            # طباعة رأي المراجع النهائي
-            log.info(f"🗣️ المراجع النهائي بعد مشاهدة الفيلم يقول:\n{result}")
-            
-            if "PERFECT" in result:
-                log.info("✅ المراجع النهائي فخور بالنتيجة واعتمد الكود الحالي.")
+            if "PERFECT" in result_text:
+                log.info("✅ المراجع النهائي فخور بالفيلم واعتمد الكود الحالي.")
                 return True
                 
-            code_match = re.search(r'```python(.*?)```', result, re.DOTALL)
+            code_match = re.search(r'```python(.*?)```', result_text, re.DOTALL)
             if code_match:
                 new_code = code_match.group(1).strip()
-                log.warning("🔄 تحذير: المراجع اكتشف خللاً وقام بتحديث الكود المصدري! جاري إعادة التشغيل...")
-                append_memory("الذكاء الاصطناعي شاهد الفيلم، وجد خللاً، فقام بتحديث كوده وأعاد التشغيل.")
+                log.warning("🔄 تحذير: المراجع اكتشف خللاً برمجياً وقام بتحديث نفسه! جاري إعادة التشغيل...")
+                append_memory("المراجع النهائي شاهد الفيلم وقام بإصلاح كود pipeline.py.")
                 Path(__file__).write_text(new_code, encoding="utf-8")
                 os.execv(sys.executable, ['python'] + sys.argv)
                 
@@ -207,6 +228,7 @@ class Hybrid_Director:
             return True
 
     def generate_voice(self, text: str, out_wav: Path):
+        """توليد الصوت باستخدام Google GenAI API (مخصص للـ TTS فقط)"""
         cfg = types.GenerateContentConfig(response_modalities=["AUDIO"], speech_config=types.SpeechConfig(voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Charon"))))
         
         for round_num in range(3):
@@ -237,21 +259,35 @@ class Hybrid_Director:
 # 4. محرك الوسائط والمونتاج والتصدير السحابي
 # ==================================================================================================
 class MediaFetcher:
-    def __init__(self): self.h = {"User-Agent": "HybridPipeline/22.6"}
+    def __init__(self): self.h = {"User-Agent": "HybridPipeline/22.7"}
     
     def fetch_media(self, source: str, query: str, out: Path, index: int) -> bool:
         try:
             if source == "PEXELS" and CONFIG.pexels:
-                r = requests.get(f"[https://api.pexels.com/videos/search?query=](https://api.pexels.com/videos/search?query=){query}&orientation=landscape", headers={"Authorization": CONFIG.pexels}).json()
-                if r.get("videos") and len(r["videos"]) > index: out.write_bytes(requests.get(sorted(r["videos"][index]["video_files"], key=lambda x: x.get("width", 0), reverse=True)[0]["link"]).content); return True
+                url = f"[https://api.pexels.com/videos/search?query=](https://api.pexels.com/videos/search?query=){query}&orientation=landscape"
+                r = requests.get(url, headers={"Authorization": CONFIG.pexels}).json()
+                if r.get("videos") and len(r["videos"]) > index: 
+                    out.write_bytes(requests.get(sorted(r["videos"][index]["video_files"], key=lambda x: x.get("width", 0), reverse=True)[0]["link"]).content)
+                    return True
             elif source == "PIXABAY" and CONFIG.pixabay:
-                r = requests.get(f"[https://pixabay.com/api/videos/?key=](https://pixabay.com/api/videos/?key=){CONFIG.pixabay}&q={query}").json()
-                if int(r.get("totalHits", 0)) > index: out.write_bytes(requests.get(r["hits"][index]["videos"]["large"]["url"]).content); return True
+                url = f"[https://pixabay.com/api/videos/?key=](https://pixabay.com/api/videos/?key=){CONFIG.pixabay}&q={query}"
+                r = requests.get(url).json()
+                if int(r.get("totalHits", 0)) > index: 
+                    out.write_bytes(requests.get(r["hits"][index]["videos"]["large"]["url"]).content)
+                    return True
             elif source == "WIKIPEDIA":
-                r = requests.get(f"[https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=](https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=){query}&prop=pageimages&pithumbsize=1920&format=json", headers=self.h).json()
+                url = f"[https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=](https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=){query}&prop=pageimages&pithumbsize=1920&format=json"
+                r = requests.get(url, headers=self.h).json()
                 pages = list(r.get("query", {}).get("pages", {}).values())
                 if pages and pages[index % len(pages)].get("thumbnail", {}).get("source"):
-                    out.write_bytes(requests.get(pages[index % len(pages)]["thumbnail"]["source"], headers=self.h).content); return True
+                    out.write_bytes(requests.get(pages[index % len(pages)]["thumbnail"]["source"], headers=self.h).content)
+                    return True
+            elif source == "FREESOUND" and CONFIG.freesound:
+                url = f"[https://freesound.org/apiv2/search/text/?query=](https://freesound.org/apiv2/search/text/?query=){query}&token={CONFIG.freesound}&fields=previews"
+                r = requests.get(url, timeout=15).json()
+                if r.get("results"): 
+                    out.write_bytes(requests.get(r["results"][0]["previews"]["preview-hq-mp3"], timeout=30).content)
+                    return True
         except: pass
         return False
 
@@ -294,7 +330,7 @@ def upload_youtube(vid: Path):
     try:
         yt = build("youtube", "v3", credentials=Credentials(None, refresh_token=CONFIG.yt_refresh, token_uri="[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)", client_id=CONFIG.yt_id, client_secret=CONFIG.yt_secret))
         body = {
-            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V22.6", "categoryId": "24"},
+            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V22.7 باستخدام Antigravity SDK", "categoryId": "24"},
             "status": {"privacyStatus": "private"}
         }
         req = yt.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(str(vid), chunksize=-1, resumable=True, mimetype="video/mp4"))
@@ -307,7 +343,7 @@ def upload_youtube(vid: Path):
 # ==================================================================================================
 def main():
     start_time = datetime.now()
-    log.info(f"▶ بدء محرك Skynet V22.6 (Absolute Perfection) | القضية: {CONFIG.topic}")
+    log.info(f"▶ بدء محرك Skynet V22.7 (The Antigravity SDK) | القضية: {CONFIG.topic}")
     
     director = Hybrid_Director()
     fetcher = MediaFetcher()
@@ -338,13 +374,11 @@ def main():
         montage_style = "NORMAL"
         current_q = original_q
         
-        # قائمة المصادر التي سيتم الدوران بينها بشكل لا نهائي حتى نجد اللقطة المناسبة
         sources_pool = ["PEXELS", "PIXABAY", "WIKIPEDIA"]
         attempt_counter = 0
 
-        # حلقة البحث اللانهائية (لا توجد شاشة سوداء بعد اليوم)
+        # حلقة البحث اللانهائية للبحث عن دليل بصري يرضي المخرج
         while not scene_approved:
-            # حماية من التعليق الأبدي إذا طال البحث جداً جداً في مشهد واحد
             if (datetime.now() - start_time).total_seconds() > 13500: break
                 
             current_source = sources_pool[attempt_counter % len(sources_pool)]
@@ -372,7 +406,7 @@ def main():
             render_scene(c_media, c_media.suffix == ".mp4", c_mp3, c_mp4, dur, montage_style)
             if c_mp4.exists(): clips.append(c_mp4)
 
-    # المرحلة النهائية: التصدير والنقد
+    # التصدير والنقد
     final_vid = CONFIG.paths.base / f"MasterDoc_{int(time.time())}.mp4"
     if clips:
         txt_list = CONFIG.paths.base / "video_list.txt"
@@ -382,7 +416,7 @@ def main():
         upload_drive(final_vid)
         upload_youtube(final_vid)
 
-    # المراجع النهائي يستلم الفيديو المدمج (صوت + صورة) ليتخذ قراره البرمجي
+    # المراجع النهائي يشاهد الفيلم
     if final_vid.exists():
         director.self_critique_and_recode(final_vid)
 
