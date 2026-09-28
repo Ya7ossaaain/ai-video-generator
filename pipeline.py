@@ -2,12 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V22.7 - The Official SDK)
-- المراجع البصري والنهائي: تم الانتقال إلى google.antigravity SDK الرسمي للتعامل مع الوسائط.
-- إرفاق الوسائط: استخدام Image.from_file و Video.from_file لإرسال الوسائط كـ Multimodal Inputs حقيقية.
-- المخرج النصي: الحفاظ على أداة agy (CLI) لمهام كتابة السيناريو النصية فقط.
-- الدقة والشفافية: طباعة قرارات Antigravity الخام واستخدام JSON دقيق.
-- حلقة البحث: لا توجد خطة بديلة، النظام سيبحث بلا توقف حتى يرضى المخرج.
+UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V22.8 - SDK Path Fix)
+- إصلاح الاستيراد: إزالة الفخ البرمجي (Silent Catching) الذي كان يعطي رسالة "الحزمة غير مثبتة" بالخطأ.
+- الاستكشاف الديناميكي: استدعاء فئات Video و Image ديناميكياً من Antigravity SDK لتجنب انهيار الاستيراد.
+- المراجع البصري والنهائي: استخدام Antigravity SDK للتعامل مع الوسائط المتعددة (MP4/JPG).
 ====================================================================================================
 """
 
@@ -37,11 +35,8 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 # Antigravity Official SDK
-try:
-    from google.antigravity import Agent, LocalAgentConfig
-    from google.antigravity.media import Image as AgImage, Video as AgVideo, Audio as AgAudio
-except ImportError:
-    sys.exit("🛑 حرج: حزمة google-antigravity غير مثبتة. يرجى تنفيذ: pip install google-antigravity")
+import google.antigravity as ag
+from google.antigravity import Agent, LocalAgentConfig
 
 # ==================================================================================================
 # 1. إعدادات النظام وتوثيق السجلات
@@ -72,7 +67,26 @@ def append_memory(summary: str):
     with open(MEMORY_FILE, "a", encoding="utf-8") as f: f.write(f"\n\n### [{now}]\n{summary}")
 
 # ==================================================================================================
-# 2. المسارات والمفاتيح
+# 2. المستكشف الديناميكي لوسائط Antigravity
+# ==================================================================================================
+def load_ag_media(file_path: Path):
+    """يستكشف ويبني كائن الوسائط الصحيح حسب بنية حزمة Antigravity المثبتة"""
+    ext = file_path.suffix.lower()
+    path_str = str(file_path.resolve())
+    
+    if ext in [".mp4", ".mov", ".webm", ".avi"]:
+        if hasattr(ag, "Video"): return getattr(ag, "Video").from_file(path_str)
+        if hasattr(ag, "media") and hasattr(ag.media, "Video"): return getattr(ag.media, "Video").from_file(path_str)
+        if hasattr(ag, "from_file"): return getattr(ag, "from_file")(path_str)
+    else:
+        if hasattr(ag, "Image"): return getattr(ag, "Image").from_file(path_str)
+        if hasattr(ag, "media") and hasattr(ag.media, "Image"): return getattr(ag.media, "Image").from_file(path_str)
+        if hasattr(ag, "from_file"): return getattr(ag, "from_file")(path_str)
+        
+    raise RuntimeError("لم يتم العثور على فئة الوسائط (Image/Video) المناسبة في حزمة google.antigravity")
+
+# ==================================================================================================
+# 3. المسارات والمفاتيح
 # ==================================================================================================
 class HybridConfig:
     topic = os.environ.get("VIDEO_TOPIC", "لغز الجريمة الغامضة")
@@ -90,7 +104,7 @@ CONFIG = HybridConfig()
 for p in [CONFIG.paths.base, CONFIG.paths.cache]: p.mkdir(parents=True, exist_ok=True)
 
 # ==================================================================================================
-# 3. العقل المدبر (Antigravity CLI + SDK)
+# 4. العقل المدبر (Antigravity CLI + SDK)
 # ==================================================================================================
 class Hybrid_Director:
     def plan_documentary(self) -> List[Dict]:
@@ -120,7 +134,7 @@ class Hybrid_Director:
         sys.exit("🛑 فشل كتابة السيناريو.")
 
     async def _async_evaluate_scout(self, media_path: Path, narration: str, source: str) -> str:
-        """القلب النابض للمراجع الفوري: استخدام SDK لإرفاق الوسائط والمحادثة"""
+        """المراجع الفوري: استخدام SDK لإرفاق الوسائط والمحادثة"""
         config = LocalAgentConfig(model="gemini-3.6-flash", effort="high")
         agent = Agent(config=config)
         
@@ -146,22 +160,14 @@ class Hybrid_Director:
   "new_query": "كلمة بحث بديلة للبحث"
 }}"""
 
-        # إرفاق كائن الوسائط الحقيقي ليتلقاه النموذج
-        if media_path.suffix.lower() in [".mp4", ".mov", ".webm", ".avi"]:
-            media_input = AgVideo.from_file(str(media_path.resolve()))
-        else:
-            media_input = AgImage.from_file(str(media_path.resolve()))
-            
+        media_input = load_ag_media(media_path)
         return await agent.chat([prompt, media_input])
 
     def evaluate_scene_with_scout(self, media_path: Path, narration: str, source: str) -> Dict:
         """واجهة المراجع الفوري المتزامنة"""
         log.info(f"👁️ المراجع الفوري (Antigravity SDK) يحلل الوسيط من {source}...")
         try:
-            # تشغيل الـ Async Agent
             result_text = asyncio.run(self._async_evaluate_scout(media_path, narration, source))
-            
-            # طباعة رأي المخرج الخام بشفافية
             log.info(f"🗣️ المراجع الفوري يقول:\n{result_text}")
 
             match = re.search(r'\{.*\}', result_text, re.DOTALL)
@@ -199,7 +205,7 @@ class Hybrid_Director:
 إذا كان هناك خلل برمجي يحتاج لإصلاح جذري، اكتب كود `pipeline.py` جديد داخل كتلة ```python .
 إذا كان الفيلم مثالياً، أجب بكلمة PERFECT فقط."""
 
-        media_input = AgVideo.from_file(str(final_video.resolve()))
+        media_input = load_ag_media(final_video)
         return await agent.chat([prompt, media_input])
 
     def self_critique_and_recode(self, final_video: Path) -> bool:
@@ -256,10 +262,10 @@ class Hybrid_Director:
         log.error("❌ استنفدت جميع المفاتيح لتوليد الصوت!")
 
 # ==================================================================================================
-# 4. محرك الوسائط والمونتاج والتصدير السحابي
+# 5. محرك الوسائط والمونتاج والتصدير السحابي
 # ==================================================================================================
 class MediaFetcher:
-    def __init__(self): self.h = {"User-Agent": "HybridPipeline/22.7"}
+    def __init__(self): self.h = {"User-Agent": "HybridPipeline/22.8"}
     
     def fetch_media(self, source: str, query: str, out: Path, index: int) -> bool:
         try:
@@ -330,7 +336,7 @@ def upload_youtube(vid: Path):
     try:
         yt = build("youtube", "v3", credentials=Credentials(None, refresh_token=CONFIG.yt_refresh, token_uri="[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)", client_id=CONFIG.yt_id, client_secret=CONFIG.yt_secret))
         body = {
-            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V22.7 باستخدام Antigravity SDK", "categoryId": "24"},
+            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V22.8 باستخدام Antigravity SDK", "categoryId": "24"},
             "status": {"privacyStatus": "private"}
         }
         req = yt.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(str(vid), chunksize=-1, resumable=True, mimetype="video/mp4"))
@@ -339,11 +345,11 @@ def upload_youtube(vid: Path):
     except Exception as e: log.error(f"⚠️ فشل يوتيوب: {e}")
 
 # ==================================================================================================
-# 5. الدورة الرئيسية للمحرك (حلقة البحث اللانهائية)
+# 6. الدورة الرئيسية للمحرك (حلقة البحث اللانهائية)
 # ==================================================================================================
 def main():
     start_time = datetime.now()
-    log.info(f"▶ بدء محرك Skynet V22.7 (The Antigravity SDK) | القضية: {CONFIG.topic}")
+    log.info(f"▶ بدء محرك Skynet V22.8 (SDK Path Fix) | القضية: {CONFIG.topic}")
     
     director = Hybrid_Director()
     fetcher = MediaFetcher()
@@ -352,7 +358,6 @@ def main():
     clips = []
 
     for i, s in enumerate(script):
-        # إنهاء العمل إذا اقتربنا من حد 4 ساعات لحماية السيرفر من التعليق
         if (datetime.now() - start_time).total_seconds() > 13500: 
             log.warning("⏳ تم تجاوز الوقت المسموح، سيتم دمج ما تم إنجازه والتوقف لضمان الحفظ.")
             break 
@@ -377,7 +382,6 @@ def main():
         sources_pool = ["PEXELS", "PIXABAY", "WIKIPEDIA"]
         attempt_counter = 0
 
-        # حلقة البحث اللانهائية للبحث عن دليل بصري يرضي المخرج
         while not scene_approved:
             if (datetime.now() - start_time).total_seconds() > 13500: break
                 
@@ -406,7 +410,6 @@ def main():
             render_scene(c_media, c_media.suffix == ".mp4", c_mp3, c_mp4, dur, montage_style)
             if c_mp4.exists(): clips.append(c_mp4)
 
-    # التصدير والنقد
     final_vid = CONFIG.paths.base / f"MasterDoc_{int(time.time())}.mp4"
     if clips:
         txt_list = CONFIG.paths.base / "video_list.txt"
@@ -416,7 +419,6 @@ def main():
         upload_drive(final_vid)
         upload_youtube(final_vid)
 
-    # المراجع النهائي يشاهد الفيلم
     if final_vid.exists():
         director.self_critique_and_recode(final_vid)
 
