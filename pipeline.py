@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V22.10 - The Grand Finale)
-- المصادقة الرسمية: استخدام OAuth2 JSON لتسجيل دخول Antigravity CLI و SDK معاً.
-- السيناريو: يُدار عبر أداة agy CLI.
-- المراجعة البصرية والنهائية: تُدار عبر google.antigravity SDK (يستقبل الصور والـ MP4 كمدخلات حقيقية).
-- الصوت: يُدار عبر google.genai API (مخصص للصوتيات فقط).
+UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V22.12 - Multi-Source Fallback)
+- منع البحث بالعربي: فلترة صارمة لمنع إرسال أي أحرف عربية لمحركات البحث لضمان النتائج.
+- هندسة القفز (3x3): 3 محاولات Pexels ثم 3 Pixabay. و 3 محاولات Wiki ثم 3 Internet Archive.
+- تصحيح الروابط: تغليف استعلامات البحث بـ URL Encoding لضمان عدم تعطل الـ APIs.
+- استخدام SDK الرسمي: المراجعة البصرية والنهائية تُدار عبر google.antigravity للتحليل الحقيقي.
 ====================================================================================================
 """
 
@@ -19,6 +19,7 @@ import logging
 import subprocess
 import base64
 import asyncio
+import urllib.parse
 from pathlib import Path
 from typing import List, Dict
 from datetime import datetime
@@ -70,7 +71,7 @@ def append_memory(summary: str):
     with open(MEMORY_FILE, "a", encoding="utf-8") as f: f.write(f"\n\n### [{now}]\n{summary}")
 
 # ==================================================================================================
-# 2. المستكشف الديناميكي لوسائط Antigravity
+# 2. المستكشف الديناميكي لوسائط Antigravity وفلتر اللغة
 # ==================================================================================================
 def load_ag_media(file_path: Path):
     ext = file_path.suffix.lower()
@@ -86,6 +87,14 @@ def load_ag_media(file_path: Path):
         if hasattr(ag, "from_file"): return getattr(ag, "from_file")(path_str)
         
     raise RuntimeError("لم يتم العثور على فئة الوسائط في حزمة google.antigravity")
+
+def enforce_english_query(query: str) -> str:
+    """إزالة أي حروف عربية من كلمة البحث لضمان توافقها مع الـ APIs"""
+    safe_q = re.sub(r'[\u0600-\u06FF]', '', query).strip()
+    # إذا مسحنا كل شيء (كان كله عربي)، نعطيه كلمة افتراضية إنجليزية
+    if not safe_q or len(safe_q) < 2:
+        safe_q = "mystery evidence"
+    return safe_q
 
 # ==================================================================================================
 # 3. المسارات والمفاتيح
@@ -110,13 +119,13 @@ for p in [CONFIG.paths.base, CONFIG.paths.cache]: p.mkdir(parents=True, exist_ok
 # ==================================================================================================
 class Hybrid_Director:
     def plan_documentary(self) -> List[Dict]:
-        """استخدام agy CLI للمهام النصية (السيناريو)"""
         if CONFIG.paths.manifest.exists(): return json.loads(CONFIG.paths.manifest.read_text(encoding="utf-8"))
 
         log.info(f"كتابة السيناريو (agy CLI: gemini-3.1-pro) | القضية: {CONFIG.topic}")
         prompt = f"""أنت كبير المخرجين. قضيتنا: "{CONFIG.topic}".
         قم ببناء سيناريو ضخم (40-50 مشهداً، كل مشهد 60-80 كلمة).
         استخدم PEXELS, PIXABAY, WIKIPEDIA.
+        تنبيه صارم: قيمة "search_query" يجب أن تكون باللغة الإنجليزية حصراً (ENGLISH ONLY) لضمان نجاح البحث.
         أخرج JSON Array فقط: [{{"scene_num": 1, "media_type": "PEXELS", "search_query": "dark street", "foley_type": "rain", "narration": "في ليلة..."}}]"""
         
         for _ in range(3):
@@ -137,7 +146,6 @@ class Hybrid_Director:
         sys.exit("🛑 فشل كتابة السيناريو.")
 
     async def _async_evaluate_scout(self, media_path: Path, narration: str, source: str) -> str:
-        """المراجع الفوري: استخدام SDK لإرفاق الصور/الفيديو ومناقشتها"""
         config = LocalAgentConfig(model="gemini-3.6-flash", effort="high")
         agent = Agent(config=config)
         
@@ -145,12 +153,12 @@ class Hybrid_Director:
 نوع المصدر: {source}
 التعليق الصوتي المرافق للمشهد: "{narration}"
 
-شاهد الوسيط المرفق بعناية (الصورة أو الفيديو الفعلي). هل يتطابق مرئياً وحرفياً مع النص؟
+شاهد الوسيط المرفق بعناية. هل يتطابق مرئياً وحرفياً مع النص؟
 قواعد:
 1. اختر ACCEPT فقط إذا كان المحتوى مرتبطاً ارتباطاً مباشراً.
 2. إذا كان التطابق غير مؤكد، اختر REJECT.
 3. اشرح تبريرك بدقة (reason).
-4. اقترح (new_query) بالإنجليزية إذا رفضت اللقطة.
+4. اقترح (new_query) بالإنجليزية حصراً إذا رفضت اللقطة.
 
 أخرج JSON فقط بالهيكلة التالية:
 {{
@@ -158,7 +166,7 @@ class Hybrid_Director:
   "score": 0.95,
   "reason": "وصف مختصر يوضح التطابق بالعربية",
   "montage": "ZOOM_IN أو NORMAL أو BW",
-  "new_query": "كلمة بحث بديلة للبحث"
+  "new_query": "English replacement query"
 }}"""
 
         media_input = load_ag_media(media_path)
@@ -190,7 +198,6 @@ class Hybrid_Director:
             return {"accepted": False, "montage": "ZOOM_IN", "new_query": ""}
 
     async def _async_critique(self, final_video: Path, logs: str) -> str:
-        """تشغيل المراجع النهائي عبر الـ SDK لمشاهدة الفيلم الوثائقي كاملاً"""
         config = LocalAgentConfig(model="gemini-3.1-pro", effort="high")
         agent = Agent(config=config)
         
@@ -234,7 +241,6 @@ class Hybrid_Director:
             return True
 
     def generate_voice(self, text: str, out_wav: Path):
-        """توليد الصوت باستخدام Google GenAI API (مخصص للصوت فقط)"""
         cfg = types.GenerateContentConfig(response_modalities=["AUDIO"], speech_config=types.SpeechConfig(voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Charon"))))
         
         for round_num in range(3):
@@ -262,39 +268,50 @@ class Hybrid_Director:
         log.error("❌ استنفدت جميع المفاتيح لتوليد الصوت!")
 
 # ==================================================================================================
-# 5. محرك الوسائط والمونتاج والتصدير السحابي
+# 5. محرك الوسائط (مع تحويل الروابط بأمان ودعم أرشيف الإنترنت)
 # ==================================================================================================
 class MediaFetcher:
-    def __init__(self): self.h = {"User-Agent": "HybridPipeline/22.10"}
+    def __init__(self): self.h = {"User-Agent": "HybridPipeline/22.12"}
     
     def fetch_media(self, source: str, query: str, out: Path, index: int) -> bool:
+        safe_query = urllib.parse.quote(query)
         try:
             if source == "PEXELS" and CONFIG.pexels:
-                url = f"[https://api.pexels.com/videos/search?query=](https://api.pexels.com/videos/search?query=){query}&orientation=landscape"
+                url = f"[https://api.pexels.com/videos/search?query=](https://api.pexels.com/videos/search?query=){safe_query}&orientation=landscape"
                 r = requests.get(url, headers={"Authorization": CONFIG.pexels}).json()
                 if r.get("videos") and len(r["videos"]) > index: 
                     out.write_bytes(requests.get(sorted(r["videos"][index]["video_files"], key=lambda x: x.get("width", 0), reverse=True)[0]["link"]).content)
                     return True
             elif source == "PIXABAY" and CONFIG.pixabay:
-                url = f"[https://pixabay.com/api/videos/?key=](https://pixabay.com/api/videos/?key=){CONFIG.pixabay}&q={query}"
+                url = f"[https://pixabay.com/api/videos/?key=](https://pixabay.com/api/videos/?key=){CONFIG.pixabay}&q={safe_query}"
                 r = requests.get(url).json()
                 if int(r.get("totalHits", 0)) > index: 
                     out.write_bytes(requests.get(r["hits"][index]["videos"]["large"]["url"]).content)
                     return True
             elif source == "WIKIPEDIA":
-                url = f"[https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=](https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=){query}&prop=pageimages&pithumbsize=1920&format=json"
+                url = f"[https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=](https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=){safe_query}&prop=pageimages&pithumbsize=1920&format=json"
                 r = requests.get(url, headers=self.h).json()
                 pages = list(r.get("query", {}).get("pages", {}).values())
                 if pages and pages[index % len(pages)].get("thumbnail", {}).get("source"):
                     out.write_bytes(requests.get(pages[index % len(pages)]["thumbnail"]["source"], headers=self.h).content)
                     return True
+            elif source == "ARCHIVE":
+                url = f"[https://archive.org/advancedsearch.php?q=](https://archive.org/advancedsearch.php?q=){safe_query}+AND+mediatype:image&fl[]=identifier&output=json&rows=10"
+                r = requests.get(url, headers=self.h).json()
+                docs = r.get("response", {}).get("docs", [])
+                if docs and len(docs) > index:
+                    identifier = docs[index]["identifier"]
+                    img_url = f"[https://archive.org/services/img/](https://archive.org/services/img/){identifier}"
+                    out.write_bytes(requests.get(img_url).content)
+                    return True
             elif source == "FREESOUND" and CONFIG.freesound:
-                url = f"[https://freesound.org/apiv2/search/text/?query=](https://freesound.org/apiv2/search/text/?query=){query}&token={CONFIG.freesound}&fields=previews"
+                url = f"[https://freesound.org/apiv2/search/text/?query=](https://freesound.org/apiv2/search/text/?query=){safe_query}&token={CONFIG.freesound}&fields=previews"
                 r = requests.get(url, timeout=15).json()
                 if r.get("results"): 
                     out.write_bytes(requests.get(r["results"][0]["previews"]["preview-hq-mp3"], timeout=30).content)
                     return True
-        except: pass
+        except Exception as e:
+            pass
         return False
 
 def process_audio(voice: Path, foley: Path, has_foley: bool, out: Path) -> float:
@@ -336,7 +353,7 @@ def upload_youtube(vid: Path):
     try:
         yt = build("youtube", "v3", credentials=Credentials(None, refresh_token=CONFIG.yt_refresh, token_uri="[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)", client_id=CONFIG.yt_id, client_secret=CONFIG.yt_secret))
         body = {
-            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V22.10 باستخدام Antigravity SDK", "categoryId": "24"},
+            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V22.12 باستخدام Antigravity SDK", "categoryId": "24"},
             "status": {"privacyStatus": "private"}
         }
         req = yt.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(str(vid), chunksize=-1, resumable=True, mimetype="video/mp4"))
@@ -345,11 +362,11 @@ def upload_youtube(vid: Path):
     except Exception as e: log.error(f"⚠️ فشل يوتيوب: {e}")
 
 # ==================================================================================================
-# 6. الدورة الرئيسية للمحرك (حلقة البحث اللانهائية)
+# 6. الدورة الرئيسية للمحرك (هندسة القفز الثلاثية)
 # ==================================================================================================
 def main():
     start_time = datetime.now()
-    log.info(f"▶ بدء محرك Skynet V22.10 (The Grand Finale) | القضية: {CONFIG.topic}")
+    log.info(f"▶ بدء محرك Skynet V22.12 (Multi-Source Fallback) | القضية: {CONFIG.topic}")
     
     director = Hybrid_Director()
     fetcher = MediaFetcher()
@@ -372,14 +389,18 @@ def main():
         if not c_wav.exists(): director.generate_voice(txt, c_wav)
         if not c_wav.exists(): continue
         
-        has_foley = fetcher.fetch_media("FREESOUND", foley, c_foley, 0) if foley != "none" else False
+        has_foley = fetcher.fetch_media("FREESOUND", enforce_english_query(foley), c_foley, 0) if foley != "none" else False
         dur = process_audio(c_wav, c_foley, has_foley, c_mp3)
 
         scene_approved = False
         montage_style = "NORMAL"
         current_q = original_q
         
-        sources_pool = ["PEXELS", "PIXABAY", "WIKIPEDIA"]
+        # إعداد مصادر البحث (3 محاولات لكل مصدر ثم القفز)
+        sources_vid = ["PEXELS", "PEXELS", "PEXELS", "PIXABAY", "PIXABAY", "PIXABAY"]
+        sources_img = ["WIKIPEDIA", "WIKIPEDIA", "WIKIPEDIA", "ARCHIVE", "ARCHIVE", "ARCHIVE"]
+        
+        sources_pool = sources_vid if typ in ["PEXELS", "PIXABAY"] else sources_img
         attempt_counter = 0
 
         while not scene_approved:
@@ -388,7 +409,11 @@ def main():
             current_source = sources_pool[attempt_counter % len(sources_pool)]
             c_media = pfx.with_suffix(".mp4") if current_source in ["PEXELS", "PIXABAY"] else pfx.with_suffix(".jpg")
             
-            is_vid = fetcher.fetch_media(current_source, current_q, c_media, attempt_counter // len(sources_pool))
+            # تنظيف الكلمة إجبارياً من أي أحرف عربية
+            safe_q = enforce_english_query(current_q)
+            index_in_source = attempt_counter % 3
+            
+            is_vid = fetcher.fetch_media(current_source, safe_q, c_media, index_in_source)
             
             if is_vid or c_media.exists():
                 eval_res = director.evaluate_scene_with_scout(c_media, txt, current_source)
@@ -398,11 +423,18 @@ def main():
                     montage_style = eval_res["montage"]
                 else:
                     new_q = eval_res.get("new_query", "")
-                    current_q = new_q if new_q else current_q + " alternative"
-                    log.warning(f"🔄 جاري الانتقال لمصدر آخر بكلمة بحث: {current_q}")
-                    c_media.unlink()
+                    new_q = enforce_english_query(new_q)
+                    current_q = new_q if new_q else safe_q + " alternative"
+                    log.warning(f"🔄 المراجع رفض اللقطة. الانتقال للبحث بكلمة: {current_q}")
+                    try: c_media.unlink()
+                    except: pass
             else:
-                log.warning(f"⚠️ المصدر {current_source} لم يعطِ نتائج لـ '{current_q}'. تبديل المصدر...")
+                log.warning(f"⚠️ المصدر {current_source} لم يعطِ نتائج لـ '{safe_q}'. المحاولة {index_in_source+1}/3...")
+                time.sleep(2) # كبح جماح الحلقة
+                
+                # إذا جربنا 3 مرات (نفس المصدر) وفشلت كلها، نعدل الكلمة قليلاً للهروب من الفشل المتكرر
+                if index_in_source == 2:
+                    current_q = safe_q.split()[0] if len(safe_q.split()) > 1 else safe_q + " mystery"
                 
             attempt_counter += 1
 
