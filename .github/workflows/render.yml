@@ -1,77 +1,72 @@
-name: 🎬 The Mastermind - V19.1
+name: Build Documentary
 
 on:
-  schedule:
-    - cron: '0 7 * * *' # 10:00 AM بتوقيت صنعاء (7:00 UTC) يومياً
   workflow_dispatch:
-    inputs:
-      topic:
-        description: 'موضوع الفيلم الوثائقي'
-        required: true
-        default: 'لغز اختفاء طائرة دي بي كوبر'
-
-permissions:
-  contents: write # ضروري لكي يتمكن البوت من حفظ الذاكرة في المستودع
+  # schedule:
+  #   - cron: "0 0 * * *" # يمكنك تفعيلها لاحقاً ليعمل تلقائياً كل يوم
 
 jobs:
   build-documentary:
     runs-on: ubuntu-latest
-    
+    permissions:
+      contents: write
+
     steps:
-      - name: 📥 جلب ملفات المستودع
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🐍 تجهيز بيئة Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: ⚙️ تثبيت محرك المونتاج والخطوط
+      - name: Install System Dependencies (FFmpeg & Fonts)
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-noto fonts-dejavu
 
-      - name: 📦 تثبيت المكتبات
+      - name: Install Python Dependencies
+        # ✅ تم إضافة الحزمة الرسمية google-antigravity هنا
         run: |
           python -m pip install --upgrade pip
-          pip install requests pillow arabic-reshaper python-bidi yt-dlp google-genai google-api-python-client google-auth-httplib2 google-auth-oauthlib
+          pip install requests pillow arabic-reshaper python-bidi yt-dlp google-genai google-api-python-client google-auth-httplib2 google-auth-oauthlib google-antigravity
 
-      - name: 🚀 تثبيت Antigravity
+      - name: Install Antigravity CLI
         run: |
           curl -fsSL https://antigravity.google/cli/install.sh | bash
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: 🔐 زرع مفاتيح Pro
+      - name: Configure Antigravity Auth
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           mkdir -p ~/.gemini/antigravity-cli/
-          echo '${{ secrets.AGY_CREDENTIALS }}' > ~/.gemini/antigravity-cli/antigravity-oauth-token
+          echo "$GEMINI_API_KEY" > ~/.gemini/antigravity-cli/antigravity-oauth-token
           chmod 600 ~/.gemini/antigravity-cli/antigravity-oauth-token
 
-      - name: 🎬 إطلاق المخرج العبقري
+      - name: Run Production Pipeline
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
-          MAPBOX_API_KEY: ${{ secrets.MAPBOX_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           DRIVE_REFRESH_TOKEN: ${{ secrets.DRIVE_REFRESH_TOKEN }}
-          VIDEO_TOPIC: ${{ inputs.topic || 'أغرب قضايا الاختفاء في التاريخ' }}
-        run: |
-          python pipeline.py
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          VIDEO_TOPIC: ${{ secrets.VIDEO_TOPIC }}
+        run: python pipeline.py
 
-      - name: 🧠 حفظ ذاكرة المخرج (Evolution Log)
+      - name: Commit Memory and Code Updates
+        # ✅ تم إضافة pipeline.py ليحفظ التعديلات الذاتية للذكاء الاصطناعي
         run: |
           git config --global user.name "Hybrid-AI-Director"
           git config --global user.email "actions@github.com"
-          git add director_memory.md
-          git commit -m "🧠 تحديث الذاكرة التراكمية للمخرج" || echo "لا توجد تحديثات في الذاكرة لرفعها"
+          git add director_memory.md pipeline.py
+          git commit -m "🧠 تحديث الذاكرة التراكمية والكود المصدري" || echo "لا توجد تحديثات لرفعها"
           git push
 
-      - name: 💾 حفظ نسخة احتياطية (Artifacts)
+      - name: Upload Master Vault Artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
