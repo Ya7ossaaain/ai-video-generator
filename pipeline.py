@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V19.1 - Resilience)
-- السيناريو والنقد: Google Antigravity (gemini-3.1-pro).
+UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V19.2 - The Antigravity Critic)
+- السيناريو والنقد النهائي: Google Antigravity (gemini-3.1-pro).
+- المراجع البصري-السمعي الفوري: حصرياً عبر Google Antigravity (gemini-3.5-flash) لتجاوز قيود AI Studio.
 - الصوت: Google AI Studio (Charon) + تبريد 30 ثانية + الدوران حول المفاتيح 3 جولات.
-- المراجع البصري-السمعي: gemini-3.5-flash (متعدد الجولات لضمان عدم الفشل).
 - الهندسة الصوتية: إصلاح مشكلة تداخل الصوت (Audio Pumping).
 - الذاكرة وحلقة الكمال: تسجيل الأخطاء والتعلم، بحد 3.75 ساعات.
 ====================================================================================================
@@ -97,10 +97,9 @@ class HybridConfig:
 
 CONFIG = HybridConfig()
 CONFIG.paths.initialize()
-if not CONFIG.gemini_keys: sys.exit("🛑 حرج: مفاتيح GEMINI_API_KEY مفقودة!")
 
 # ==================================================================================================
-# 3. العقل الهجين والمراجع السمعي-البصري الفوري
+# 3. العقل الهجين والمراجع السمعي-البصري الفوري (عبر Antigravity حصرياً)
 # ==================================================================================================
 class Hybrid_Director:
     def plan_documentary(self) -> List[Dict]:
@@ -185,14 +184,14 @@ class Hybrid_Director:
                     log.warning(f"⚠️ فشل المفتاح ({i+1}/{len(CONFIG.gemini_keys)}) | السبب: {str(e)[:50]}... التبديل للتالي.")
                     time.sleep(2)
             
-            log.warning(f"🔄 انتهت الجولة {round_num+1} من تجربة المفاتيح للصوت. أخذ استراحة 10 ثوانٍ قبل المحاولة مجدداً...")
+            log.warning(f"🔄 انتهت الجولة {round_num+1} للصوت. استراحة 10 ثوانٍ قبل إعادة المحاولة...")
             time.sleep(10)
             
-        log.error("❌ استنفدت جميع المفاتيح بعد 3 جولات! تم التخطي.")
+        log.error("❌ استنفدت جميع المفاتيح لتوليد الصوت بعد 3 جولات!")
 
     def evaluate_scene_multimodal(self, media_path: Path, audio_path: Path, narration: str) -> Dict:
-        """يستخدم نموذج Flash 3.5 لسماع الصوت، رؤية المشهد، وتقييمهما معاً، مع نظام الدوران للمفاتيح"""
-        log.info("👁️🎧 المراجع الفوري (Flash 3.5) يسمع ويشاهد المشهد...")
+        """يستخدم Antigravity بنموذج Flash 3.5 لتقييم الصوت والصورة معاً لتجنب حدود AI Studio"""
+        log.info("👁️🎧 المراجع الفوري (Flash 3.5 عبر Antigravity) يسمع ويشاهد المشهد...")
         
         eval_img_path = media_path.with_suffix(".eval.jpg")
         try:
@@ -200,63 +199,53 @@ class Hybrid_Director:
             else: eval_img_path = media_path
         except: pass
 
+        # توجيه Antigravity لقراءة الملفات من مساراتها المباشرة
         prompt = f"""
-        أنت مخرج مونتاج لوثائقي جنائي. السرد: "{narration}"
+        أنت مخرج مونتاج لوثائقي جنائي. 
+        السرد المرتبط بالمشهد هو: "{narration}"
+        قم بفحص الصورة الموجودة في هذا المسار: {eval_img_path.resolve()}
+        واستمع للملف الصوتي في هذا المسار: {audio_path.resolve()}
         قيّم ما إذا كان المشهد يتناسب مع الصوت ومع جو الجريمة الغامض. 
         ثم حدد أسلوب المونتاج الأنسب من هذه الخيارات: ZOOM_IN, PAN_RIGHT, BW (لأبيض وأسود), NORMAL.
-        أخرج ردك كـ JSON فقط بالصيغة التالية:
-        {{"decision": "ACCEPT" أو "REJECT", "montage": "ZOOM_IN"}}
+        أخرج ردك كملف JSON فقط بالصيغة التالية (بدون أي نصوص إضافية):
+        {{"decision": "ACCEPT", "montage": "ZOOM_IN"}}
         """
         
-        max_rounds = 2 # دورتان كافيتان للمراجع الفوري
-        for round_num in range(max_rounds):
-            for i, key in enumerate(CONFIG.gemini_keys):
-                audio_file = None
-                img_file = None
-                try:
-                    client = genai.Client(api_key=key)
-                    audio_file = client.files.upload(file=str(audio_path))
-                    img_file = client.files.upload(file=str(eval_img_path))
+        for attempt in range(3):
+            try:
+                # استخدام `--dangerously-skip-permissions` للسماح لـ agy بقراءة الملفات تلقائياً
+                cmd = ["agy", "--model", "gemini-3.5-flash", "--dangerously-skip-permissions", "-p", prompt]
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=120)
+                output = result.stdout.strip()
+                
+                # استخراج الـ JSON من رد الأداة
+                clean = re.search(r'\{.*\}', output, re.DOTALL).group(0)
+                data = json.loads(clean)
+                
+                if eval_img_path != media_path and eval_img_path.exists(): eval_img_path.unlink()
+                
+                if data.get("decision") == "ACCEPT":
+                    log.info(f"✅ الناقد (Antigravity) اعتمد اللقطة. طلب مونتاج: {data.get('montage', 'NORMAL')}")
+                    return {"valid": True, "montage": data.get("montage", "NORMAL")}
+                else:
+                    log.warning("❌ الناقد (Antigravity) رفض اللقطة لعدم التوافق.")
+                    return {"valid": False, "montage": "NORMAL"}
                     
-                    res = client.models.generate_content(
-                        model="gemini-3.5-flash", 
-                        contents=[prompt, img_file, audio_file],
-                        config=types.GenerateContentConfig(response_mime_type="application/json")
-                    )
-                    
-                    # تنظيف السيرفر
-                    try: client.files.delete(name=audio_file.name); client.files.delete(name=img_file.name)
-                    except: pass
-                    if eval_img_path != media_path and eval_img_path.exists(): eval_img_path.unlink()
-                    
-                    data = json.loads(res.text)
-                    if data.get("decision") == "ACCEPT":
-                        log.info(f"✅ الناقد اعتمد اللقطة. طلب مونتاج: {data.get('montage', 'NORMAL')}")
-                        return {"valid": True, "montage": data.get("montage", "NORMAL")}
-                    else:
-                        log.warning("❌ الناقد رفض اللقطة لعدم التوافق.")
-                        return {"valid": False, "montage": "NORMAL"}
-                        
-                except Exception as e:
-                    if audio_file:
-                        try: client.files.delete(name=audio_file.name)
-                        except: pass
-                    if img_file:
-                        try: client.files.delete(name=img_file.name)
-                        except: pass
-                    log.warning(f"⚠️ فشل المفتاح ({i+1}) في المراجعة. التبديل للتالي...")
-                    time.sleep(2)
-            time.sleep(5)
+            except subprocess.TimeoutExpired:
+                log.warning(f"⚠️ انتهى وقت المراجع الفوري (المحاولة {attempt+1})")
+            except Exception as e:
+                log.warning(f"⚠️ فشل المراجع الفوري: {str(e)[:50]}... إعادة المحاولة.")
+                time.sleep(3)
 
-        log.warning("⚠️ استنفدت المفاتيح للمراجع الفوري. سيتم الاعتماد الافتراضي للقطة.")
+        log.warning("⚠️ فشل التقييم المتكرر عبر Antigravity. سيتم الاعتماد الافتراضي للقطة.")
         if eval_img_path != media_path and eval_img_path.exists(): eval_img_path.unlink()
-        return {"valid": True, "montage": "ZOOM_IN"} # افتراضي
+        return {"valid": True, "montage": "ZOOM_IN"}
 
 # ==================================================================================================
-# 4. محرك استدعاء الوسائط ومعالجة الصوت والمونتاج (محسن)
+# 4. محرك استدعاء الوسائط ومعالجة الصوت والمونتاج 
 # ==================================================================================================
 class MediaFetcher:
-    def __init__(self): self.h = {"User-Agent": "HybridPipeline/19.1"}
+    def __init__(self): self.h = {"User-Agent": "HybridPipeline/19.2"}
     
     def fetch_video(self, source: str, query: str, out: Path, index: int = 0) -> bool:
         try:
@@ -336,10 +325,9 @@ def render_scene(media: Path, is_vid: bool, ass: Path, aud: Path, out: Path, dur
         fc = f"[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080{color_fx},vignette=PI/3.6,subtitles='{ass}',fps={fps}[v]"
         cmd = ["ffmpeg", "-y", "-stream_loop", "-1", "-i", str(media), "-i", str(aud), "-filter_complex", fc, "-map", "[v]", "-map", "1:a", "-c:v", "libx264", "-c:a", "aac", "-shortest", str(out)]
     else:
-        # ترجمة أوامر الناقد إلى حركة حقيقية
         if "PAN_RIGHT" in montage_hint: motion = "z=1.1:x='x+1':y='ih/2-(ih/zoom/2)'"
         elif "NORMAL" in montage_hint: motion = "z=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-        else: motion = "z='min(1.15, 1.05+0.0003*on)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'" # ZOOM_IN
+        else: motion = "z='min(1.15, 1.05+0.0003*on)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
         
         fc = f"[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,zoompan={motion}:d={int(dur*fps)}:s=1920x1080{color_fx},vignette=PI/3.6,subtitles='{ass}',fps={fps}[v]"
         cmd = ["ffmpeg", "-y", "-loop", "1", "-i", str(media), "-i", str(aud), "-filter_complex", fc, "-map", "[v]", "-map", "1:a", "-c:v", "libx264", "-c:a", "aac", "-shortest", str(out)]
@@ -365,7 +353,7 @@ def upload_drive(vid: Path):
 def main():
     start_time = datetime.now()
     max_seconds = 3 * 3600 + 45 * 60 # 3.75 ساعات
-    log.info(f"▶ بدء محرك الإنتاج V19.1 | القضية: {CONFIG.topic}")
+    log.info(f"▶ بدء محرك الإنتاج V19.2 | القضية: {CONFIG.topic}")
     
     director = Hybrid_Director()
     fetcher = MediaFetcher()
@@ -404,7 +392,7 @@ def main():
                 
                 if not c_media.exists(): break
                 
-                # التقييم المتعدد (صوت + صورة + نص)
+                # التقييم المتعدد عبر Antigravity
                 eval_result = director.evaluate_scene_multimodal(c_media, c_wav, txt)
                 if eval_result["valid"]:
                     montage_style = eval_result["montage"]
