@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install System Dependencies (FFmpeg & Fonts)
+      - name: Install System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-noto fonts-dejavu
@@ -38,15 +38,14 @@ jobs:
           curl -fsSL https://antigravity.google/cli/install.sh | bash
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Configure Antigravity Auth
+      - name: Configure Antigravity Full OAuth2
         env:
-          # تنبيه: تأكد أن التوكن محفوظ في GitHub Secrets بهذا الاسم تماماً.
-          # إذا حفظته باسم مختلف (مثل ANTIGRAVITY_TOKEN)، قم بتعديل GEMINI_API_KEY هنا.
-          AGY_TOKEN: ${{ secrets.GEMINI_API_KEY }}
+          # سحب الـ JSON من السر الذي أنشأته أنت مسبقاً
+          OAUTH_JSON: ${{ secrets.AGY_CREDENTIALS }}
         run: |
           mkdir -p ~/.gemini/antigravity-cli/
-          # استخدام printf لضمان عدم تشوه التوكن بأسطر فارغة
-          printf "%s" "$AGY_TOKEN" > ~/.gemini/antigravity-cli/antigravity-oauth-token
+          # استخدام printf لكتابة الـ JSON في المسار الرسمي لـ Antigravity
+          printf "%s" "$OAUTH_JSON" > ~/.gemini/antigravity-cli/antigravity-oauth-token
           chmod 600 ~/.gemini/antigravity-cli/antigravity-oauth-token
 
       - name: Run Production Pipeline
