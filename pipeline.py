@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V21.1 - Contextual Skynet)
+UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V21.2 - The Vault)
 - السيناريو والنقد النهائي: Google Antigravity (gemini-3.1-pro-high).
-- المراجع الفوري العميق: gemini-3.6-flash-high (يفهم سياق الفيلم والنص السردي بالكامل).
-- الهندسة الصوتية الآمنة: إزالة فلاتر القص العشوائي (silenceremove) لمنع اختفاء الصوت.
+- المراجع الفوري العميق: gemini-3.6-flash-high (يفهم سياق الفيلم والنص السردي).
+- أمان التصدير: دمج ورفع الفيديو (Drive + YouTube Private) **قبل** جلسة النقد وإعادة التشغيل.
 - التبديل التلقائي: PEXELS <-> PIXABAY (3 محاولات) وحلقات WIKIPEDIA.
-- التعديل الذاتي: المراجع النهائي يعدل الكود ويعيد التشغيل (Self-Healing).
+- التعديل الذاتي: المراجع النهائي يعدل الكود ويعيد التشغيل بعد تأمين النسخة.
 ====================================================================================================
 """
 
@@ -30,6 +30,9 @@ import arabic_reshaper
 from bidi.algorithm import get_display
 from google import genai
 from google.genai import types
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
 # ==================================================================================================
 # 1. إعدادات النظام
@@ -72,6 +75,10 @@ class HybridConfig:
     pexels = os.environ.get("PEXELS_API_KEY", "")
     pixabay = os.environ.get("PIXABAY_API_KEY", "")
     freesound = os.environ.get("FREESOUND_API_KEY", "")
+    yt_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    yt_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+    drive_token = os.environ.get("DRIVE_REFRESH_TOKEN", "")
+    yt_refresh = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
 
 CONFIG = HybridConfig()
 for p in [CONFIG.paths.base, CONFIG.paths.cache]: p.mkdir(parents=True, exist_ok=True)
@@ -101,7 +108,6 @@ class Hybrid_Director:
         sys.exit("🛑 فشل كتابة السيناريو.")
 
     def evaluate_scene_flash(self, media_path: Path, narration: str) -> Dict:
-        """يستلم الصورة والنص والسياق الكامل للفيلم ويقرر إخراجياً"""
         log.info("👁️ المراجع الفوري (gemini-3.6-flash-high) يحلل السياق والمشهد...")
         eval_img_path = media_path.with_suffix(".eval.jpg")
         try:
@@ -109,17 +115,13 @@ class Hybrid_Director:
             else: eval_img_path = media_path
         except: pass
 
-        prompt = f"""أنت مخرج مونتاج صارم لفيلم وثائقي جنائي غامض بعنوان: "{CONFIG.topic}".
-        نحن الآن نعمل على أحد المشاهد، وهذا هو النص الذي يقرأه المعلق الصوتي في هذه اللحظة تحديداً:
-        "{narration}"
+        prompt = f"""أنت مخرج مونتاج لفيلم وثائقي جنائي غامض بعنوان: "{CONFIG.topic}".
+        النص السردي لهذا المشهد: "{narration}"
         
-        انظر بعناية للصورة/الإطار المرفق من المشهد المقترح. 
-        1. هل المشهد يتطابق مع سياق النص وجو الجريمة والغموض العام للفيلم؟
-        2. هل الإضاءة والألوان تعكس النص؟
-        
-        إذا رفضت المشهد لأنه لا يخدم السياق، اقترح كلمات بحث جديدة باللغة الإنجليزية (search_query) للبحث عن مقطع أدق.
-        حدد فلتر المونتاج: ZOOM_IN, PAN_RIGHT, BW (إذا أردت جعله مرعباً بأبيض وأسود), أو NORMAL.
-        أخرج JSON فقط: {{"decision": "ACCEPT" أو "REJECT", "montage": "ZOOM_IN", "new_query": "creepy dark abandoned house"}}"""
+        هل المشهد يتطابق مع سياق النص وجو الجريمة والغموض؟
+        إذا رفضت المشهد، اقترح كلمات بحث باللغة الإنجليزية (search_query) لمقطع أدق.
+        حدد فلتر المونتاج: ZOOM_IN, PAN_RIGHT, BW, NORMAL.
+        أخرج JSON فقط: {{"decision": "ACCEPT" أو "REJECT", "montage": "ZOOM_IN", "new_query": "creepy dark alley"}}"""
         
         try:
             cmd = ["agy", "--model", "gemini-3.6-flash-high", "--dangerously-skip-permissions", prompt, str(eval_img_path.resolve())]
@@ -175,17 +177,16 @@ class Hybrid_Director:
                 res = genai.Client(api_key=key).models.generate_content(model="gemini-3.8-flash-tts", contents=f"[INSTRUCTION: Deep chilling narrator]\n{text}", config=cfg)
                 out_wav.write_bytes(base64.b64decode(res.candidates[0].content.parts[0].inline_data.data) if isinstance(res.candidates[0].content.parts[0].inline_data.data, str) else res.candidates[0].content.parts[0].inline_data.data)
                 
-                # اختبار أولي لسلامة الملف
                 if out_wav.exists() and out_wav.stat().st_size > 1000:
                     time.sleep(30); return
             except: time.sleep(2)
         log.error("❌ استنفدت المفاتيح لتوليد الصوت!")
 
 # ==================================================================================================
-# 4. محرك الوسائط والمونتاج الآمن
+# 4. محرك الوسائط والمونتاج الآمن والرفع
 # ==================================================================================================
 class MediaFetcher:
-    def __init__(self): self.h = {"User-Agent": "HybridPipeline/21.1"}
+    def __init__(self): self.h = {"User-Agent": "HybridPipeline/21.2"}
     
     def fetch_media(self, source: str, query: str, out: Path, index: int) -> bool:
         try:
@@ -204,7 +205,6 @@ class MediaFetcher:
         return False
 
 def process_audio(voice: Path, foley: Path, has_foley: bool, out: Path) -> float:
-    # الهندسة الآمنة: تم إزالة silenceremove لتجنب مسح الملفات. الاعتماد فقط على تطبيع الصوت loudnorm
     if has_foley:
         fc = "[0:a]loudnorm=I=-16[v]; [1:a]volume=0.04[bg]; [v][bg]amix=inputs=2:duration=first:dropout_transition=0[aout]"
         cmd = ["ffmpeg", "-y", "-i", str(voice), "-stream_loop", "-1", "-i", str(foley), "-filter_complex", fc, "-map", "[aout]", "-ar", "48000", str(out)]
@@ -213,13 +213,11 @@ def process_audio(voice: Path, foley: Path, has_foley: bool, out: Path) -> float
         cmd = ["ffmpeg", "-y", "-i", str(voice), "-filter_complex", fc, "-map", "[aout]", "-ar", "48000", str(out)]
     
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
     try:
         dur = float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(out)]).decode().strip())
         if dur < 0.5: raise ValueError("Audio duration is too short")
         return dur
     except:
-        log.warning("⚠️ الصوت الناتج تالف أو فارغ، سيتم استخدام طول افتراضي لتجنب الانهيار.")
         return 3.0
 
 def render_scene(media: Path, is_vid: bool, aud: Path, out: Path, dur: float, montage: str):
@@ -228,12 +226,38 @@ def render_scene(media: Path, is_vid: bool, aud: Path, out: Path, dur: float, mo
     else: cmd = ["ffmpeg", "-y", "-loop", "1", "-i", str(media), "-i", str(aud), "-filter_complex", f"[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,zoompan=z=1.05:d={int(dur*24)}{fx}[v]", "-map", "[v]", "-map", "1:a", "-c:v", "libx264", "-c:a", "aac", "-shortest", str(out)]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+def upload_drive(vid: Path):
+    if not (CONFIG.yt_id and CONFIG.drive_token): return
+    log.info("☁️ الرفع إلى Google Drive...")
+    try:
+        dr = build("drive", "v3", credentials=Credentials(None, refresh_token=CONFIG.drive_token, token_uri="[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)", client_id=CONFIG.yt_id, client_secret=CONFIG.yt_secret))
+        res = dr.files().list(q="name='Broadcast_Vault' and mimeType='application/vnd.google-apps.folder'", fields="files(id)").execute()
+        fid = res.get("files")[0]["id"] if res.get("files") else dr.files().create(body={"name": "Broadcast_Vault", "mimeType": "application/vnd.google-apps.folder"}, fields="id").execute()["id"]
+        req = dr.files().create(body={"name": vid.name, "parents": [fid]}, media_body=MediaFileUpload(str(vid), mimetype="video/mp4", resumable=True, chunksize=5*1024*1024))
+        while req.next_chunk()[1] is None: pass
+        log.info("✅ تم حفظ نسخة في درايف بنجاح!")
+    except Exception as e: log.error(f"⚠️ فشل درايف: {e}")
+
+def upload_youtube(vid: Path):
+    if not (CONFIG.yt_id and CONFIG.yt_refresh): return
+    log.info("▶️ الرفع إلى YouTube (مسودة خاصة)...")
+    try:
+        yt = build("youtube", "v3", credentials=Credentials(None, refresh_token=CONFIG.yt_refresh, token_uri="[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)", client_id=CONFIG.yt_id, client_secret=CONFIG.yt_secret))
+        body = {
+            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V21.2", "categoryId": "24"},
+            "status": {"privacyStatus": "private"}
+        }
+        req = yt.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(str(vid), chunksize=-1, resumable=True, mimetype="video/mp4"))
+        while req.next_chunk()[1] is None: pass
+        log.info("✅ تم الرفع لليوتيوب بنجاح (Private)!")
+    except Exception as e: log.error(f"⚠️ فشل يوتيوب: {e}")
+
 # ==================================================================================================
-# 5. وحدة التحكم المركزية
+# 5. وحدة التحكم المركزية (ترتيب العمليات لحفظ الفيديو قبل المراجعة)
 # ==================================================================================================
 def main():
     start_time = datetime.now()
-    log.info(f"▶ بدء محرك Skynet V21.1 | القضية: {CONFIG.topic}")
+    log.info(f"▶ بدء محرك Skynet V21.2 | القضية: {CONFIG.topic}")
     
     director = Hybrid_Director()
     fetcher = MediaFetcher()
@@ -307,18 +331,24 @@ def main():
         render_scene(c_media, is_vid, c_mp3, c_mp4, dur, montage_style)
         if c_mp4.exists(): clips.append(c_mp4)
 
-    master_audio = CONFIG.paths.base / "master_audio.wav"
-    if final_audio_segments:
-        txt_list = CONFIG.paths.base / "audio_list.txt"
-        txt_list.write_text("\n".join(f"file '{c.resolve().as_posix()}'" for c in final_audio_segments), encoding="utf-8")
-        subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(txt_list), "-c", "copy", str(master_audio)], stdout=subprocess.DEVNULL)
-        director.self_critique_and_recode(master_audio)
-
+    # المرحلة 1: دمج الفيديو وتصديره للسحابة (لحفظ النسخة مهما حدث لاحقاً)
     if clips:
         txt_list = CONFIG.paths.base / "video_list.txt"
         txt_list.write_text("\n".join(f"file '{c.resolve().as_posix()}'" for c in clips), encoding="utf-8")
         final_vid = CONFIG.paths.base / f"MasterDoc_{int(time.time())}.mp4"
         subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(txt_list), "-c", "copy", str(final_vid)], stdout=subprocess.DEVNULL)
-        log.info("🎬 تم تصدير الفيلم!")
+        log.info("🎬 تم تصدير الفيلم محلياً. جاري الحفظ السحابي...")
+        upload_drive(final_vid)
+        upload_youtube(final_vid)
+
+    # المرحلة 2: دمج الصوت والنقد الذاتي (آمن الآن للقيام بإعادة التشغيل إذا لزم الأمر)
+    master_audio = CONFIG.paths.base / "master_audio.wav"
+    if final_audio_segments:
+        txt_list = CONFIG.paths.base / "audio_list.txt"
+        txt_list.write_text("\n".join(f"file '{c.resolve().as_posix()}'" for c in final_audio_segments), encoding="utf-8")
+        subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(txt_list), "-c", "copy", str(master_audio)], stdout=subprocess.DEVNULL)
+        
+        # بعد أن تم حفظ الفيديو، يمكن للمراجع أن يتخذ قراره بتعديل الكود أو الموافقة
+        director.self_critique_and_recode(master_audio)
 
 if __name__ == "__main__": main()
