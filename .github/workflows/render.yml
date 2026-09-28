@@ -40,10 +40,13 @@ jobs:
 
       - name: Configure Antigravity Auth
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # تنبيه: تأكد أن التوكن محفوظ في GitHub Secrets بهذا الاسم تماماً.
+          # إذا حفظته باسم مختلف (مثل ANTIGRAVITY_TOKEN)، قم بتعديل GEMINI_API_KEY هنا.
+          AGY_TOKEN: ${{ secrets.GEMINI_API_KEY }}
         run: |
           mkdir -p ~/.gemini/antigravity-cli/
-          echo "$GEMINI_API_KEY" > ~/.gemini/antigravity-cli/antigravity-oauth-token
+          # استخدام printf لضمان عدم تشوه التوكن بأسطر فارغة
+          printf "%s" "$AGY_TOKEN" > ~/.gemini/antigravity-cli/antigravity-oauth-token
           chmod 600 ~/.gemini/antigravity-cli/antigravity-oauth-token
 
       - name: Run Production Pipeline
