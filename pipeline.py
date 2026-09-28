@@ -3,7 +3,7 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.17 - Syntax Fixed / Unlimited Vision Search
+HYBRID V22.17 - Syntax Fixed / Unlimited Vision Search (Patched)
 """
 
 import os
@@ -261,21 +261,27 @@ ARCHIVE
         raise RuntimeError("🛑 فشل إنشاء السيناريو بعد 3 جولات.")
 
     async def _chat_to_text(self, agent, content):
-        """
-        Antigravity chat() يعيد ChatResponse وليس نصاً عادياً.
-        يجب استدعاء response.text() أو تجميع الـstream.
-        """
-        response = await agent.chat(content)
-
         try:
-            text_value = response.text()
-            if asyncio.iscoroutine(text_value):
-                text_value = await text_value
-            if text_value:
-                return str(text_value)
-        except Exception:
-            pass
+            response = await agent.chat(content)
+            
+            # في حزمة Google GenAI عادة يكون النص خاصية (Property)
+            if hasattr(response, "text"):
+                text_value = response.text
+                if text_value:
+                    return str(text_value)
+                    
+            # كخيار احتياطي إذا كان الدالة (Method)
+            if callable(getattr(response, "text", None)):
+                text_value = response.text()
+                if asyncio.iscoroutine(text_value):
+                    text_value = await text_value
+                if text_value:
+                    return str(text_value)
+                    
+        except Exception as e:
+            log.error(f"⚠️ خطأ أثناء قراءة الرد من Antigravity: {e}")
 
+        # محاولة قراءة النص المقطع (Stream) إن وجد
         chunks = []
         try:
             async for chunk in response:
@@ -285,8 +291,8 @@ ARCHIVE
                     value = getattr(chunk, "text", "")
                     if value:
                         chunks.append(str(value))
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"Stream read skipped: {e}")
 
         return "".join(chunks).strip()
 
@@ -555,7 +561,7 @@ ARCHIVE
 
 class MediaFetcher:
     def __init__(self):
-        self.h = {"User-Agent": "HybridPipeline/22.17"}
+        self.h = {"User-Agent": "HybridPipeline/22.17 (https://github.com/Ya7ossaaain/ai-video-generator; contact@example.com)"}
 
     def _get(self, url, **kwargs):
         kwargs.setdefault("timeout", 30)
@@ -587,7 +593,7 @@ class MediaFetcher:
                     },
                     headers={
                         "Authorization": CONFIG.pexels,
-                        "User-Agent": "HybridPipeline/22.17",
+                        "User-Agent": self.h["User-Agent"],
                     },
                 )
                 videos = r.json().get("videos", [])
@@ -989,7 +995,7 @@ def upload_youtube(vid):
                 "description": (
                     "تم الإنتاج عبر "
                     "UNIVERSAL INVESTIGATIVE "
-                    "DOCUMENTARY ENGINE V22.16"
+                    "DOCUMENTARY ENGINE V22.17 (Patched)"
                 ),
                 "categoryId": "24",
             },
@@ -1102,6 +1108,7 @@ def main():
         current_q = enforce_english_query(original_q)
         sources_pool = get_source_pool(typ)
         attempt_counter = 0
+        MAX_ATTEMPTS = 15  # 🔴 صمام الأمان: 15 محاولة كحد أقصى للمشهد الواحد
 
         query_variants = [
             "documentary evidence",
@@ -1117,9 +1124,7 @@ def main():
         ]
         base_q = enforce_english_query(original_q)
 
-        # مهم: لا يوجد حد لعدد المحاولات.
-        # يستمر البحث حتى ACCEPT أو انتهاء 13,500 ثانية.
-        while not scene_approved:
+        while not scene_approved and attempt_counter < MAX_ATTEMPTS:
             elapsed = (
                 datetime.now() - start_time
             ).total_seconds()
@@ -1223,8 +1228,9 @@ def main():
                     f"⚠️ {current_source} لم يعطِ نتيجة صالحة "
                     f"لـ '{safe_q}'."
                 )
-                time.sleep(2)
-
+            
+            # 🔴 إضافة فترة راحة لتجنب حظر الـ API
+            time.sleep(3)
             attempt_counter += 1
 
             if attempt_counter % len(sources_pool) == 0:
@@ -1244,15 +1250,17 @@ def main():
                 )
 
         if not scene_approved:
-            log.error(
-                f"❌ لم يتم اعتماد المشهد {i + 1} "
-                "قبل انتهاء وقت التشغيل."
-            )
-            append_memory(
-                f"Scene {i + 1} was not approved before global timeout. "
-                f"Original query: {original_q}"
-            )
-            continue
+            log.error(f"❌ تعذر اعتماد المشهد {i + 1} بعد {MAX_ATTEMPTS} محاولة.")
+            # 🔴 إجراء إنقاذي: إجبار استخدام آخر لقطة تم تحميلها إن وجدت
+            if c_media.exists() and c_media.stat().st_size > 1000:
+                log.warning("⚠️ سيتم إجبار استخدام آخر لقطة تم تحميلها كإجراء إنقاذي.")
+                scene_approved = True
+            else:
+                append_memory(
+                    f"Scene {i + 1} completely failed after {MAX_ATTEMPTS} attempts. "
+                    f"Original query: {original_q}"
+                )
+                continue
 
         try:
             render_scene(
