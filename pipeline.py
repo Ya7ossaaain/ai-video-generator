@@ -3,7 +3,7 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.16 - Syntax Fixed / Unlimited Vision Search
+HYBRID V22.17 - Syntax Fixed / Unlimited Vision Search
 """
 
 import os
@@ -54,6 +54,7 @@ def setup_logger():
         logger.addHandler(ch)
         fh = logging.FileHandler("production_logs.txt", encoding="utf-8")
         logger.addHandler(fh)
+    logger.propagate = False
     return logger
 
 
@@ -89,11 +90,30 @@ def load_ag_media(file_path):
     raise RuntimeError("لم يتم العثور على فئة الوسائط في حزمة google.antigravity")
 
 
-def enforce_english_query(query):
+def enforce_english_query(query, max_chars=90):
     query = str(query or "")
-    safe_q = re.sub(r"[\u0600-\u06FF]", "", query).strip()
-    safe_q = re.sub(r"\s+", " ", safe_q)
-    return safe_q if safe_q and len(safe_q) >= 2 else "mystery evidence"
+    safe_q = re.sub(r"[\u0600-\u06FF]", "", query)
+    safe_q = re.sub(r"[^A-Za-z0-9,._' -]", " ", safe_q)
+    safe_q = re.sub(r"\s+", " ", safe_q).strip()
+
+    # إزالة الكلمات المكررة التي قد تتراكم بعد رفض عدة لقطات.
+    words = []
+    seen = set()
+    for word in safe_q.split():
+        key = word.lower()
+        if key not in seen:
+            seen.add(key)
+            words.append(word)
+
+    safe_q = " ".join(words)
+
+    if not safe_q or len(safe_q) < 2:
+        safe_q = "mystery evidence"
+
+    if len(safe_q) > max_chars:
+        safe_q = safe_q[:max_chars].rsplit(" ", 1)[0].strip()
+
+    return safe_q
 
 
 class HybridConfig:
@@ -240,6 +260,36 @@ ARCHIVE
 
         raise RuntimeError("🛑 فشل إنشاء السيناريو بعد 3 جولات.")
 
+    async def _chat_to_text(self, agent, content):
+        """
+        Antigravity chat() يعيد ChatResponse وليس نصاً عادياً.
+        يجب استدعاء response.text() أو تجميع الـstream.
+        """
+        response = await agent.chat(content)
+
+        try:
+            text_value = response.text()
+            if asyncio.iscoroutine(text_value):
+                text_value = await text_value
+            if text_value:
+                return str(text_value)
+        except Exception:
+            pass
+
+        chunks = []
+        try:
+            async for chunk in response:
+                if isinstance(chunk, str):
+                    chunks.append(chunk)
+                elif hasattr(chunk, "text"):
+                    value = getattr(chunk, "text", "")
+                    if value:
+                        chunks.append(str(value))
+        except Exception:
+            pass
+
+        return "".join(chunks).strip()
+
     async def _async_evaluate_scout(self, media_path, narration, source):
         config = LocalAgentConfig(model="gemini-3.6-flash", effort="high")
 
@@ -278,7 +328,10 @@ ARCHIVE
 
         # Antigravity SDK requires an active async Agent session.
         async with Agent(config=config) as agent:
-            return await agent.chat([prompt, media_input])
+            return await self._chat_to_text(
+                agent,
+                [prompt, media_input],
+            )
 
     def evaluate_scene_with_scout(self, media_path, narration, source):
         log.info(f"👁️ Antigravity Vision Scout يفحص الوسيط من {source}...")
@@ -292,16 +345,47 @@ ARCHIVE
             )
             log.info(f"🗣️ نتيجة المراجع:\n{result_text}")
 
-            match = re.search(r"\{.*\}", result_text, re.DOTALL)
-            if not match:
-                log.warning("⚠️ تعذر استخراج JSON؛ سيتم رفض الوسيط.")
+            # استخراج JSON حتى لو أضاف النموذج أسطرًا أو Markdown.
+            cleaned = result_text.strip()
+            cleaned = re.sub(
+                r"^```(?:json)?\s*|\s*```$",
+                "",
+                cleaned,
+                flags=re.IGNORECASE | re.DOTALL,
+            ).strip()
+
+            data = None
+
+            try:
+                candidate = json.loads(cleaned)
+                if isinstance(candidate, dict):
+                    data = candidate
+            except Exception:
+                pass
+
+            if data is None:
+                decoder = json.JSONDecoder()
+                for pos, char in enumerate(cleaned):
+                    if char != "{":
+                        continue
+                    try:
+                        candidate, _ = decoder.raw_decode(cleaned[pos:])
+                        if isinstance(candidate, dict):
+                            data = candidate
+                            break
+                    except Exception:
+                        continue
+
+            if data is None:
+                log.warning(
+                    "⚠️ تعذر استخراج JSON من رد Antigravity. "
+                    f"الرد الخام: {cleaned[:1000]}"
+                )
                 return {
                     "accepted": False,
                     "montage": "ZOOM_IN",
                     "new_query": "",
                 }
-
-            data = json.loads(match.group(0))
             score = float(data.get("score", 0.0))
             decision = str(data.get("decision", "")).upper()
 
@@ -349,7 +433,10 @@ ARCHIVE
 
         # Antigravity SDK requires an active async Agent session.
         async with Agent(config=config) as agent:
-            return await agent.chat([prompt, media_input])
+            return await self._chat_to_text(
+                agent,
+                [prompt, media_input],
+            )
 
     def self_critique_and_recode(self, final_video):
         log.info("🧠 المراجع النهائي يشاهد الفيلم الكامل...")
@@ -468,7 +555,7 @@ ARCHIVE
 
 class MediaFetcher:
     def __init__(self):
-        self.h = {"User-Agent": "HybridPipeline/22.15"}
+        self.h = {"User-Agent": "HybridPipeline/22.17"}
 
     def _get(self, url, **kwargs):
         kwargs.setdefault("timeout", 30)
@@ -500,7 +587,7 @@ class MediaFetcher:
                     },
                     headers={
                         "Authorization": CONFIG.pexels,
-                        "User-Agent": "HybridPipeline/22.15",
+                        "User-Agent": "HybridPipeline/22.17",
                     },
                 )
                 videos = r.json().get("videos", [])
@@ -935,7 +1022,7 @@ def main():
     start_time = datetime.now()
 
     log.info(
-        f"▶ بدء المحرك V22.16 | القضية: {CONFIG.topic}"
+        f"▶ بدء المحرك V22.17 | القضية: {CONFIG.topic}"
     )
 
     director = Hybrid_Director()
@@ -1024,10 +1111,11 @@ def main():
             "police investigation",
             "historical evidence",
             "news archive",
-            "investigative scene",
             "forensic evidence",
             "mysterious location",
+            "case evidence",
         ]
+        base_q = enforce_english_query(original_q)
 
         # مهم: لا يوجد حد لعدد المحاولات.
         # يستمر البحث حتى ACCEPT أو انتهاء 13,500 ثانية.
@@ -1108,14 +1196,15 @@ def main():
                     and new_q != "mystery evidence"
                     and new_q.lower() != safe_q.lower()
                 ):
-                    current_q = new_q[:100].rsplit(" ", 1)[0]
+                    current_q = enforce_english_query(new_q, 90)
                 else:
                     variant = query_variants[
                         attempt_counter % len(query_variants)
                     ]
-                    current_q = f"{safe_q} {variant}"
-                    if len(current_q) > 100:
-                        current_q = current_q[:100].rsplit(" ", 1)[0]
+                    current_q = enforce_english_query(
+                        f"{base_q} {variant}",
+                        90,
+                    )
 
                 log.warning(
                     "🔄 REJECTED | Antigravity رفض الوسيط."
@@ -1144,13 +1233,14 @@ def main():
                         attempt_counter // len(sources_pool)
                     ) % len(query_variants)
                 ]
-                current_q = f"{safe_q} {variant}"
-                if len(current_q) > 100:
-                    current_q = current_q[:100].rsplit(" ", 1)[0]
+                current_q = enforce_english_query(
+                    f"{base_q} {variant}",
+                    90,
+                )
 
                 log.info(
                     "♻️ لم يتم اعتماد أي لقطة في الدورة الكاملة. "
-                    f"توسيع البحث إلى: '{current_q}'"
+                    f"تغيير استراتيجية البحث إلى: '{current_q}'"
                 )
 
         if not scene_approved:
