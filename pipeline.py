@@ -3,7 +3,7 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.15 - Syntax Fixed / Unlimited Vision Search
+HYBRID V22.16 - Syntax Fixed / Unlimited Vision Search
 """
 
 import os
@@ -242,7 +242,6 @@ ARCHIVE
 
     async def _async_evaluate_scout(self, media_path, narration, source):
         config = LocalAgentConfig(model="gemini-3.6-flash", effort="high")
-        agent = Agent(config=config)
 
         prompt = f"""
 أنت المراجع البصري الفوري لفيلم وثائقي تحقيقي بعنوان:
@@ -276,7 +275,10 @@ ARCHIVE
 """.strip()
 
         media_input = load_ag_media(media_path)
-        return await agent.chat([prompt, media_input])
+
+        # Antigravity SDK requires an active async Agent session.
+        async with Agent(config=config) as agent:
+            return await agent.chat([prompt, media_input])
 
     def evaluate_scene_with_scout(self, media_path, narration, source):
         log.info(f"👁️ Antigravity Vision Scout يفحص الوسيط من {source}...")
@@ -321,7 +323,6 @@ ARCHIVE
 
     async def _async_critique(self, final_video, logs):
         config = LocalAgentConfig(model="gemini-3.1-pro", effort="high")
-        agent = Agent(config=config)
 
         prompt = f"""
 أنت المراجع النهائي للفيلم الوثائقي.
@@ -345,7 +346,10 @@ ARCHIVE
 """.strip()
 
         media_input = load_ag_media(final_video)
-        return await agent.chat([prompt, media_input])
+
+        # Antigravity SDK requires an active async Agent session.
+        async with Agent(config=config) as agent:
+            return await agent.chat([prompt, media_input])
 
     def self_critique_and_recode(self, final_video):
         log.info("🧠 المراجع النهائي يشاهد الفيلم الكامل...")
@@ -476,6 +480,11 @@ class MediaFetcher:
     def fetch_media(self, source, query, out, index):
         safe_query = enforce_english_query(query)
 
+        # Pixabay's q parameter has a practical length limit.
+        # Keep the search phrase compact so long Scout-generated
+        # queries do not trigger HTTP 400.
+        pixabay_query = safe_query[:100].strip()
+
         try:
             if source == "PEXELS":
                 if not CONFIG.pexels:
@@ -528,7 +537,7 @@ class MediaFetcher:
                     "https://pixabay.com/api/videos/",
                     params={
                         "key": CONFIG.pixabay,
-                        "q": safe_query,
+                        "q": pixabay_query,
                         "per_page": 10,
                     },
                     headers=self.h,
@@ -893,7 +902,7 @@ def upload_youtube(vid):
                 "description": (
                     "تم الإنتاج عبر "
                     "UNIVERSAL INVESTIGATIVE "
-                    "DOCUMENTARY ENGINE V22.15"
+                    "DOCUMENTARY ENGINE V22.16"
                 ),
                 "categoryId": "24",
             },
@@ -926,7 +935,7 @@ def main():
     start_time = datetime.now()
 
     log.info(
-        f"▶ بدء المحرك V22.15 | القضية: {CONFIG.topic}"
+        f"▶ بدء المحرك V22.16 | القضية: {CONFIG.topic}"
     )
 
     director = Hybrid_Director()
@@ -1099,12 +1108,14 @@ def main():
                     and new_q != "mystery evidence"
                     and new_q.lower() != safe_q.lower()
                 ):
-                    current_q = new_q
+                    current_q = new_q[:100].rsplit(" ", 1)[0]
                 else:
                     variant = query_variants[
                         attempt_counter % len(query_variants)
                     ]
                     current_q = f"{safe_q} {variant}"
+                    if len(current_q) > 100:
+                        current_q = current_q[:100].rsplit(" ", 1)[0]
 
                 log.warning(
                     "🔄 REJECTED | Antigravity رفض الوسيط."
@@ -1134,6 +1145,8 @@ def main():
                     ) % len(query_variants)
                 ]
                 current_q = f"{safe_q} {variant}"
+                if len(current_q) > 100:
+                    current_q = current_q[:100].rsplit(" ", 1)[0]
 
                 log.info(
                     "♻️ لم يتم اعتماد أي لقطة في الدورة الكاملة. "
