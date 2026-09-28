@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V21.2 - The Vault)
-- السيناريو والنقد النهائي: Google Antigravity (gemini-3.1-pro-high).
-- المراجع الفوري العميق: gemini-3.6-flash-high (يفهم سياق الفيلم والنص السردي).
-- أمان التصدير: دمج ورفع الفيديو (Drive + YouTube Private) **قبل** جلسة النقد وإعادة التشغيل.
+UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V22.1 - The Transparent Director + Fixed Rotation)
+- المراجع الفوري (الشفاف): يشرح سبب رفض أو قبول كل مشهد بدقة باللغة العربية.
+- أمان التصدير: دمج ورفع الفيديو (Drive + YouTube Private) قبل جلسة النقد.
 - التبديل التلقائي: PEXELS <-> PIXABAY (3 محاولات) وحلقات WIKIPEDIA.
 - التعديل الذاتي: المراجع النهائي يعدل الكود ويعيد التشغيل بعد تأمين النسخة.
+- إصلاح الصوت: إعادة دمج نظام الدوران الصارم (3 جولات) مع طباعة أسباب الرفض للمفاتيح.
 ====================================================================================================
 """
 
@@ -108,7 +108,7 @@ class Hybrid_Director:
         sys.exit("🛑 فشل كتابة السيناريو.")
 
     def evaluate_scene_flash(self, media_path: Path, narration: str) -> Dict:
-        log.info("👁️ المراجع الفوري (gemini-3.6-flash-high) يحلل السياق والمشهد...")
+        log.info("👁️ المراجع الفوري يحلل السياق والمشهد...")
         eval_img_path = media_path.with_suffix(".eval.jpg")
         try:
             if media_path.suffix == ".mp4": subprocess.run(["ffmpeg", "-y", "-i", str(media_path), "-vframes", "1", "-q:v", "2", str(eval_img_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -119,9 +119,11 @@ class Hybrid_Director:
         النص السردي لهذا المشهد: "{narration}"
         
         هل المشهد يتطابق مع سياق النص وجو الجريمة والغموض؟
-        إذا رفضت المشهد، اقترح كلمات بحث باللغة الإنجليزية (search_query) لمقطع أدق.
-        حدد فلتر المونتاج: ZOOM_IN, PAN_RIGHT, BW, NORMAL.
-        أخرج JSON فقط: {{"decision": "ACCEPT" أو "REJECT", "montage": "ZOOM_IN", "new_query": "creepy dark alley"}}"""
+        - اشرح سبب قبولك أو رفضك بدقة باللغة العربية في حقل (reason).
+        - إذا رفضت المشهد، اقترح كلمات بحث بالإنجليزية (search_query) لمقطع أدق.
+        - حدد فلتر المونتاج: ZOOM_IN, PAN_RIGHT, BW, NORMAL.
+        
+        أخرج JSON فقط: {{"decision": "ACCEPT" أو "REJECT", "reason": "شرح السبب هنا باللغة العربية", "montage": "ZOOM_IN", "new_query": "creepy dark alley"}}"""
         
         try:
             cmd = ["agy", "--model", "gemini-3.6-flash-high", "--dangerously-skip-permissions", prompt, str(eval_img_path.resolve())]
@@ -137,7 +139,7 @@ class Hybrid_Director:
             log.warning(f"⚠️ فشل المراجع الفوري: {str(e)[:50]}")
             if eval_img_path != media_path and eval_img_path.exists(): eval_img_path.unlink()
             
-        return {"decision": "ACCEPT", "montage": "ZOOM_IN", "new_query": ""}
+        return {"decision": "ACCEPT", "reason": "فشل التقييم، تم الاعتماد الافتراضي للقطة.", "montage": "ZOOM_IN", "new_query": ""}
 
     def self_critique_and_recode(self, final_audio: Path) -> bool:
         log.info("🧠 المراجع النهائي يقوم بالتحليل الشامل للمشروع...")
@@ -172,21 +174,32 @@ class Hybrid_Director:
 
     def generate_voice(self, text: str, out_wav: Path):
         cfg = types.GenerateContentConfig(response_modalities=["AUDIO"], speech_config=types.SpeechConfig(voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Charon"))))
-        for key in CONFIG.gemini_keys:
-            try:
-                res = genai.Client(api_key=key).models.generate_content(model="gemini-3.8-flash-tts", contents=f"[INSTRUCTION: Deep chilling narrator]\n{text}", config=cfg)
-                out_wav.write_bytes(base64.b64decode(res.candidates[0].content.parts[0].inline_data.data) if isinstance(res.candidates[0].content.parts[0].inline_data.data, str) else res.candidates[0].content.parts[0].inline_data.data)
-                
-                if out_wav.exists() and out_wav.stat().st_size > 1000:
-                    time.sleep(30); return
-            except: time.sleep(2)
-        log.error("❌ استنفدت المفاتيح لتوليد الصوت!")
+        
+        for round_num in range(3): # <-- هنا تم إصلاح الخلل وإعادة نظام الدوران!
+            log.info(f"🎙️ توليد الصوت (الجولة {round_num + 1}/3)...")
+            for i, key in enumerate(CONFIG.gemini_keys):
+                try:
+                    res = genai.Client(api_key=key).models.generate_content(model="gemini-3.8-flash-tts", contents=f"[INSTRUCTION: Deep chilling narrator]\n{text}", config=cfg)
+                    out_wav.write_bytes(base64.b64decode(res.candidates[0].content.parts[0].inline_data.data) if isinstance(res.candidates[0].content.parts[0].inline_data.data, str) else res.candidates[0].content.parts[0].inline_data.data)
+                    
+                    if out_wav.exists() and out_wav.stat().st_size > 1000:
+                        log.info("⏳ تم توليد الصوت بنجاح. تبريد 30 ثانية...")
+                        time.sleep(30)
+                        return
+                except Exception as e: 
+                    log.warning(f"⚠️ فشل المفتاح {i+1}: {str(e)[:50]}") # <-- الآن سنعرف سبب الرفض لكل مفتاح
+                    time.sleep(2)
+            
+            log.warning("🔄 انتهت الجولة. استراحة 10 ثوانٍ قبل محاولة الجولة التالية...")
+            time.sleep(10)
+            
+        log.error("❌ استنفدت جميع المفاتيح لتوليد الصوت بعد 3 جولات!")
 
 # ==================================================================================================
 # 4. محرك الوسائط والمونتاج الآمن والرفع
 # ==================================================================================================
 class MediaFetcher:
-    def __init__(self): self.h = {"User-Agent": "HybridPipeline/21.2"}
+    def __init__(self): self.h = {"User-Agent": "HybridPipeline/22.1"}
     
     def fetch_media(self, source: str, query: str, out: Path, index: int) -> bool:
         try:
@@ -244,7 +257,7 @@ def upload_youtube(vid: Path):
     try:
         yt = build("youtube", "v3", credentials=Credentials(None, refresh_token=CONFIG.yt_refresh, token_uri="[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)", client_id=CONFIG.yt_id, client_secret=CONFIG.yt_secret))
         body = {
-            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V21.2", "categoryId": "24"},
+            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V22.1", "categoryId": "24"},
             "status": {"privacyStatus": "private"}
         }
         req = yt.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(str(vid), chunksize=-1, resumable=True, mimetype="video/mp4"))
@@ -253,11 +266,11 @@ def upload_youtube(vid: Path):
     except Exception as e: log.error(f"⚠️ فشل يوتيوب: {e}")
 
 # ==================================================================================================
-# 5. وحدة التحكم المركزية (ترتيب العمليات لحفظ الفيديو قبل المراجعة)
+# 5. وحدة التحكم المركزية 
 # ==================================================================================================
 def main():
     start_time = datetime.now()
-    log.info(f"▶ بدء محرك Skynet V21.2 | القضية: {CONFIG.topic}")
+    log.info(f"▶ بدء محرك Skynet V22.1 (الشفاف + الدوران الصلب) | القضية: {CONFIG.topic}")
     
     director = Hybrid_Director()
     fetcher = MediaFetcher()
@@ -297,12 +310,15 @@ def main():
                     if not is_vid or not c_media.exists(): continue
                     
                     eval_res = director.evaluate_scene_flash(c_media, txt)
+                    reason = eval_res.get("reason", "لا يوجد تبرير متاح")
+                    
                     if eval_res.get("decision") == "ACCEPT":
+                        log.info(f"✅ المخرج قَبِل المشهد: {reason}")
                         scene_approved = True
                         montage_style = eval_res.get("montage", "NORMAL")
                         break
                     else:
-                        log.warning(f"❌ المشهد مرفوض. الاقتراح الجديد: {eval_res.get('new_query')}")
+                        log.warning(f"❌ المخرج رفض المشهد: {reason} | اقتراحه للبحث القادم: {eval_res.get('new_query')}")
                         current_q = eval_res.get("new_query", current_q + " mysterious")
                         c_media.unlink()
         else:
@@ -314,11 +330,14 @@ def main():
                 has_media = fetcher.fetch_media("WIKIPEDIA", current_q, c_media, attempt)
                 if has_media and c_media.exists():
                     eval_res = director.evaluate_scene_flash(c_media, txt)
+                    reason = eval_res.get("reason", "لا يوجد تبرير متاح")
+                    
                     if eval_res.get("decision") == "ACCEPT":
-                        log.info(f"✅ ويكيبيديا: تم اعتماد الدليل ({current_q})")
+                        log.info(f"✅ المخرج قَبِل صورة ويكيبيديا: {reason}")
                         scene_approved = True
                         montage_style = eval_res.get("montage", "ZOOM_IN")
                     else:
+                        log.warning(f"❌ المخرج رفض صورة ويكيبيديا: {reason} | يحاول ببحث آخر...")
                         current_q = eval_res.get("new_query", current_q)
                         c_media.unlink()
                 else: current_q += " evidence"
@@ -331,7 +350,7 @@ def main():
         render_scene(c_media, is_vid, c_mp3, c_mp4, dur, montage_style)
         if c_mp4.exists(): clips.append(c_mp4)
 
-    # المرحلة 1: دمج الفيديو وتصديره للسحابة (لحفظ النسخة مهما حدث لاحقاً)
+    # التصدير للسحابة للحفظ الآمن
     if clips:
         txt_list = CONFIG.paths.base / "video_list.txt"
         txt_list.write_text("\n".join(f"file '{c.resolve().as_posix()}'" for c in clips), encoding="utf-8")
@@ -341,14 +360,12 @@ def main():
         upload_drive(final_vid)
         upload_youtube(final_vid)
 
-    # المرحلة 2: دمج الصوت والنقد الذاتي (آمن الآن للقيام بإعادة التشغيل إذا لزم الأمر)
+    # جلسة النقد الذاتي
     master_audio = CONFIG.paths.base / "master_audio.wav"
     if final_audio_segments:
         txt_list = CONFIG.paths.base / "audio_list.txt"
         txt_list.write_text("\n".join(f"file '{c.resolve().as_posix()}'" for c in final_audio_segments), encoding="utf-8")
         subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(txt_list), "-c", "copy", str(master_audio)], stdout=subprocess.DEVNULL)
-        
-        # بعد أن تم حفظ الفيديو، يمكن للمراجع أن يتخذ قراره بتعديل الكود أو الموافقة
         director.self_critique_and_recode(master_audio)
 
 if __name__ == "__main__": main()
