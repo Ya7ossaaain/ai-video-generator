@@ -2,12 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V19.2 - The Antigravity Critic)
+UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V20 - The Master Scout)
 - السيناريو والنقد النهائي: Google Antigravity (gemini-3.1-pro).
-- المراجع البصري-السمعي الفوري: حصرياً عبر Google Antigravity (gemini-3.5-flash) لتجاوز قيود AI Studio.
-- الصوت: Google AI Studio (Charon) + تبريد 30 ثانية + الدوران حول المفاتيح 3 جولات.
-- الهندسة الصوتية: إصلاح مشكلة تداخل الصوت (Audio Pumping).
-- الذاكرة وحلقة الكمال: تسجيل الأخطاء والتعلم، بحد 3.75 ساعات.
+- المراجع البصري (الكشاف): Groq Vision لتحليل عميق للصورة ثم تمريرها لـ Antigravity.
+- الصوت: Google AI Studio (Charon) + دوران المفاتيح 3 جولات + تبريد 30 ثانية.
+- الذاكرة وحلقة الكمال: تسجيل الأخطاء، معالجة ذاتية، بحد 3.75 ساعات.
 ====================================================================================================
 """
 
@@ -97,9 +96,10 @@ class HybridConfig:
 
 CONFIG = HybridConfig()
 CONFIG.paths.initialize()
+if not CONFIG.gemini_keys: sys.exit("🛑 حرج: مفاتيح GEMINI_API_KEY مفقودة!")
 
 # ==================================================================================================
-# 3. العقل الهجين والمراجع السمعي-البصري الفوري (عبر Antigravity حصرياً)
+# 3. العقل الهجين والمراجع (Antigravity + Groq Vision Scout)
 # ==================================================================================================
 class Hybrid_Director:
     def plan_documentary(self) -> List[Dict]:
@@ -125,7 +125,13 @@ class Hybrid_Director:
             try:
                 cmd = ["agy", "--model", "gemini-3.1-pro", "--effort", "high", "-p", prompt]
                 result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=900)
-                clean = re.search(r'\[.*\]', result.stdout.strip(), re.DOTALL).group(0)
+                output = result.stdout.strip()
+                match = re.search(r'\[.*\]', output, re.DOTALL)
+                if not match:
+                    log.warning(f"⚠️ الأداة لم ترجع JSON. محتوى الرد:\n{output[:300]}...")
+                    time.sleep(5)
+                    continue
+                clean = match.group(0)
                 data = json.loads(clean)
                 CONFIG.paths.manifest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
                 return data
@@ -155,12 +161,14 @@ class Hybrid_Director:
                 append_memory("ظهرت تحذيرات لكن تم تجاوزها لاعتماد المقطع.")
                 return True
                 
-            clean = re.search(r'\[.*\]', output, re.DOTALL).group(0)
-            CONFIG.paths.manifest.write_text(json.dumps(json.loads(clean), ensure_ascii=False, indent=2), encoding="utf-8")
-            log.info("🔄 تم تحديث السيناريو بناءً على النقد!")
-            append_memory(f"تم إصلاح أخطاء بصرية/برمجية وتحديث السيناريو بنجاح.")
-            Path("production_logs.txt").write_text("")
-            return False 
+            match = re.search(r'\[.*\]', output, re.DOTALL)
+            if match:
+                CONFIG.paths.manifest.write_text(json.dumps(json.loads(match.group(0)), ensure_ascii=False, indent=2), encoding="utf-8")
+                log.info("🔄 تم تحديث السيناريو بناءً على النقد!")
+                append_memory(f"تم إصلاح أخطاء بصرية/برمجية وتحديث السيناريو بنجاح.")
+                Path("production_logs.txt").write_text("")
+                return False 
+            return True
         except Exception as e:
             log.warning(f"⚠️ فشل التقييم، سيتم الاعتماد على النسخة الحالية: {e}")
             return True
@@ -169,83 +177,85 @@ class Hybrid_Director:
         prompt = f"[INSTRUCTION: Documentary narrator. Deep, chilling voice. Read normally.]\n\n{text}"
         cfg = types.GenerateContentConfig(response_modalities=["AUDIO"], speech_config=types.SpeechConfig(voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Charon"))))
         
-        max_rounds = 3 # 3 دورات كاملة حول المفاتيح
-        for round_num in range(max_rounds):
+        for round_num in range(3):
             for i, key in enumerate(CONFIG.gemini_keys):
                 try:
                     temp_client = genai.Client(api_key=key)
                     res = temp_client.models.generate_content(model="gemini-3.8-flash-tts", contents=prompt, config=cfg)
                     raw = res.candidates[0].content.parts[0].inline_data.data
                     out_wav.write_bytes(base64.b64decode(raw) if isinstance(raw, str) else raw)
-                    log.info(f"⏳ تم توليد الصوت بنجاح (الجولة {round_num+1}). بدء فترة التبريد (30 ثانية)...")
+                    log.info(f"⏳ تم توليد الصوت بنجاح. بدء التبريد (30 ثانية)...")
                     time.sleep(30)
                     return 
                 except Exception as e: 
-                    log.warning(f"⚠️ فشل المفتاح ({i+1}/{len(CONFIG.gemini_keys)}) | السبب: {str(e)[:50]}... التبديل للتالي.")
+                    log.warning(f"⚠️ فشل المفتاح ({i+1}) لتوليد الصوت. التبديل للتالي...")
                     time.sleep(2)
-            
-            log.warning(f"🔄 انتهت الجولة {round_num+1} للصوت. استراحة 10 ثوانٍ قبل إعادة المحاولة...")
             time.sleep(10)
-            
-        log.error("❌ استنفدت جميع المفاتيح لتوليد الصوت بعد 3 جولات!")
+        log.error("❌ استنفدت جميع المفاتيح لتوليد الصوت!")
 
-    def evaluate_scene_multimodal(self, media_path: Path, audio_path: Path, narration: str) -> Dict:
-        """يستخدم Antigravity بنموذج Flash 3.5 لتقييم الصوت والصورة معاً لتجنب حدود AI Studio"""
-        log.info("👁️🎧 المراجع الفوري (Flash 3.5 عبر Antigravity) يسمع ويشاهد المشهد...")
-        
+    def evaluate_scene_with_scout(self, media_path: Path, narration: str) -> Dict:
+        """يقوم Groq Vision بتحليل الصورة وصفاً دقيقاً، ثم يرسلها لـ Antigravity ليقرر المخرج قرار القبول والمونتاج"""
+        log.info("👁️ الكشاف (Groq Vision) يحلل المشهد...")
         eval_img_path = media_path.with_suffix(".eval.jpg")
         try:
             if media_path.suffix == ".mp4": subprocess.run(["ffmpeg", "-y", "-i", str(media_path), "-vframes", "1", "-q:v", "2", str(eval_img_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else: eval_img_path = media_path
         except: pass
 
-        # توجيه Antigravity لقراءة الملفات من مساراتها المباشرة
-        prompt = f"""
-        أنت مخرج مونتاج لوثائقي جنائي. 
-        السرد المرتبط بالمشهد هو: "{narration}"
-        قم بفحص الصورة الموجودة في هذا المسار: {eval_img_path.resolve()}
-        واستمع للملف الصوتي في هذا المسار: {audio_path.resolve()}
-        قيّم ما إذا كان المشهد يتناسب مع الصوت ومع جو الجريمة الغامض. 
-        ثم حدد أسلوب المونتاج الأنسب من هذه الخيارات: ZOOM_IN, PAN_RIGHT, BW (لأبيض وأسود), NORMAL.
-        أخرج ردك كملف JSON فقط بالصيغة التالية (بدون أي نصوص إضافية):
-        {{"decision": "ACCEPT", "montage": "ZOOM_IN"}}
-        """
-        
-        for attempt in range(3):
+        # الخطوة 1: استخراج الوصف البصري العميق عبر Groq Vision
+        visual_desc = "لقطة سينمائية عامة"
+        if CONFIG.groq and eval_img_path.exists():
             try:
-                # استخدام `--dangerously-skip-permissions` للسماح لـ agy بقراءة الملفات تلقائياً
-                cmd = ["agy", "--model", "gemini-3.5-flash", "--dangerously-skip-permissions", "-p", prompt]
-                result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=120)
-                output = result.stdout.strip()
-                
-                # استخراج الـ JSON من رد الأداة
-                clean = re.search(r'\{.*\}', output, re.DOTALL).group(0)
-                data = json.loads(clean)
-                
-                if eval_img_path != media_path and eval_img_path.exists(): eval_img_path.unlink()
-                
-                if data.get("decision") == "ACCEPT":
-                    log.info(f"✅ الناقد (Antigravity) اعتمد اللقطة. طلب مونتاج: {data.get('montage', 'NORMAL')}")
-                    return {"valid": True, "montage": data.get("montage", "NORMAL")}
-                else:
-                    log.warning("❌ الناقد (Antigravity) رفض اللقطة لعدم التوافق.")
-                    return {"valid": False, "montage": "NORMAL"}
-                    
-            except subprocess.TimeoutExpired:
-                log.warning(f"⚠️ انتهى وقت المراجع الفوري (المحاولة {attempt+1})")
+                img_bytes = eval_img_path.read_bytes()
+                base64_img = base64.b64encode(img_bytes).decode('utf-8')
+                headers = {"Authorization": f"Bearer {CONFIG.groq}", "Content-Type": "application/json"}
+                payload = {
+                    "model": "llama-3.2-90b-vision-preview",
+                    "messages": [{"role": "user", "content": [
+                        {"type": "text", "text": "صف هذه الصورة بدقة سينمائية في 3 أسطر: زاوية الكاميرا، الإضاءة والألوان، والعناصر الرئيسية والمزاج العام."},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
+                    ]}],
+                    "max_tokens": 150
+                }
+                res = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=30).json()
+                visual_desc = res["choices"][0]["message"]["content"]
             except Exception as e:
-                log.warning(f"⚠️ فشل المراجع الفوري: {str(e)[:50]}... إعادة المحاولة.")
-                time.sleep(3)
+                log.warning(f"⚠️ فشل الكشاف Groq في التحليل: {e}")
 
-        log.warning("⚠️ فشل التقييم المتكرر عبر Antigravity. سيتم الاعتماد الافتراضي للقطة.")
         if eval_img_path != media_path and eval_img_path.exists(): eval_img_path.unlink()
-        return {"valid": True, "montage": "ZOOM_IN"}
+
+        # الخطوة 2: إرسال التقرير البصري إلى Antigravity (المخرج) ليتخذ القرار
+        log.info("🧠 المخرج (Antigravity) يراجع التقرير البصري للمشهد...")
+        prompt = f"""
+        أنت مخرج وثائقيات جنائية صارم.
+        النص السردي للمشهد: "{narration}"
+        التقرير البصري للقطة (من مدير التصوير): "{visual_desc}"
+        
+        هل تتطابق اللقطة مع جو النص الغامض والمرعب؟ 
+        حدد أسلوب المونتاج الأنسب من الخيارات التالية: ZOOM_IN, PAN_RIGHT, BW (لأبيض وأسود)، أو NORMAL.
+        أخرج ردك كـ JSON فقط بالصيغة التالية (بدون أي نصوص إضافية):
+        {{"decision": "ACCEPT" أو "REJECT", "montage": "ZOOM_IN"}}
+        """
+        try:
+            cmd = ["agy", "--model", "gemini-3.1-pro", "--dangerously-skip-permissions", "-p", prompt]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=120)
+            output = result.stdout.strip()
+            match = re.search(r'\{.*\}', output, re.DOTALL)
+            if match:
+                data = json.loads(match.group(0))
+                if data.get("decision") == "ACCEPT":
+                    log.info(f"✅ المخرج اعتمد اللقطة. طلب مونتاج: {data.get('montage', 'NORMAL')}")
+                    return {"valid": True, "montage": data.get("montage", "NORMAL")}
+        except Exception as e:
+            log.warning(f"⚠️ خطأ في تقييم المخرج للقطة: {e}")
+
+        return {"valid": True, "montage": "ZOOM_IN"} # افتراضي آمن
 
 # ==================================================================================================
 # 4. محرك استدعاء الوسائط ومعالجة الصوت والمونتاج 
 # ==================================================================================================
 class MediaFetcher:
-    def __init__(self): self.h = {"User-Agent": "HybridPipeline/19.2"}
+    def __init__(self): self.h = {"User-Agent": "HybridPipeline/20.0"}
     
     def fetch_video(self, source: str, query: str, out: Path, index: int = 0) -> bool:
         try:
@@ -307,7 +317,6 @@ def generate_ass(words: List[Dict], fallback: str, dur: float, out: Path, badge:
     out.write_text(ass, encoding="utf-8")
 
 def process_audio(voice: Path, foley: Path, has_foley: bool, out: Path) -> float:
-    # [الإصلاح الجذري] لتداخل الصوت المزعج
     if has_foley:
         fc = "[0:a]silenceremove=stop_periods=-1:stop_duration=0.8:stop_threshold=-45dB,loudnorm=I=-16[v]; [1:a]volume=0.04[bg]; [v][bg]amix=inputs=2:duration=first:dropout_transition=0[aout]"
         cmd = ["ffmpeg", "-y", "-i", str(voice), "-stream_loop", "-1", "-i", str(foley), "-filter_complex", fc, "-map", "[aout]", "-ar", "48000", str(out)]
@@ -353,7 +362,7 @@ def upload_drive(vid: Path):
 def main():
     start_time = datetime.now()
     max_seconds = 3 * 3600 + 45 * 60 # 3.75 ساعات
-    log.info(f"▶ بدء محرك الإنتاج V19.2 | القضية: {CONFIG.topic}")
+    log.info(f"▶ بدء محرك الإنتاج V20 (The Master Scout) | القضية: {CONFIG.topic}")
     
     director = Hybrid_Director()
     fetcher = MediaFetcher()
@@ -392,8 +401,7 @@ def main():
                 
                 if not c_media.exists(): break
                 
-                # التقييم المتعدد عبر Antigravity
-                eval_result = director.evaluate_scene_multimodal(c_media, c_wav, txt)
+                eval_result = director.evaluate_scene_with_scout(c_media, txt)
                 if eval_result["valid"]:
                     montage_style = eval_result["montage"]
                     break
@@ -406,7 +414,6 @@ def main():
             badges = {"PEXELS": "لقطات سينمائية", "PIXABAY": "أرشيف عام", "MAPBOX": "إحداثيات جغرافية تكتيكية", "WIKIPEDIA": "سجلات التحقيق الرسمية"}
             generate_ass(words, txt, dur, c_ass, f"● {badges.get(typ, 'ملف سري')} | {q}")
             
-            # الرندر مع الفلاتر الذكية
             render_scene(c_media, is_vid, c_ass, c_mp3, c_mp4, dur, montage_style)
             if c_mp4.exists(): clips.append(c_mp4)
 
