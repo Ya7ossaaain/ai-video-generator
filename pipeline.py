@@ -2,12 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V22.2 - Connection Fixed)
-- المراجع الفوري (الشفاف): يشرح سبب رفض أو قبول كل مشهد بدقة باللغة العربية.
+UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V22.3 - The True Vision)
+- المراجع الفوري (الشفاف): تم إصلاح خطأ الـ (-p) وتمرير مسار اللقطات كجزء من الموجه لتعمل الرؤية.
+- المراجع النهائي: تم إصلاح خطأ استدعاء الملف الصوتي ليسمعه بوضوح.
 - أمان التصدير: دمج ورفع الفيديو (Drive + YouTube Private) قبل جلسة النقد.
-- التبديل التلقائي: PEXELS <-> PIXABAY (3 محاولات) وحلقات WIKIPEDIA.
-- التعديل الذاتي: المراجع النهائي يعدل الكود ويعيد التشغيل بعد تأمين النسخة.
-- إصلاح الصوت الجذري: إصلاح مشكلة إغلاق الاتصال (Client Closed) في مكتبة جوجل.
+- إصلاح الصوت الجذري: الاتصال الآمن بالمكتبة لضمان عدم توقف (Client Closed).
 ====================================================================================================
 """
 
@@ -115,8 +114,11 @@ class Hybrid_Director:
             else: eval_img_path = media_path
         except: pass
 
+        # تم دمج مسار الصورة في الموجه لتقرأه الأداة دون أن تنهار
         prompt = f"""أنت مخرج مونتاج لفيلم وثائقي جنائي غامض بعنوان: "{CONFIG.topic}".
         النص السردي لهذا المشهد: "{narration}"
+        
+        [مسار الصورة لمعاينتها]: {eval_img_path.resolve()}
         
         هل المشهد يتطابق مع سياق النص وجو الجريمة والغموض؟
         - اشرح سبب قبولك أو رفضك بدقة باللغة العربية في حقل (reason).
@@ -126,7 +128,8 @@ class Hybrid_Director:
         أخرج JSON فقط: {{"decision": "ACCEPT" أو "REJECT", "reason": "شرح السبب هنا باللغة العربية", "montage": "ZOOM_IN", "new_query": "creepy dark alley"}}"""
         
         try:
-            cmd = ["agy", "--model", "gemini-3.6-flash-high", "--dangerously-skip-permissions", prompt, str(eval_img_path.resolve())]
+            # تمت إضافة -p التي كانت مفقودة لتنفيذ الأمر بشكل صحيح
+            cmd = ["agy", "--model", "gemini-3.6-flash-high", "--dangerously-skip-permissions", "-p", prompt]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             output = result.stdout.strip()
             
@@ -139,19 +142,24 @@ class Hybrid_Director:
             log.warning(f"⚠️ فشل المراجع الفوري: {str(e)[:50]}")
             if eval_img_path != media_path and eval_img_path.exists(): eval_img_path.unlink()
             
-        return {"decision": "ACCEPT", "reason": "فشل التقييم، تم الاعتماد الافتراضي للقطة.", "montage": "ZOOM_IN", "new_query": ""}
+        return {"decision": "ACCEPT", "reason": "فشل التقييم التقني، تم الاعتماد الافتراضي.", "montage": "ZOOM_IN", "new_query": ""}
 
     def self_critique_and_recode(self, final_audio: Path) -> bool:
         log.info("🧠 المراجع النهائي يقوم بالتحليل الشامل للمشروع...")
         logs = Path("production_logs.txt").read_text()[-2000:] if Path("production_logs.txt").exists() else "No logs"
         
-        prompt = f"""أنت الذكاء الاصطناعي المؤسس. استمع للمسار الصوتي واقرأ سجلات الأخطاء:
+        # تم دمج مسار الصوت في الموجه لتقرأه الأداة
+        prompt = f"""أنت الذكاء الاصطناعي المؤسس. اقرأ سجلات الأخطاء:
         {logs}
-        إذا كان هناك خلل فادح (انقطاع صوت، توقف)، قم بكتابة كود `pipeline.py` جديد بالكامل ومُعدّل داخل كتلة ```python .
+        
+        [مسار الملف الصوتي للمراجعة]: {final_audio.resolve()}
+        
+        استمع للمسار الصوتي. إذا كان هناك خلل فادح (انقطاع صوت، توقف)، قم بكتابة كود `pipeline.py` جديد بالكامل ومُعدّل داخل كتلة ```python .
         إذا كان النظام يعمل بكفاءة، أجب بكلمة PERFECT فقط."""
         
         try:
-            cmd = ["agy", "--model", "gemini-3.1-pro-high", "--dangerously-skip-permissions", prompt, str(final_audio.resolve())]
+            # تمت إضافة -p التي كانت مفقودة هنا أيضاً
+            cmd = ["agy", "--model", "gemini-3.1-pro-high", "--dangerously-skip-permissions", "-p", prompt]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
             output = result.stdout.strip()
             
@@ -179,7 +187,6 @@ class Hybrid_Director:
             log.info(f"🎙️ توليد الصوت (الجولة {round_num + 1}/3)...")
             for i, key in enumerate(CONFIG.gemini_keys):
                 try:
-                    # الإصلاح الجذري: تعريف العميل بشكل مستقل لإبقاء الاتصال مفتوحاً
                     client = genai.Client(api_key=key)
                     res = client.models.generate_content(
                         model="gemini-3.8-flash-tts", 
@@ -188,10 +195,8 @@ class Hybrid_Director:
                     )
                     
                     audio_data = res.candidates[0].content.parts[0].inline_data.data
-                    if isinstance(audio_data, str):
-                        out_wav.write_bytes(base64.b64decode(audio_data))
-                    else:
-                        out_wav.write_bytes(audio_data)
+                    if isinstance(audio_data, str): out_wav.write_bytes(base64.b64decode(audio_data))
+                    else: out_wav.write_bytes(audio_data)
                     
                     if out_wav.exists() and out_wav.stat().st_size > 1000:
                         log.info("⏳ تم توليد الصوت بنجاح. تبريد 30 ثانية...")
@@ -210,7 +215,7 @@ class Hybrid_Director:
 # 4. محرك الوسائط والمونتاج الآمن والرفع
 # ==================================================================================================
 class MediaFetcher:
-    def __init__(self): self.h = {"User-Agent": "HybridPipeline/22.2"}
+    def __init__(self): self.h = {"User-Agent": "HybridPipeline/22.3"}
     
     def fetch_media(self, source: str, query: str, out: Path, index: int) -> bool:
         try:
@@ -268,7 +273,7 @@ def upload_youtube(vid: Path):
     try:
         yt = build("youtube", "v3", credentials=Credentials(None, refresh_token=CONFIG.yt_refresh, token_uri="[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)", client_id=CONFIG.yt_id, client_secret=CONFIG.yt_secret))
         body = {
-            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V22.2", "categoryId": "24"},
+            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V22.3", "categoryId": "24"},
             "status": {"privacyStatus": "private"}
         }
         req = yt.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(str(vid), chunksize=-1, resumable=True, mimetype="video/mp4"))
@@ -281,7 +286,7 @@ def upload_youtube(vid: Path):
 # ==================================================================================================
 def main():
     start_time = datetime.now()
-    log.info(f"▶ بدء محرك Skynet V22.2 (الشفاف + اتصال آمن) | القضية: {CONFIG.topic}")
+    log.info(f"▶ بدء محرك Skynet V22.3 (الرؤية الحقيقية) | القضية: {CONFIG.topic}")
     
     director = Hybrid_Director()
     fetcher = MediaFetcher()
