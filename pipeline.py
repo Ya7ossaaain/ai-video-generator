@@ -2,11 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V22.12 - Multi-Source Fallback)
-- منع البحث بالعربي: فلترة صارمة لمنع إرسال أي أحرف عربية لمحركات البحث لضمان النتائج.
+UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V22.13 - Extended Timeout)
+- تمديد الوقت: زيادة مهلة توليد السيناريو إلى 6 دقائق لضمان استقرار المشروعات الكبيرة والضخمة.
 - هندسة القفز (3x3): 3 محاولات Pexels ثم 3 Pixabay. و 3 محاولات Wiki ثم 3 Internet Archive.
-- تصحيح الروابط: تغليف استعلامات البحث بـ URL Encoding لضمان عدم تعطل الـ APIs.
-- استخدام SDK الرسمي: المراجعة البصرية والنهائية تُدار عبر google.antigravity للتحليل الحقيقي.
+- المراجعة البصرية والنهائية: تُدار عبر google.antigravity SDK للتحليل الحقيقي للصوت والصورة.
 ====================================================================================================
 """
 
@@ -91,7 +90,6 @@ def load_ag_media(file_path: Path):
 def enforce_english_query(query: str) -> str:
     """إزالة أي حروف عربية من كلمة البحث لضمان توافقها مع الـ APIs"""
     safe_q = re.sub(r'[\u0600-\u06FF]', '', query).strip()
-    # إذا مسحنا كل شيء (كان كله عربي)، نعطيه كلمة افتراضية إنجليزية
     if not safe_q or len(safe_q) < 2:
         safe_q = "mystery evidence"
     return safe_q
@@ -125,13 +123,14 @@ class Hybrid_Director:
         prompt = f"""أنت كبير المخرجين. قضيتنا: "{CONFIG.topic}".
         قم ببناء سيناريو ضخم (40-50 مشهداً، كل مشهد 60-80 كلمة).
         استخدم PEXELS, PIXABAY, WIKIPEDIA.
-        تنبيه صارم: قيمة "search_query" يجب أن تكون باللغة الإنجليزية حصراً (ENGLISH ONLY) لضمان نجاح البحث.
+        تنبيه صارم: قيمة "search_query" يجب أن تكون باللغة الإنجليزية حصراً (ENGLISH ONLY).
         أخرج JSON Array فقط: [{{"scene_num": 1, "media_type": "PEXELS", "search_query": "dark street", "foley_type": "rain", "narration": "في ليلة..."}}]"""
         
         for _ in range(3):
             try:
+                # ✅ تم رفع المهلة (Timeout) إلى 360 ثانية (6 دقائق)
                 cmd = ["agy", "--model", "gemini-3.1-pro", "--effort", "high", "--dangerously-skip-permissions", "-p", prompt]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=360)
                 if result.returncode != 0:
                     log.warning(f"Agy Error: {result.stderr.strip()}")
                     time.sleep(5)
@@ -271,7 +270,7 @@ class Hybrid_Director:
 # 5. محرك الوسائط (مع تحويل الروابط بأمان ودعم أرشيف الإنترنت)
 # ==================================================================================================
 class MediaFetcher:
-    def __init__(self): self.h = {"User-Agent": "HybridPipeline/22.12"}
+    def __init__(self): self.h = {"User-Agent": "HybridPipeline/22.13"}
     
     def fetch_media(self, source: str, query: str, out: Path, index: int) -> bool:
         safe_query = urllib.parse.quote(query)
@@ -353,7 +352,7 @@ def upload_youtube(vid: Path):
     try:
         yt = build("youtube", "v3", credentials=Credentials(None, refresh_token=CONFIG.yt_refresh, token_uri="[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)", client_id=CONFIG.yt_id, client_secret=CONFIG.yt_secret))
         body = {
-            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V22.12 باستخدام Antigravity SDK", "categoryId": "24"},
+            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V22.13 باستخدام Antigravity SDK", "categoryId": "24"},
             "status": {"privacyStatus": "private"}
         }
         req = yt.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(str(vid), chunksize=-1, resumable=True, mimetype="video/mp4"))
@@ -366,7 +365,7 @@ def upload_youtube(vid: Path):
 # ==================================================================================================
 def main():
     start_time = datetime.now()
-    log.info(f"▶ بدء محرك Skynet V22.12 (Multi-Source Fallback) | القضية: {CONFIG.topic}")
+    log.info(f"▶ بدء محرك Skynet V22.13 (Extended Timeout) | القضية: {CONFIG.topic}")
     
     director = Hybrid_Director()
     fetcher = MediaFetcher()
@@ -396,7 +395,6 @@ def main():
         montage_style = "NORMAL"
         current_q = original_q
         
-        # إعداد مصادر البحث (3 محاولات لكل مصدر ثم القفز)
         sources_vid = ["PEXELS", "PEXELS", "PEXELS", "PIXABAY", "PIXABAY", "PIXABAY"]
         sources_img = ["WIKIPEDIA", "WIKIPEDIA", "WIKIPEDIA", "ARCHIVE", "ARCHIVE", "ARCHIVE"]
         
@@ -409,7 +407,6 @@ def main():
             current_source = sources_pool[attempt_counter % len(sources_pool)]
             c_media = pfx.with_suffix(".mp4") if current_source in ["PEXELS", "PIXABAY"] else pfx.with_suffix(".jpg")
             
-            # تنظيف الكلمة إجبارياً من أي أحرف عربية
             safe_q = enforce_english_query(current_q)
             index_in_source = attempt_counter % 3
             
@@ -430,9 +427,8 @@ def main():
                     except: pass
             else:
                 log.warning(f"⚠️ المصدر {current_source} لم يعطِ نتائج لـ '{safe_q}'. المحاولة {index_in_source+1}/3...")
-                time.sleep(2) # كبح جماح الحلقة
+                time.sleep(2)
                 
-                # إذا جربنا 3 مرات (نفس المصدر) وفشلت كلها، نعدل الكلمة قليلاً للهروب من الفشل المتكرر
                 if index_in_source == 2:
                     current_q = safe_q.split()[0] if len(safe_q.split()) > 1 else safe_q + " mystery"
                 
