@@ -56,7 +56,6 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           DRIVE_REFRESH_TOKEN: ${{ secrets.DRIVE_REFRESH_TOKEN }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
-          # ✅ تم ربط المتغير بصندوق الإدخال الذي تكتب فيه أنت
           VIDEO_TOPIC: ${{ github.event.inputs.video_topic }}
         run: python pipeline.py
 
