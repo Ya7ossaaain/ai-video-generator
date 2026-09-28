@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V22.1 - The Transparent Director + Fixed Rotation)
+UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V22.2 - Connection Fixed)
 - المراجع الفوري (الشفاف): يشرح سبب رفض أو قبول كل مشهد بدقة باللغة العربية.
 - أمان التصدير: دمج ورفع الفيديو (Drive + YouTube Private) قبل جلسة النقد.
 - التبديل التلقائي: PEXELS <-> PIXABAY (3 محاولات) وحلقات WIKIPEDIA.
 - التعديل الذاتي: المراجع النهائي يعدل الكود ويعيد التشغيل بعد تأمين النسخة.
-- إصلاح الصوت: إعادة دمج نظام الدوران الصارم (3 جولات) مع طباعة أسباب الرفض للمفاتيح.
+- إصلاح الصوت الجذري: إصلاح مشكلة إغلاق الاتصال (Client Closed) في مكتبة جوجل.
 ====================================================================================================
 """
 
@@ -175,19 +175,30 @@ class Hybrid_Director:
     def generate_voice(self, text: str, out_wav: Path):
         cfg = types.GenerateContentConfig(response_modalities=["AUDIO"], speech_config=types.SpeechConfig(voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Charon"))))
         
-        for round_num in range(3): # <-- هنا تم إصلاح الخلل وإعادة نظام الدوران!
+        for round_num in range(3):
             log.info(f"🎙️ توليد الصوت (الجولة {round_num + 1}/3)...")
             for i, key in enumerate(CONFIG.gemini_keys):
                 try:
-                    res = genai.Client(api_key=key).models.generate_content(model="gemini-3.8-flash-tts", contents=f"[INSTRUCTION: Deep chilling narrator]\n{text}", config=cfg)
-                    out_wav.write_bytes(base64.b64decode(res.candidates[0].content.parts[0].inline_data.data) if isinstance(res.candidates[0].content.parts[0].inline_data.data, str) else res.candidates[0].content.parts[0].inline_data.data)
+                    # الإصلاح الجذري: تعريف العميل بشكل مستقل لإبقاء الاتصال مفتوحاً
+                    client = genai.Client(api_key=key)
+                    res = client.models.generate_content(
+                        model="gemini-3.8-flash-tts", 
+                        contents=f"[INSTRUCTION: Deep chilling narrator]\n{text}", 
+                        config=cfg
+                    )
+                    
+                    audio_data = res.candidates[0].content.parts[0].inline_data.data
+                    if isinstance(audio_data, str):
+                        out_wav.write_bytes(base64.b64decode(audio_data))
+                    else:
+                        out_wav.write_bytes(audio_data)
                     
                     if out_wav.exists() and out_wav.stat().st_size > 1000:
                         log.info("⏳ تم توليد الصوت بنجاح. تبريد 30 ثانية...")
                         time.sleep(30)
                         return
                 except Exception as e: 
-                    log.warning(f"⚠️ فشل المفتاح {i+1}: {str(e)[:50]}") # <-- الآن سنعرف سبب الرفض لكل مفتاح
+                    log.warning(f"⚠️ فشل المفتاح {i+1}: {str(e)[:50]}")
                     time.sleep(2)
             
             log.warning("🔄 انتهت الجولة. استراحة 10 ثوانٍ قبل محاولة الجولة التالية...")
@@ -199,7 +210,7 @@ class Hybrid_Director:
 # 4. محرك الوسائط والمونتاج الآمن والرفع
 # ==================================================================================================
 class MediaFetcher:
-    def __init__(self): self.h = {"User-Agent": "HybridPipeline/22.1"}
+    def __init__(self): self.h = {"User-Agent": "HybridPipeline/22.2"}
     
     def fetch_media(self, source: str, query: str, out: Path, index: int) -> bool:
         try:
@@ -257,7 +268,7 @@ def upload_youtube(vid: Path):
     try:
         yt = build("youtube", "v3", credentials=Credentials(None, refresh_token=CONFIG.yt_refresh, token_uri="[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)", client_id=CONFIG.yt_id, client_secret=CONFIG.yt_secret))
         body = {
-            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V22.1", "categoryId": "24"},
+            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V22.2", "categoryId": "24"},
             "status": {"privacyStatus": "private"}
         }
         req = yt.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(str(vid), chunksize=-1, resumable=True, mimetype="video/mp4"))
@@ -270,7 +281,7 @@ def upload_youtube(vid: Path):
 # ==================================================================================================
 def main():
     start_time = datetime.now()
-    log.info(f"▶ بدء محرك Skynet V22.1 (الشفاف + الدوران الصلب) | القضية: {CONFIG.topic}")
+    log.info(f"▶ بدء محرك Skynet V22.2 (الشفاف + اتصال آمن) | القضية: {CONFIG.topic}")
     
     director = Hybrid_Director()
     fetcher = MediaFetcher()
