@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================================================
-UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V22.3 - The True Vision)
-- المراجع الفوري (الشفاف): تم إصلاح خطأ الـ (-p) وتمرير مسار اللقطات كجزء من الموجه لتعمل الرؤية.
-- المراجع النهائي: تم إصلاح خطأ استدعاء الملف الصوتي ليسمعه بوضوح.
-- أمان التصدير: دمج ورفع الفيديو (Drive + YouTube Private) قبل جلسة النقد.
-- إصلاح الصوت الجذري: الاتصال الآمن بالمكتبة لضمان عدم توقف (Client Closed).
+UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (HYBRID V22.4 - The Masterpiece)
+- المراجع البصري العميق: يستخرج 3 لقطات من الفيديو ليفهم السياق بالكامل، ويبرر قراره باللغة العربية.
+- إصلاح الصوت الجذري: تثبيت الاتصال بمكتبة جوجل لمنع إغلاق العميل (Client Closed).
+- أمان التصدير السحابي: دمج ورفع الفيديو (Drive + YouTube Private) قبل الدخول في جلسة النقد الذاتي.
+- التبديل التلقائي: PEXELS <-> PIXABAY (3 محاولات) وحلقات WIKIPEDIA (حتى 20 محاولة).
 ====================================================================================================
 """
 
@@ -34,7 +34,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 # ==================================================================================================
-# 1. إعدادات النظام
+# 1. إعدادات النظام وتوثيق السجلات
 # ==================================================================================================
 class ProTelemetryFormatter(logging.Formatter):
     COLORS = {'INFO': "\x1b[38;5;39m", 'WARNING': "\x1b[38;5;214m", 'ERROR': "\x1b[38;5;196m"}
@@ -83,7 +83,7 @@ CONFIG = HybridConfig()
 for p in [CONFIG.paths.base, CONFIG.paths.cache]: p.mkdir(parents=True, exist_ok=True)
 
 # ==================================================================================================
-# 3. العقل المدبر والمراجع الفوري 
+# 3. العقل المدبر والمراجع الفوري (الرؤية العميقة)
 # ==================================================================================================
 class Hybrid_Director:
     def plan_documentary(self) -> List[Dict]:
@@ -106,68 +106,122 @@ class Hybrid_Director:
             except Exception as e: log.warning(f"⚠️ خطأ السيناريو: {e}"); time.sleep(5)
         sys.exit("🛑 فشل كتابة السيناريو.")
 
-    def evaluate_scene_flash(self, media_path: Path, narration: str) -> Dict:
-        log.info("👁️ المراجع الفوري يحلل السياق والمشهد...")
-        eval_img_path = media_path.with_suffix(".eval.jpg")
-        try:
-            if media_path.suffix == ".mp4": subprocess.run(["ffmpeg", "-y", "-i", str(media_path), "-vframes", "1", "-q:v", "2", str(eval_img_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            else: eval_img_path = media_path
-        except: pass
+    def run_antigravity(self, model: str, effort: str, image: Path, prompt: str, timeout: int) -> str:
+        """دالة التغليف النظيفة لتشغيل أداة agy مع الوسائط وتمرير المسار كمعلمة مستقلة"""
+        cmd = [
+            "agy", 
+            "--model", model, 
+            "--effort", effort, 
+            "--dangerously-skip-permissions", 
+            "-p", prompt, 
+            str(image.resolve())
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if result.returncode != 0:
+            log.warning(f"Agy Error Output: {result.stderr}")
+        return result.stdout.strip()
 
-        # تم دمج مسار الصورة في الموجه لتقرأه الأداة دون أن تنهار
-        prompt = f"""أنت مخرج مونتاج لفيلم وثائقي جنائي غامض بعنوان: "{CONFIG.topic}".
-        النص السردي لهذا المشهد: "{narration}"
-        
-        [مسار الصورة لمعاينتها]: {eval_img_path.resolve()}
-        
-        هل المشهد يتطابق مع سياق النص وجو الجريمة والغموض؟
-        - اشرح سبب قبولك أو رفضك بدقة باللغة العربية في حقل (reason).
-        - إذا رفضت المشهد، اقترح كلمات بحث بالإنجليزية (search_query) لمقطع أدق.
-        - حدد فلتر المونتاج: ZOOM_IN, PAN_RIGHT, BW, NORMAL.
-        
-        أخرج JSON فقط: {{"decision": "ACCEPT" أو "REJECT", "reason": "شرح السبب هنا باللغة العربية", "montage": "ZOOM_IN", "new_query": "creepy dark alley"}}"""
-        
+    def create_video_contact_sheet(self, video_path: Path) -> Path:
+        """يستخرج 3 لقطات (20%، 50%، 80%) ويدمجها أفقياً لفهم الفيديوهات بشكل كامل"""
+        sheet_path = video_path.with_suffix(".sheet.jpg")
         try:
-            # تمت إضافة -p التي كانت مفقودة لتنفيذ الأمر بشكل صحيح
-            cmd = ["agy", "--model", "gemini-3.6-flash-high", "--dangerously-skip-permissions", "-p", prompt]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-            output = result.stdout.strip()
-            
-            if eval_img_path != media_path and eval_img_path.exists(): eval_img_path.unlink()
-            
-            match = re.search(r'\{.*\}', output, re.DOTALL)
-            if match:
-                return json.loads(match.group(0))
+            dur_str = subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)]).decode().strip()
+            dur = float(dur_str)
+            if dur < 1.0: raise ValueError("فيديو قصير جداً")
+            t1, t2, t3 = dur * 0.2, dur * 0.5, dur * 0.8
+            fc = f"[0:v]select='eq(t,{t1})+eq(t,{t2})+eq(t,{t3})',scale=640:-1,tile=3x1[v]"
+            subprocess.run(["ffmpeg", "-y", "-i", str(video_path), "-vf", fc, "-frames:v", "1", "-q:v", "2", str(sheet_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if sheet_path.exists(): return sheet_path
         except Exception as e:
-            log.warning(f"⚠️ فشل المراجع الفوري: {str(e)[:50]}")
-            if eval_img_path != media_path and eval_img_path.exists(): eval_img_path.unlink()
+            pass
+        
+        # خطة بديلة لو فشل الدمج
+        subprocess.run(["ffmpeg", "-y", "-ss", "00:00:01", "-i", str(video_path), "-frames:v", "1", "-q:v", "2", str(sheet_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return sheet_path
+
+    def evaluate_scene_with_scout(self, media_path: Path, narration: str, scene_type: str) -> Dict:
+        """يراجع الوسيط المرشح فورياً ويقرر هل هو مرتبط فعلياً بسياق التعليق الصوتي ويطبع الأسباب"""
+        log.info(f"👁️ المراجع الفوري (gemini-3.6-flash-high) يحلل الوسيط...")
+        review_image = media_path
+
+        if media_path.suffix.lower() in {".mp4", ".mov", ".webm", ".mkv"}:
+            review_image = self.create_video_contact_sheet(media_path)
+        else:
+            review_image = media_path.with_suffix(".eval.jpg")
+            try: Image.open(media_path).convert("RGB").save(review_image, "JPEG", quality=80)
+            except: pass
+
+        prompt = f"""أنت مراجع بصري فوري لمشروع وثائقي تحقيقي بعنوان: "{CONFIG.topic}".
+مهمتك ليست تقييم جمال الصورة، بل التطابق الفعلي مع سياق التعليق الصوتي.
+
+نوع الوسيط: {scene_type}
+التعليق الصوتي: "{narration}"
+
+قواعد صارمة:
+1. ACCEPT فقط إذا كان المحتوى المرئي مرتبطاً بشكل مباشر بالتعليق الصوتي.
+2. لا تقبل صورة عامة فقط لأنها تبدو سينمائية.
+3. إذا كان التطابق غير مؤكد، اختر REJECT.
+4. اقترح new_query بالإنجليزية إذا رفضت اللقطة.
+5. حدد montage مناسب: ZOOM_IN, PAN_RIGHT, BW, NORMAL.
+
+أجب JSON فقط بهذا الشكل:
+{{
+  "decision": "ACCEPT" أو "REJECT",
+  "relevance_score": 0-100,
+  "reason": "سبب الرفض أو القبول بالعربية",
+  "visual_evidence": "الأدلة التي رأيتها في الصورة لدعم قرارك بالعربية",
+  "montage": "ZOOM_IN",
+  "new_query": "كلمة بحث بديلة"
+}}"""
+
+        try:
+            result = self.run_antigravity(model="gemini-3.6-flash-high", effort="high", image=review_image, prompt=prompt, timeout=120)
             
-        return {"decision": "ACCEPT", "reason": "فشل التقييم التقني، تم الاعتماد الافتراضي.", "montage": "ZOOM_IN", "new_query": ""}
+            if review_image != media_path and review_image.exists(): review_image.unlink()
+
+            match = re.search(r'\{.*\}', result, re.DOTALL)
+            if not match: raise ValueError("لا يوجد JSON في الرد")
+                
+            data = json.loads(match.group(0))
+            score = int(data.get("relevance_score", 0))
+            reason = data.get("reason", "لا يوجد تبرير")
+            evidence = data.get("visual_evidence", "لا يوجد دليل")
+            
+            accepted = (data.get("decision") == "ACCEPT" and score >= 70)
+
+            if not accepted:
+                log.warning(f"❌ رُفض المشهد (النقاط: {score}%): {reason} | الدليل: {evidence}")
+            else:
+                log.info(f"✅ قُبل المشهد (النقاط: {score}%): {reason} | الدليل: {evidence}")
+
+            return {
+                "accepted": accepted,
+                "montage": data.get("montage", "NORMAL"),
+                "new_query": data.get("new_query", "")
+            }
+
+        except Exception as e:
+            log.warning(f"⚠️ فشل المراجع الفوري (الاعتماد الافتراضي): {str(e)[:50]}")
+            if review_image != media_path and review_image.exists(): review_image.unlink()
+            return {"accepted": True, "montage": "ZOOM_IN", "new_query": ""}
 
     def self_critique_and_recode(self, final_audio: Path) -> bool:
         log.info("🧠 المراجع النهائي يقوم بالتحليل الشامل للمشروع...")
         logs = Path("production_logs.txt").read_text()[-2000:] if Path("production_logs.txt").exists() else "No logs"
         
-        # تم دمج مسار الصوت في الموجه لتقرأه الأداة
         prompt = f"""أنت الذكاء الاصطناعي المؤسس. اقرأ سجلات الأخطاء:
-        {logs}
-        
-        [مسار الملف الصوتي للمراجعة]: {final_audio.resolve()}
-        
-        استمع للمسار الصوتي. إذا كان هناك خلل فادح (انقطاع صوت، توقف)، قم بكتابة كود `pipeline.py` جديد بالكامل ومُعدّل داخل كتلة ```python .
-        إذا كان النظام يعمل بكفاءة، أجب بكلمة PERFECT فقط."""
+{logs}
+استمع للمسار الصوتي (المرفق). إذا كان هناك خلل فادح (انقطاع صوت، توقف)، قم بكتابة كود `pipeline.py` جديد بالكامل ومُعدّل داخل كتلة ```python .
+إذا كان النظام يعمل بكفاءة، أجب بكلمة PERFECT فقط."""
         
         try:
-            # تمت إضافة -p التي كانت مفقودة هنا أيضاً
-            cmd = ["agy", "--model", "gemini-3.1-pro-high", "--dangerously-skip-permissions", "-p", prompt]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
-            output = result.stdout.strip()
+            result = self.run_antigravity(model="gemini-3.1-pro-high", effort="high", image=final_audio, prompt=prompt, timeout=900)
             
-            if "PERFECT" in output:
+            if "PERFECT" in result:
                 log.info("✅ المراجع النهائي يعتمد الكود والإنتاج الحالي.")
                 return True
                 
-            code_match = re.search(r'```python(.*?)```', output, re.DOTALL)
+            code_match = re.search(r'```python(.*?)```', result, re.DOTALL)
             if code_match:
                 new_code = code_match.group(1).strip()
                 log.warning("🔄 تحذير: المراجع قام بتحديث الكود المصدري! جاري إعادة التشغيل...")
@@ -187,6 +241,7 @@ class Hybrid_Director:
             log.info(f"🎙️ توليد الصوت (الجولة {round_num + 1}/3)...")
             for i, key in enumerate(CONFIG.gemini_keys):
                 try:
+                    # تثبيت العميل المستقل لمنع الإغلاق المبكر للاتصال
                     client = genai.Client(api_key=key)
                     res = client.models.generate_content(
                         model="gemini-3.8-flash-tts", 
@@ -206,16 +261,16 @@ class Hybrid_Director:
                     log.warning(f"⚠️ فشل المفتاح {i+1}: {str(e)[:50]}")
                     time.sleep(2)
             
-            log.warning("🔄 انتهت الجولة. استراحة 10 ثوانٍ قبل محاولة الجولة التالية...")
+            log.warning("🔄 انتهت الجولة. استراحة 10 ثوانٍ قبل المحاولة...")
             time.sleep(10)
             
         log.error("❌ استنفدت جميع المفاتيح لتوليد الصوت بعد 3 جولات!")
 
 # ==================================================================================================
-# 4. محرك الوسائط والمونتاج الآمن والرفع
+# 4. محرك الوسائط والمونتاج والتصدير السحابي
 # ==================================================================================================
 class MediaFetcher:
-    def __init__(self): self.h = {"User-Agent": "HybridPipeline/22.3"}
+    def __init__(self): self.h = {"User-Agent": "HybridPipeline/22.4"}
     
     def fetch_media(self, source: str, query: str, out: Path, index: int) -> bool:
         try:
@@ -234,6 +289,7 @@ class MediaFetcher:
         return False
 
 def process_audio(voice: Path, foley: Path, has_foley: bool, out: Path) -> float:
+    # تم إزالة silenceremove لتجنب قطع الصوت العميق
     if has_foley:
         fc = "[0:a]loudnorm=I=-16[v]; [1:a]volume=0.04[bg]; [v][bg]amix=inputs=2:duration=first:dropout_transition=0[aout]"
         cmd = ["ffmpeg", "-y", "-i", str(voice), "-stream_loop", "-1", "-i", str(foley), "-filter_complex", fc, "-map", "[aout]", "-ar", "48000", str(out)]
@@ -273,7 +329,7 @@ def upload_youtube(vid: Path):
     try:
         yt = build("youtube", "v3", credentials=Credentials(None, refresh_token=CONFIG.yt_refresh, token_uri="[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)", client_id=CONFIG.yt_id, client_secret=CONFIG.yt_secret))
         body = {
-            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V22.3", "categoryId": "24"},
+            "snippet": {"title": f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}", "description": "تم الإنتاج عبر المحرك الذاتي V22.4", "categoryId": "24"},
             "status": {"privacyStatus": "private"}
         }
         req = yt.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(str(vid), chunksize=-1, resumable=True, mimetype="video/mp4"))
@@ -282,11 +338,11 @@ def upload_youtube(vid: Path):
     except Exception as e: log.error(f"⚠️ فشل يوتيوب: {e}")
 
 # ==================================================================================================
-# 5. وحدة التحكم المركزية 
+# 5. الدورة الرئيسية للمحرك
 # ==================================================================================================
 def main():
     start_time = datetime.now()
-    log.info(f"▶ بدء محرك Skynet V22.3 (الرؤية الحقيقية) | القضية: {CONFIG.topic}")
+    log.info(f"▶ بدء محرك Skynet V22.4 (The Masterpiece) | القضية: {CONFIG.topic}")
     
     director = Hybrid_Director()
     fetcher = MediaFetcher()
@@ -325,17 +381,13 @@ def main():
                     is_vid = fetcher.fetch_media(current_source, current_q, c_media, attempt)
                     if not is_vid or not c_media.exists(): continue
                     
-                    eval_res = director.evaluate_scene_flash(c_media, txt)
-                    reason = eval_res.get("reason", "لا يوجد تبرير متاح")
-                    
-                    if eval_res.get("decision") == "ACCEPT":
-                        log.info(f"✅ المخرج قَبِل المشهد: {reason}")
+                    eval_res = director.evaluate_scene_with_scout(c_media, txt, current_source)
+                    if eval_res["accepted"]:
                         scene_approved = True
-                        montage_style = eval_res.get("montage", "NORMAL")
+                        montage_style = eval_res["montage"]
                         break
                     else:
-                        log.warning(f"❌ المخرج رفض المشهد: {reason} | اقتراحه للبحث القادم: {eval_res.get('new_query')}")
-                        current_q = eval_res.get("new_query", current_q + " mysterious")
+                        current_q = eval_res["new_query"] if eval_res["new_query"] else current_q + " mystery"
                         c_media.unlink()
         else:
             current_q = original_q
@@ -345,16 +397,12 @@ def main():
                 is_vid = False
                 has_media = fetcher.fetch_media("WIKIPEDIA", current_q, c_media, attempt)
                 if has_media and c_media.exists():
-                    eval_res = director.evaluate_scene_flash(c_media, txt)
-                    reason = eval_res.get("reason", "لا يوجد تبرير متاح")
-                    
-                    if eval_res.get("decision") == "ACCEPT":
-                        log.info(f"✅ المخرج قَبِل صورة ويكيبيديا: {reason}")
+                    eval_res = director.evaluate_scene_with_scout(c_media, txt, "WIKIPEDIA")
+                    if eval_res["accepted"]:
                         scene_approved = True
-                        montage_style = eval_res.get("montage", "ZOOM_IN")
+                        montage_style = eval_res["montage"]
                     else:
-                        log.warning(f"❌ المخرج رفض صورة ويكيبيديا: {reason} | يحاول ببحث آخر...")
-                        current_q = eval_res.get("new_query", current_q)
+                        current_q = eval_res["new_query"] if eval_res["new_query"] else current_q
                         c_media.unlink()
                 else: current_q += " evidence"
                 attempt += 1
@@ -376,7 +424,7 @@ def main():
         upload_drive(final_vid)
         upload_youtube(final_vid)
 
-    # جلسة النقد الذاتي
+    # جلسة النقد الذاتي والتقييم النهائي
     master_audio = CONFIG.paths.base / "master_audio.wav"
     if final_audio_segments:
         txt_list = CONFIG.paths.base / "audio_list.txt"
