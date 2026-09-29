@@ -329,6 +329,7 @@ ARCHIVE
             cmd = [
                 "agy",
                 "--model", "gemini-3.8-flash",
+                "--effort", "high",
                 "--dangerously-skip-permissions",
                 "-p", prompt,
             ]
