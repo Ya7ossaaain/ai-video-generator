@@ -3,7 +3,7 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.17 - Syntax Fixed / Unlimited Vision Search (Patched)
+HYBRID V22.20 - Antigravity Chat Output & Infinite Loop Patched
 """
 
 import os
@@ -96,7 +96,6 @@ def enforce_english_query(query, max_chars=90):
     safe_q = re.sub(r"[^A-Za-z0-9,._' -]", " ", safe_q)
     safe_q = re.sub(r"\s+", " ", safe_q).strip()
 
-    # إزالة الكلمات المكررة التي قد تتراكم بعد رفض عدة لقطات.
     words = []
     seen = set()
     for word in safe_q.split():
@@ -261,40 +260,50 @@ ARCHIVE
         raise RuntimeError("🛑 فشل إنشاء السيناريو بعد 3 جولات.")
 
     async def _chat_to_text(self, agent, content):
+        """
+        قراءة الرد من Antigravity بمرونة تامة للتعامل مع كافة أشكال المخرجات
+        """
         try:
             response = await agent.chat(content)
-            
-            # في حزمة Google GenAI عادة يكون النص خاصية (Property)
-            if hasattr(response, "text"):
-                text_value = response.text
-                if text_value:
-                    return str(text_value)
-                    
-            # كخيار احتياطي إذا كان الدالة (Method)
-            if callable(getattr(response, "text", None)):
-                text_value = response.text()
-                if asyncio.iscoroutine(text_value):
-                    text_value = await text_value
-                if text_value:
-                    return str(text_value)
-                    
         except Exception as e:
-            log.error(f"⚠️ خطأ أثناء قراءة الرد من Antigravity: {e}")
+            log.error(f"⚠️ فشل استدعاء agent.chat: {e}")
+            return ""
 
-        # محاولة قراءة النص المقطع (Stream) إن وجد
+        # 1. إذا كان الرد عبارة عن نص عادي مباشرة
+        if isinstance(response, str):
+            return response.strip()
+
+        # 2. محاولة قراءة الخاصية .text سواء كانت المتغير نفسه أو دالة
+        try:
+            if hasattr(response, "text"):
+                val = response.text
+                if callable(val):
+                    val = val()
+                if asyncio.iscoroutine(val):
+                    val = await val
+                if val:
+                    return str(val).strip()
+        except Exception as e:
+            pass # نتجاهل الخطأ وننتقل للطريقة التالية
+
+        # 3. محاولة قراءته كـ Async Iterable (Stream)
         chunks = []
         try:
-            async for chunk in response:
-                if isinstance(chunk, str):
-                    chunks.append(chunk)
-                elif hasattr(chunk, "text"):
-                    value = getattr(chunk, "text", "")
-                    if value:
-                        chunks.append(str(value))
+            if hasattr(response, "__aiter__"):
+                async for chunk in response:
+                    if isinstance(chunk, str):
+                        chunks.append(chunk)
+                    elif hasattr(chunk, "text"):
+                        val = chunk.text
+                        if callable(val): 
+                            val = val()
+                        chunks.append(str(val))
+                return "".join(chunks).strip()
         except Exception as e:
-            log.debug(f"Stream read skipped: {e}")
+            pass
 
-        return "".join(chunks).strip()
+        # 4. الملاذ الأخير: تحويل الكائن كنص
+        return str(response).strip()
 
     async def _async_evaluate_scout(self, media_path, narration, source):
         config = LocalAgentConfig(model="gemini-3.6-flash", effort="high")
@@ -318,7 +327,7 @@ ARCHIVE
 4. اشرح سبب القرار باختصار.
 5. عند الرفض اقترح new_query باللغة الإنجليزية فقط.
 6. score بين 0 و1.
-7. أخرج JSON فقط بلا Markdown.
+7. أخرج JSON فقط بلا Markdown، وتأكد أن يبدأ بـ {{ وينتهي بـ }}.
 
 البنية:
 {{
@@ -332,7 +341,6 @@ ARCHIVE
 
         media_input = load_ag_media(media_path)
 
-        # Antigravity SDK requires an active async Agent session.
         async with Agent(config=config) as agent:
             return await self._chat_to_text(
                 agent,
@@ -348,50 +356,39 @@ ARCHIVE
                         media_path, narration, source
                     )
                 )
-            )
-            log.info(f"🗣️ نتيجة المراجع:\n{result_text}")
-
-            # استخراج JSON حتى لو أضاف النموذج أسطرًا أو Markdown.
-            cleaned = result_text.strip()
-            cleaned = re.sub(
-                r"^```(?:json)?\s*|\s*```$",
-                "",
-                cleaned,
-                flags=re.IGNORECASE | re.DOTALL,
             ).strip()
 
-            data = None
-
-            try:
-                candidate = json.loads(cleaned)
-                if isinstance(candidate, dict):
-                    data = candidate
-            except Exception:
-                pass
-
-            if data is None:
-                decoder = json.JSONDecoder()
-                for pos, char in enumerate(cleaned):
-                    if char != "{":
-                        continue
-                    try:
-                        candidate, _ = decoder.raw_decode(cleaned[pos:])
-                        if isinstance(candidate, dict):
-                            data = candidate
-                            break
-                    except Exception:
-                        continue
-
-            if data is None:
-                log.warning(
-                    "⚠️ تعذر استخراج JSON من رد Antigravity. "
-                    f"الرد الخام: {cleaned[:1000]}"
-                )
+            if not result_text:
+                log.warning("⚠️ رد Antigravity فارغ تماماً.")
                 return {
                     "accepted": False,
                     "montage": "ZOOM_IN",
-                    "new_query": "",
+                    "new_query": "investigation evidence",
+                    "score": 0.0,
+                    "reason": "Empty Response"
                 }
+
+            log.info(f"🗣️ نتيجة المراجع:\n{result_text}")
+
+            data = None
+            # استخراج JSON بأمان عبر التعبيرات النمطية
+            match = re.search(r"\{[\s\S]*\}", result_text)
+            if match:
+                try:
+                    data = json.loads(match.group(0))
+                except Exception:
+                    pass
+
+            if data is None:
+                log.warning(f"⚠️ تعذر استخراج JSON من الرد: {result_text[:200]}")
+                return {
+                    "accepted": False,
+                    "montage": "ZOOM_IN",
+                    "new_query": "archival evidence",
+                    "score": 0.0,
+                    "reason": "Parse Error"
+                }
+
             score = float(data.get("score", 0.0))
             decision = str(data.get("decision", "")).upper()
 
@@ -409,6 +406,8 @@ ARCHIVE
                 "accepted": False,
                 "montage": "ZOOM_IN",
                 "new_query": "",
+                "score": 0.0,
+                "reason": "Exception"
             }
 
     async def _async_critique(self, final_video, logs):
@@ -437,7 +436,6 @@ ARCHIVE
 
         media_input = load_ag_media(final_video)
 
-        # Antigravity SDK requires an active async Agent session.
         async with Agent(config=config) as agent:
             return await self._chat_to_text(
                 agent,
@@ -561,7 +559,7 @@ ARCHIVE
 
 class MediaFetcher:
     def __init__(self):
-        self.h = {"User-Agent": "HybridPipeline/22.17 (https://github.com/Ya7ossaaain/ai-video-generator; contact@example.com)"}
+        self.h = {"User-Agent": "HybridPipeline/22.20 (https://github.com/Ya7ossaaain/ai-video-generator; contact@example.com)"}
 
     def _get(self, url, **kwargs):
         kwargs.setdefault("timeout", 30)
@@ -572,10 +570,6 @@ class MediaFetcher:
 
     def fetch_media(self, source, query, out, index):
         safe_query = enforce_english_query(query)
-
-        # Pixabay's q parameter has a practical length limit.
-        # Keep the search phrase compact so long Scout-generated
-        # queries do not trigger HTTP 400.
         pixabay_query = safe_query[:100].strip()
 
         try:
@@ -995,7 +989,7 @@ def upload_youtube(vid):
                 "description": (
                     "تم الإنتاج عبر "
                     "UNIVERSAL INVESTIGATIVE "
-                    "DOCUMENTARY ENGINE V22.17 (Patched)"
+                    "DOCUMENTARY ENGINE V22.20"
                 ),
                 "categoryId": "24",
             },
@@ -1028,7 +1022,7 @@ def main():
     start_time = datetime.now()
 
     log.info(
-        f"▶ بدء المحرك V22.17 | القضية: {CONFIG.topic}"
+        f"▶ بدء المحرك V22.20 | القضية: {CONFIG.topic}"
     )
 
     director = Hybrid_Director()
@@ -1108,7 +1102,7 @@ def main():
         current_q = enforce_english_query(original_q)
         sources_pool = get_source_pool(typ)
         attempt_counter = 0
-        MAX_ATTEMPTS = 15  # 🔴 صمام الأمان: 15 محاولة كحد أقصى للمشهد الواحد
+        MAX_ATTEMPTS = 15  # 🔴 منع حلقة البحث اللانهائية
 
         query_variants = [
             "documentary evidence",
@@ -1229,7 +1223,7 @@ def main():
                     f"لـ '{safe_q}'."
                 )
             
-            # 🔴 إضافة فترة راحة لتجنب حظر الـ API
+            # 🔴 راحة لتجنب حظر السيرفرات (Error 429)
             time.sleep(3)
             attempt_counter += 1
 
@@ -1251,9 +1245,8 @@ def main():
 
         if not scene_approved:
             log.error(f"❌ تعذر اعتماد المشهد {i + 1} بعد {MAX_ATTEMPTS} محاولة.")
-            # 🔴 إجراء إنقاذي: إجبار استخدام آخر لقطة تم تحميلها إن وجدت
             if c_media.exists() and c_media.stat().st_size > 1000:
-                log.warning("⚠️ سيتم إجبار استخدام آخر لقطة تم تحميلها كإجراء إنقاذي.")
+                log.warning("⚠️ إجبار استخدام آخر لقطة تم تحميلها كإجراء إنقاذي للمشهد.")
                 scene_approved = True
             else:
                 append_memory(
