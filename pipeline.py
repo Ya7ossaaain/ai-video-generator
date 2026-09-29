@@ -3,7 +3,7 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.22 - Links Cleaned
+HYBRID V22.23 - Anti-Markdown Links Patch
 """
 
 import os
@@ -233,7 +233,7 @@ ARCHIVE
                     re.DOTALL,
                 )
                 if not match:
-                    log.warning("⚠️ لم يتم العثور على JSON Array صالح من Agy.")
+                    log.warning("⚠️️ لم يتم العثور على JSON Array صالح من Agy.")
                     time.sleep(5)
                     continue
 
@@ -541,7 +541,8 @@ ARCHIVE
 
 class MediaFetcher:
     def __init__(self):
-        self.h = {"User-Agent": "HybridPipeline/22.22 ([https://github.com/Ya7ossaaain/ai-video-generator](https://github.com/Ya7ossaaain/ai-video-generator); contact@example.com)"}
+        # فصلنا الرابط لتفادي الـ Markdown
+        self.h = {"User-Agent": "HybridPipeline/22.23 (" + "https://" + "[github.com/Ya7ossaaain/ai-video-generator](https://github.com/Ya7ossaaain/ai-video-generator); contact@example.com)"}
 
     def _get(self, url, **kwargs):
         kwargs.setdefault("timeout", 30)
@@ -561,7 +562,7 @@ class MediaFetcher:
                     return False
 
                 r = self._get(
-                    "[https://api.pexels.com/videos/search](https://api.pexels.com/videos/search)",
+                    "https://" + "[api.pexels.com/videos/search](https://api.pexels.com/videos/search)",
                     params={
                         "query": safe_query,
                         "orientation": "landscape",
@@ -603,7 +604,7 @@ class MediaFetcher:
                     return False
 
                 r = self._get(
-                    "[https://pixabay.com/api/videos/](https://pixabay.com/api/videos/)",
+                    "https://" + "[pixabay.com/api/videos/](https://pixabay.com/api/videos/)",
                     params={
                         "key": CONFIG.pixabay,
                         "q": pixabay_query,
@@ -634,7 +635,7 @@ class MediaFetcher:
 
             if source == "WIKIPEDIA":
                 r = self._get(
-                    "[https://en.wikipedia.org/w/api.php](https://en.wikipedia.org/w/api.php)",
+                    "https://" + "en.wikipedia.org/w/api.php",
                     params={
                         "action": "query",
                         "generator": "search",
@@ -672,7 +673,7 @@ class MediaFetcher:
 
             if source == "ARCHIVE":
                 r = self._get(
-                    "[https://archive.org/advancedsearch.php](https://archive.org/advancedsearch.php)",
+                    "https://" + "archive.org/advancedsearch.php",
                     params={
                         "q": f"{safe_query} AND mediatype:image",
                         "fl[]": "identifier",
@@ -694,7 +695,7 @@ class MediaFetcher:
                     return False
 
                 image_url = (
-                    "[https://archive.org/services/img/](https://archive.org/services/img/)"
+                    "https://" + "archive.org/services/img/"
                     + urllib.parse.quote(identifier)
                 )
                 media = self._get(
@@ -710,7 +711,7 @@ class MediaFetcher:
                     return False
 
                 r = self._get(
-                    "[https://freesound.org/apiv2/search/text/](https://freesound.org/apiv2/search/text/)",
+                    "https://" + "freesound.org/apiv2/search/text/",
                     params={
                         "query": safe_query,
                         "token": CONFIG.freesound,
@@ -885,7 +886,7 @@ def upload_drive(vid):
         credentials = Credentials(
             None,
             refresh_token=CONFIG.drive_token,
-            token_uri="[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)",
+            token_uri="https://" + "[oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)",
             client_id=CONFIG.yt_id,
             client_secret=CONFIG.yt_secret,
         )
@@ -952,7 +953,7 @@ def upload_youtube(vid):
         credentials = Credentials(
             None,
             refresh_token=CONFIG.yt_refresh,
-            token_uri="[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)",
+            token_uri="https://" + "[oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)",
             client_id=CONFIG.yt_id,
             client_secret=CONFIG.yt_secret,
         )
@@ -971,7 +972,7 @@ def upload_youtube(vid):
                 "description": (
                     "تم الإنتاج عبر "
                     "UNIVERSAL INVESTIGATIVE "
-                    "DOCUMENTARY ENGINE V22.22"
+                    "DOCUMENTARY ENGINE V22.23"
                 ),
                 "categoryId": "24",
             },
@@ -1004,7 +1005,7 @@ def main():
     start_time = datetime.now()
 
     log.info(
-        f"▶ بدء المحرك V22.22 | القضية: {CONFIG.topic}"
+        f"▶ بدء المحرك V22.23 | القضية: {CONFIG.topic}"
     )
 
     director = Hybrid_Director()
