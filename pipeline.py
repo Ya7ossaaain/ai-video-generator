@@ -295,10 +295,7 @@ ARCHIVE
             return ""
 
     async def _async_evaluate_scout(self, media_path, narration, source):
-        # 🔴 إصلاح الخطأ: تمرير config بدون api_key لضمان عمل Agent وعدم توجيهه لـ AI Studio
-        config = LocalAgentConfig(model="gemini-3.1-flash", effort="high")
-        prompt = f"""
-أنت المراجع البصري الفوري لفيلم وثائقي تحقيقي بعنوان:
+        prompt = f'''أنت المراجع البصري الفوري لفيلم وثائقي تحقيقي بعنوان:
 "{CONFIG.topic}"
 
 نوع المصدر:
@@ -307,7 +304,8 @@ ARCHIVE
 التعليق الصوتي:
 "{narration}"
 
-شاهد الوسيط المرفق بعناية.
+شاهد الوسيط المرفق بعناية:
+{media_path}
 
 قواعد صارمة:
 1. ACCEPT فقط إذا كان المحتوى المرئي مرتبطاً ارتباطاً مباشراً وواضحاً بالنص.
@@ -326,12 +324,31 @@ ARCHIVE
   "montage": "ZOOM_IN",
   "new_query": "English replacement query"
 }}
-""".strip()
+'''
+        try:
+            cmd = [
+                "agy",
+                "--model", "gemini-3.1-flash",
+                "--effort", "high",
+                "--dangerously-skip-permissions",
+                "-p", prompt,
+            ]
+            import asyncio
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                raise RuntimeError(f"Agy failed: {stderr.decode('utf-8')}")
+            
+            result_text = stdout.decode("utf-8").strip()
+            return result_text
+        except Exception as e:
+            log.error(f"⚠️ انهيار المراجع الفوري: {e}")
+            return ""
 
-        media_input = load_ag_media(media_path)
-        
-        async with Agent(config=config) as agent:
-            return await self._chat_to_text(agent, [prompt, media_input])
 
     def evaluate_scene_with_scout(self, media_path, narration, source):
         log.info(f"👁 Antigravity Vision Scout يفحص الوسيط من {source}...")
@@ -396,15 +413,13 @@ ARCHIVE
             }
 
     async def _async_critique(self, final_video, logs):
-        # 🔴 إصلاح الخطأ: تمرير config بدون api_key
-        config = LocalAgentConfig(model="gemini-3.1-pro", effort="high")
-        prompt = f"""
-أنت المراجع النهائي للفيلم الوثائقي.
+        prompt = f'''أنت المراجع النهائي للفيلم الوثائقي.
 
 سجلات النظام:
 {logs}
 
-شاهد الفيلم النهائي المرفق.
+شاهد الفيلم النهائي المرفق:
+{final_video}
 
 افحص:
 1. تزامن الصوت والصورة.
@@ -417,12 +432,31 @@ ARCHIVE
 
 إذا كان الفيلم سليماً:
 أجب بكلمة PERFECT فقط.
-""".strip()
+'''
+        try:
+            cmd = [
+                "agy",
+                "--model", "gemini-3.1-pro",
+                "--effort", "high",
+                "--dangerously-skip-permissions",
+                "-p", prompt,
+            ]
+            import asyncio
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                raise RuntimeError(f"Agy failed: {stderr.decode('utf-8')}")
+            
+            result_text = stdout.decode("utf-8").strip()
+            return result_text
+        except Exception as e:
+            log.error(f"⚠️ فشل المراجع النهائي: {e}")
+            return ""
 
-        media_input = load_ag_media(final_video)
-        
-        async with Agent(config=config) as agent:
-            return await self._chat_to_text(agent, [prompt, media_input])
 
     def self_critique_and_recode(self, final_video):
         log.info("🧠 المراجع النهائي يشاهد الفيلم الكامل...")
