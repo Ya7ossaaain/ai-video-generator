@@ -3,7 +3,7 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.27 - Absolute URL Obfuscation Patch
+HYBRID V22.29 - Absolute Auth Isolation & Environment Cleanup
 """
 
 import os
@@ -139,6 +139,10 @@ class HybridConfig:
     drive_token = os.environ.get("DRIVE_REFRESH_TOKEN", "")
     yt_refresh = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
 
+# 🔴 العزل التام: نحذف GEMINI_API_KEY من بيئة النظام فوراً بعد نسخه، 
+# لكي لا تكتشفه حزمة Antigravity وتطالب به بدلاً من AGY_CREDENTIALS (تجنباً لخطأ 401)
+if "GEMINI_API_KEY" in os.environ:
+    del os.environ["GEMINI_API_KEY"]
 
 CONFIG = HybridConfig()
 CONFIG.paths.base.mkdir(parents=True, exist_ok=True)
@@ -260,9 +264,6 @@ ARCHIVE
         raise RuntimeError("🛑 فشل إنشاء السيناريو بعد 3 جولات.")
 
     async def _chat_to_text(self, agent, content):
-        """
-        استخراج النص بصرامة وقوة من كائن ChatResponse الخاص بـ Antigravity.
-        """
         try:
             response = await agent.chat(content)
             extracted_text = ""
@@ -472,7 +473,7 @@ ARCHIVE
 
     def generate_voice(self, text, out_wav):
         if not CONFIG.gemini_keys:
-            log.error("❌ لا توجد GEMINI_API_KEY في Environment.")
+            log.error("❌ لا توجد GEMINI_API_KEY لاستخدامها في الصوت.")
             return
 
         cfg = types.GenerateContentConfig(
@@ -540,11 +541,9 @@ ARCHIVE
 
 class MediaFetcher:
     def __init__(self):
-        # تمويه رابط GitHub الخاص بالـ User-Agent
         gh_domain = f"{'github'}.com"
         self.h = {
-            "User-Agent": f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 HybridBot/1.0 (https://{gh_domain}/Ya7ossaaain; contact@example.com)",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+            "User-Agent": f"HybridDocBot/1.0 (https://{gh_domain}/Ya7ossaaain; contact@example.com)",
         }
 
     def _get(self, url, **kwargs):
@@ -563,7 +562,6 @@ class MediaFetcher:
                 if not CONFIG.pexels:
                     return False
 
-                # تمويه روابط Pexels
                 api_url = f"https://api.{'pexels'}.com/videos/search"
                 r = self._get(
                     api_url,
@@ -611,7 +609,6 @@ class MediaFetcher:
                 if not CONFIG.pixabay:
                     return False
 
-                # تمويه رابط Pixabay
                 api_url = f"https://{'pixabay'}.com/api/videos/"
                 r = self._get(
                     api_url,
@@ -649,7 +646,6 @@ class MediaFetcher:
                 return out.exists() and out.stat().st_size > 50000
 
             if source == "WIKIPEDIA":
-                # تمويه رابط Wikipedia
                 api_url = f"https://en.{'wikipedia'}.org/w/api.php"
                 r = self._get(
                     api_url,
@@ -694,7 +690,6 @@ class MediaFetcher:
                 return out.exists() and out.stat().st_size > 10000
 
             if source == "ARCHIVE":
-                # تمويه رابط Archive Search
                 api_url = f"https://{'archive'}.org/advancedsearch.php"
                 r = self._get(
                     api_url,
@@ -723,7 +718,6 @@ class MediaFetcher:
                 if not identifier:
                     return False
 
-                # تمويه رابط Archive Image
                 image_url = f"https://{'archive'}.org/services/img/" + urllib.parse.quote(identifier)
                 media = self._get(
                     image_url,
@@ -737,7 +731,6 @@ class MediaFetcher:
                 if not CONFIG.freesound:
                     return False
 
-                # تمويه رابط Freesound
                 api_url = f"https://{'freesound'}.org/apiv2/search/text/"
                 r = self._get(
                     api_url,
@@ -775,7 +768,14 @@ class MediaFetcher:
                 return out.exists() and out.stat().st_size > 1000
 
         except requests.RequestException as e:
-            log.warning(f"🌐 خطأ شبكة في {source}: {str(e)[:150]}")
+            err_msg = str(e)
+            if "429" in err_msg:
+                log.warning(f"⏳ {source} يطلب التمهل (Error 429). سننتظر قليلاً...")
+                time.sleep(3)
+            elif "403" in err_msg:
+                log.warning(f"🛡️ {source} يرفض الوصول (Error 403). تم التخطي بأمان.")
+            else:
+                log.warning(f"🌐 خطأ شبكة في {source}: {err_msg[:150]}")
         except Exception as e:
             log.warning(f"⚠️ خطأ {source}: {str(e)[:150]}")
 
@@ -913,7 +913,6 @@ def upload_drive(vid):
     log.info("☁️ الرفع إلى Google Drive...")
 
     try:
-        # تمويه رابط Google OAuth
         token_url = f"https://{'oauth2'}[.googleapis.com/token](https://.googleapis.com/token)"
         credentials = Credentials(
             None,
@@ -1005,7 +1004,7 @@ def upload_youtube(vid):
                 "description": (
                     "تم الإنتاج عبر "
                     "UNIVERSAL INVESTIGATIVE "
-                    "DOCUMENTARY ENGINE V22.27"
+                    "DOCUMENTARY ENGINE V22.28"
                 ),
                 "categoryId": "24",
             },
@@ -1038,7 +1037,7 @@ def main():
     start_time = datetime.now()
 
     log.info(
-        f"▶ بدء المحرك V22.27 | القضية: {CONFIG.topic}"
+        f"▶ بدء المحرك V22.28 | القضية: {CONFIG.topic}"
     )
 
     director = Hybrid_Director()
@@ -1254,7 +1253,7 @@ def main():
                 )
 
                 log.info(
-                    "♻️️ لم يتم اعتماد أي لقطة في الدورة الكاملة. "
+                    "♻️ لم يتم اعتماد أي لقطة في الدورة الكاملة. "
                     f"تغيير استراتيجية البحث إلى: '{current_q}'"
                 )
 
