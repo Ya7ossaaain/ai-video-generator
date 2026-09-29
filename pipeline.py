@@ -293,8 +293,7 @@ ARCHIVE
             return ""
 
     async def _async_evaluate_scout(self, media_path, narration, source):
-        # 🔴 إصلاح الخطأ: تمرير config بدون api_key لضمان عمل Agent وعدم توجيهه لـ AI Studio
-        config = LocalAgentConfig(model="gemini-3.6-flash", effort="high")
+        config = LocalAgentConfig(model="gemini-3.1-flash", effort="high", api_key=CONFIG.gemini_keys[0] if CONFIG.gemini_keys else None)
         prompt = f"""
 أنت المراجع البصري الفوري لفيلم وثائقي تحقيقي بعنوان:
 "{CONFIG.topic}"
@@ -394,8 +393,7 @@ ARCHIVE
             }
 
     async def _async_critique(self, final_video, logs):
-        # 🔴 إصلاح الخطأ: تمرير config بدون api_key
-        config = LocalAgentConfig(model="gemini-3.1-pro", effort="high")
+        config = LocalAgentConfig(model="gemini-3.1-pro", effort="high", api_key=CONFIG.gemini_keys[0] if CONFIG.gemini_keys else None)
         prompt = f"""
 أنت المراجع النهائي للفيلم الوثائقي.
 
