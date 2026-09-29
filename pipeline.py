@@ -3,7 +3,7 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.25 - ChatResponse Unpacking & Chrome User-Agent Cloaking
+HYBRID V22.26 - JSON Parsing Safety & Method Resolution Patch
 """
 
 import os
@@ -261,26 +261,39 @@ ARCHIVE
 
     async def _chat_to_text(self, agent, content):
         """
-        استخراج النص بصرامة من كائن ChatResponse الخاص بـ Antigravity
+        استخراج النص بصرامة وقوة من كائن ChatResponse الخاص بـ Antigravity.
         """
         try:
             response = await agent.chat(content)
-            
-            # إذا كان الرد يحتوي على خاصية text، نستخرجها فوراً
+            extracted_text = ""
+
+            # 1. فحص خاصية text وتشغيلها كدالة إذا لزم الأمر
             if hasattr(response, 'text'):
-                return str(response.text).strip()
-                
-            # محاولة بديلة إذا كان الرد يستخدم بنية message.content
-            if hasattr(response, 'message') and hasattr(response.message, 'content'):
-                return str(response.message.content).strip()
-                
-            # إذا كان نصاً مباشراً
-            if isinstance(response, str):
-                return response.strip()
-                
-            # كملاذ أخير، تحويل الكائن إلى نص (لا يفضل لأنه قد يرجع Memory Address)
-            log.warning("⚠️ لم يتم العثور على خاصية text في الرد، سيتم تحويل الكائن إلى نص.")
-            return str(response).strip()
+                val = response.text
+                if callable(val):
+                    val = val()
+                if asyncio.iscoroutine(val):
+                    val = await val
+                if val:
+                    extracted_text = str(val)
+
+            # 2. إذا كانت فارغة، فحص بنية message.content الشائعة
+            if not extracted_text and hasattr(response, 'message'):
+                if hasattr(response.message, 'content'):
+                    val = response.message.content
+                    if callable(val): val = val()
+                    if asyncio.iscoroutine(val): val = await val
+                    if val: extracted_text = str(val)
+
+            # 3. إذا كان الرد نفسه نصاً
+            if not extracted_text and isinstance(response, str):
+                extracted_text = response
+
+            # 4. الملاذ الأخير
+            if not extracted_text:
+                extracted_text = str(response)
+
+            return extracted_text.strip()
             
         except Exception as e:
             log.error(f"⚠️ فشل استخراج النص من المراجع: {e}")
@@ -325,7 +338,7 @@ ARCHIVE
             return await self._chat_to_text(agent, [prompt, media_input])
 
     def evaluate_scene_with_scout(self, media_path, narration, source):
-        log.info(f"👁️️ Antigravity Vision Scout يفحص الوسيط من {source}...")
+        log.info(f"👁 Antigravity Vision Scout يفحص الوسيط من {source}...")
         try:
             result_text = str(
                 asyncio.run(
@@ -335,8 +348,9 @@ ARCHIVE
                 )
             ).strip()
 
-            if not result_text or "<google.antigravity" in result_text:
-                log.warning("⚠️ رد المراجع عبارة عن كائن برمجي فارغ، تم رفض المشهد.")
+            # التأكد من أن الرد ليس مجرد اسم الكائن في الذاكرة (Memory Address) أو Method
+            if not result_text or "<google.antigravity" in result_text or "<bound method" in result_text:
+                log.warning("⚠️ رد المراجع عبارة عن كائن برمجي فارغ، تم رفض المشهد للانتقال للتالي.")
                 return {
                     "accepted": False,
                     "montage": "ZOOM_IN",
@@ -531,7 +545,6 @@ ARCHIVE
 
 class MediaFetcher:
     def __init__(self):
-        # ✅ التنكر كمتصفح Chrome حقيقي لتفادي حظر 403 من Wikimedia Commons
         self.h = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 HybridBot/1.0",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
@@ -551,7 +564,6 @@ class MediaFetcher:
         try:
             if source == "PEXELS":
                 if not CONFIG.pexels:
-                    log.warning("⚠️ PEXELS_API_KEY غير موجود.")
                     return False
 
                 r = self._get(
@@ -566,7 +578,12 @@ class MediaFetcher:
                         "User-Agent": self.h["User-Agent"],
                     },
                 )
-                videos = r.json().get("videos", [])
+                try:
+                    data = r.json()
+                except Exception:
+                    return False
+                    
+                videos = data.get("videos", [])
                 if len(videos) <= index:
                     return False
 
@@ -593,7 +610,6 @@ class MediaFetcher:
 
             if source == "PIXABAY":
                 if not CONFIG.pixabay:
-                    log.warning("⚠️ PIXABAY_API_KEY غير موجود.")
                     return False
 
                 r = self._get(
@@ -605,7 +621,12 @@ class MediaFetcher:
                     },
                     headers=self.h,
                 )
-                hits = r.json().get("hits", [])
+                try:
+                    data = r.json()
+                except Exception:
+                    return False
+                    
+                hits = data.get("hits", [])
                 if len(hits) <= index:
                     return False
 
@@ -642,8 +663,13 @@ class MediaFetcher:
                     },
                     headers=self.h,
                 )
+                try:
+                    data = r.json()
+                except Exception:
+                    return False
+                    
                 pages = list(
-                    r.json()
+                    data
                     .get("query", {})
                     .get("pages", {})
                     .values()
@@ -675,8 +701,13 @@ class MediaFetcher:
                     },
                     headers=self.h,
                 )
+                try:
+                    data = r.json()
+                except Exception:
+                    return False
+                    
                 docs = (
-                    r.json()
+                    data
                     .get("response", {})
                     .get("docs", [])
                 )
@@ -713,7 +744,12 @@ class MediaFetcher:
                     },
                     headers=self.h,
                 )
-                results = r.json().get("results", [])
+                try:
+                    data = r.json()
+                except Exception:
+                    return False
+                    
+                results = data.get("results", [])
                 if not results:
                     return False
 
@@ -734,13 +770,9 @@ class MediaFetcher:
                 return out.exists() and out.stat().st_size > 1000
 
         except requests.RequestException as e:
-            log.warning(
-                f"🌐 خطأ شبكة في {source}: {str(e)[:300]}"
-            )
+            log.warning(f"🌐 خطأ شبكة في {source}: {str(e)[:150]}")
         except Exception as e:
-            log.warning(
-                f"⚠️ خطأ {source}: {str(e)[:300]}"
-            )
+            log.warning(f"⚠️ خطأ {source}: {str(e)[:150]}")
 
         return False
 
@@ -965,7 +997,7 @@ def upload_youtube(vid):
                 "description": (
                     "تم الإنتاج عبر "
                     "UNIVERSAL INVESTIGATIVE "
-                    "DOCUMENTARY ENGINE V22.25"
+                    "DOCUMENTARY ENGINE V22.26"
                 ),
                 "categoryId": "24",
             },
@@ -998,7 +1030,7 @@ def main():
     start_time = datetime.now()
 
     log.info(
-        f"▶ بدء المحرك V22.25 | القضية: {CONFIG.topic}"
+        f"▶ بدء المحرك V22.26 | القضية: {CONFIG.topic}"
     )
 
     director = Hybrid_Director()
