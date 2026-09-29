@@ -3,7 +3,7 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.23 - Anti-Markdown Links Patch
+HYBRID V22.24 - Async Session Fixed & Wikipedia 403 Patched
 """
 
 import os
@@ -233,13 +233,13 @@ ARCHIVE
                     re.DOTALL,
                 )
                 if not match:
-                    log.warning("⚠️️ لم يتم العثور على JSON Array صالح من Agy.")
+                    log.warning("⚠ لم يتم العثور على JSON Array صالح من Agy.")
                     time.sleep(5)
                     continue
 
                 data = json.loads(match.group(0))
                 if not isinstance(data, list) or not data:
-                    log.warning("⚠️ السيناريو فارغ.")
+                    log.warning("⚠️️ السيناريو فارغ.")
                     time.sleep(5)
                     continue
 
@@ -263,7 +263,7 @@ ARCHIVE
         try:
             response = await agent.chat(content)
         except Exception as e:
-            log.error(f"⚠️ فشل استدعاء agent.chat: {e}")
+            log.error(f"⚠️️ فشل استدعاء agent.chat: {e}")
             return ""
 
         if isinstance(response, str):
@@ -332,8 +332,10 @@ ARCHIVE
 """.strip()
 
         media_input = load_ag_media(media_path)
-        agent = Agent(config=config)
-        return await self._chat_to_text(agent, [prompt, media_input])
+        
+        # ✅ الإصلاح: استخدام async with كما طلب الخطأ بالضبط لفتح الجلسة
+        async with Agent(config=config) as agent:
+            return await self._chat_to_text(agent, [prompt, media_input])
 
     def evaluate_scene_with_scout(self, media_path, narration, source):
         log.info(f"👁️ Antigravity Vision Scout يفحص الوسيط من {source}...")
@@ -421,8 +423,10 @@ ARCHIVE
 """.strip()
 
         media_input = load_ag_media(final_video)
-        agent = Agent(config=config)
-        return await self._chat_to_text(agent, [prompt, media_input])
+        
+        # ✅ الإصلاح: استخدام async with لفتح الجلسة
+        async with Agent(config=config) as agent:
+            return await self._chat_to_text(agent, [prompt, media_input])
 
     def self_critique_and_recode(self, final_video):
         log.info("🧠 المراجع النهائي يشاهد الفيلم الكامل...")
@@ -541,8 +545,8 @@ ARCHIVE
 
 class MediaFetcher:
     def __init__(self):
-        # فصلنا الرابط لتفادي الـ Markdown
-        self.h = {"User-Agent": "HybridPipeline/22.23 (" + "https://" + "[github.com/Ya7ossaaain/ai-video-generator](https://github.com/Ya7ossaaain/ai-video-generator); contact@example.com)"}
+        # ✅ الإصلاح: وضع كلمة Bot صراحة لتفادي خطأ 403 من ويكيبيديا
+        self.h = {"User-Agent": "HybridBot/1.0 (" + "https://" + "[github.com/Ya7ossaaain](https://github.com/Ya7ossaaain); contact@example.com)"}
 
     def _get(self, url, **kwargs):
         kwargs.setdefault("timeout", 30)
@@ -972,7 +976,7 @@ def upload_youtube(vid):
                 "description": (
                     "تم الإنتاج عبر "
                     "UNIVERSAL INVESTIGATIVE "
-                    "DOCUMENTARY ENGINE V22.23"
+                    "DOCUMENTARY ENGINE V22.24"
                 ),
                 "categoryId": "24",
             },
@@ -1005,7 +1009,7 @@ def main():
     start_time = datetime.now()
 
     log.info(
-        f"▶ بدء المحرك V22.23 | القضية: {CONFIG.topic}"
+        f"▶ بدء المحرك V22.24 | القضية: {CONFIG.topic}"
     )
 
     director = Hybrid_Director()
