@@ -3,7 +3,7 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.20 - Antigravity Chat Output & Infinite Loop Patched
+HYBRID V22.21 - Antigravity Chat Output & Infinite Loop Patched (Fixed Async Context)
 """
 
 import os
@@ -260,20 +260,15 @@ ARCHIVE
         raise RuntimeError("🛑 فشل إنشاء السيناريو بعد 3 جولات.")
 
     async def _chat_to_text(self, agent, content):
-        """
-        قراءة الرد من Antigravity بمرونة تامة للتعامل مع كافة أشكال المخرجات
-        """
         try:
             response = await agent.chat(content)
         except Exception as e:
             log.error(f"⚠️ فشل استدعاء agent.chat: {e}")
             return ""
 
-        # 1. إذا كان الرد عبارة عن نص عادي مباشرة
         if isinstance(response, str):
             return response.strip()
 
-        # 2. محاولة قراءة الخاصية .text سواء كانت المتغير نفسه أو دالة
         try:
             if hasattr(response, "text"):
                 val = response.text
@@ -283,10 +278,9 @@ ARCHIVE
                     val = await val
                 if val:
                     return str(val).strip()
-        except Exception as e:
-            pass # نتجاهل الخطأ وننتقل للطريقة التالية
+        except Exception:
+            pass
 
-        # 3. محاولة قراءته كـ Async Iterable (Stream)
         chunks = []
         try:
             if hasattr(response, "__aiter__"):
@@ -299,15 +293,13 @@ ARCHIVE
                             val = val()
                         chunks.append(str(val))
                 return "".join(chunks).strip()
-        except Exception as e:
+        except Exception:
             pass
 
-        # 4. الملاذ الأخير: تحويل الكائن كنص
         return str(response).strip()
 
     async def _async_evaluate_scout(self, media_path, narration, source):
         config = LocalAgentConfig(model="gemini-3.6-flash", effort="high")
-
         prompt = f"""
 أنت المراجع البصري الفوري لفيلم وثائقي تحقيقي بعنوان:
 "{CONFIG.topic}"
@@ -340,12 +332,8 @@ ARCHIVE
 """.strip()
 
         media_input = load_ag_media(media_path)
-
-        async with Agent(config=config) as agent:
-            return await self._chat_to_text(
-                agent,
-                [prompt, media_input],
-            )
+        agent = Agent(config=config)
+        return await self._chat_to_text(agent, [prompt, media_input])
 
     def evaluate_scene_with_scout(self, media_path, narration, source):
         log.info(f"👁️ Antigravity Vision Scout يفحص الوسيط من {source}...")
@@ -371,7 +359,6 @@ ARCHIVE
             log.info(f"🗣️ نتيجة المراجع:\n{result_text}")
 
             data = None
-            # استخراج JSON بأمان عبر التعبيرات النمطية
             match = re.search(r"\{[\s\S]*\}", result_text)
             if match:
                 try:
@@ -412,7 +399,6 @@ ARCHIVE
 
     async def _async_critique(self, final_video, logs):
         config = LocalAgentConfig(model="gemini-3.1-pro", effort="high")
-
         prompt = f"""
 أنت المراجع النهائي للفيلم الوثائقي.
 
@@ -435,12 +421,8 @@ ARCHIVE
 """.strip()
 
         media_input = load_ag_media(final_video)
-
-        async with Agent(config=config) as agent:
-            return await self._chat_to_text(
-                agent,
-                [prompt, media_input],
-            )
+        agent = Agent(config=config)
+        return await self._chat_to_text(agent, [prompt, media_input])
 
     def self_critique_and_recode(self, final_video):
         log.info("🧠 المراجع النهائي يشاهد الفيلم الكامل...")
@@ -559,7 +541,7 @@ ARCHIVE
 
 class MediaFetcher:
     def __init__(self):
-        self.h = {"User-Agent": "HybridPipeline/22.20 (https://github.com/Ya7ossaaain/ai-video-generator; contact@example.com)"}
+        self.h = {"User-Agent": "HybridPipeline/22.21 ([https://github.com/Ya7ossaaain/ai-video-generator](https://github.com/Ya7ossaaain/ai-video-generator); contact@example.com)"}
 
     def _get(self, url, **kwargs):
         kwargs.setdefault("timeout", 30)
@@ -579,7 +561,7 @@ class MediaFetcher:
                     return False
 
                 r = self._get(
-                    "https://api.pexels.com/videos/search",
+                    "[https://api.pexels.com/videos/search](https://api.pexels.com/videos/search)",
                     params={
                         "query": safe_query,
                         "orientation": "landscape",
@@ -621,7 +603,7 @@ class MediaFetcher:
                     return False
 
                 r = self._get(
-                    "https://pixabay.com/api/videos/",
+                    "[https://pixabay.com/api/videos/](https://pixabay.com/api/videos/)",
                     params={
                         "key": CONFIG.pixabay,
                         "q": pixabay_query,
@@ -652,7 +634,7 @@ class MediaFetcher:
 
             if source == "WIKIPEDIA":
                 r = self._get(
-                    "https://en.wikipedia.org/w/api.php",
+                    "[https://en.wikipedia.org/w/api.php](https://en.wikipedia.org/w/api.php)",
                     params={
                         "action": "query",
                         "generator": "search",
@@ -690,7 +672,7 @@ class MediaFetcher:
 
             if source == "ARCHIVE":
                 r = self._get(
-                    "https://archive.org/advancedsearch.php",
+                    "[https://archive.org/advancedsearch.php](https://archive.org/advancedsearch.php)",
                     params={
                         "q": f"{safe_query} AND mediatype:image",
                         "fl[]": "identifier",
@@ -712,7 +694,7 @@ class MediaFetcher:
                     return False
 
                 image_url = (
-                    "https://archive.org/services/img/"
+                    "[https://archive.org/services/img/](https://archive.org/services/img/)"
                     + urllib.parse.quote(identifier)
                 )
                 media = self._get(
@@ -728,7 +710,7 @@ class MediaFetcher:
                     return False
 
                 r = self._get(
-                    "https://freesound.org/apiv2/search/text/",
+                    "[https://freesound.org/apiv2/search/text/](https://freesound.org/apiv2/search/text/)",
                     params={
                         "query": safe_query,
                         "token": CONFIG.freesound,
@@ -903,7 +885,7 @@ def upload_drive(vid):
         credentials = Credentials(
             None,
             refresh_token=CONFIG.drive_token,
-            token_uri="https://oauth2.googleapis.com/token",
+            token_uri="[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)",
             client_id=CONFIG.yt_id,
             client_secret=CONFIG.yt_secret,
         )
@@ -970,7 +952,7 @@ def upload_youtube(vid):
         credentials = Credentials(
             None,
             refresh_token=CONFIG.yt_refresh,
-            token_uri="https://oauth2.googleapis.com/token",
+            token_uri="[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)",
             client_id=CONFIG.yt_id,
             client_secret=CONFIG.yt_secret,
         )
@@ -989,7 +971,7 @@ def upload_youtube(vid):
                 "description": (
                     "تم الإنتاج عبر "
                     "UNIVERSAL INVESTIGATIVE "
-                    "DOCUMENTARY ENGINE V22.20"
+                    "DOCUMENTARY ENGINE V22.21"
                 ),
                 "categoryId": "24",
             },
@@ -1022,7 +1004,7 @@ def main():
     start_time = datetime.now()
 
     log.info(
-        f"▶ بدء المحرك V22.20 | القضية: {CONFIG.topic}"
+        f"▶ بدء المحرك V22.21 | القضية: {CONFIG.topic}"
     )
 
     director = Hybrid_Director()
@@ -1063,7 +1045,7 @@ def main():
             c_mp4.exists()
             and c_mp4.stat().st_size > 50000
         ):
-            log.info(f"⏭️ المشهد {i + 1} موجود في الكاش.")
+            log.info(f"⏭️️ المشهد {i + 1} موجود في الكاش.")
             clips.append(c_mp4)
             continue
 
@@ -1102,7 +1084,7 @@ def main():
         current_q = enforce_english_query(original_q)
         sources_pool = get_source_pool(typ)
         attempt_counter = 0
-        MAX_ATTEMPTS = 15  # 🔴 منع حلقة البحث اللانهائية
+        MAX_ATTEMPTS = 15
 
         query_variants = [
             "documentary evidence",
@@ -1164,7 +1146,7 @@ def main():
 
             if found and c_media.exists():
                 log.info(
-                    f"👁️ تم العثور على وسيط من {current_source}. "
+                    f"👁️️ تم العثور على وسيط من {current_source}. "
                     "إرساله إلى Antigravity..."
                 )
 
@@ -1223,7 +1205,6 @@ def main():
                     f"لـ '{safe_q}'."
                 )
             
-            # 🔴 راحة لتجنب حظر السيرفرات (Error 429)
             time.sleep(3)
             attempt_counter += 1
 
