@@ -59,7 +59,9 @@ jobs:
           DRIVE_REFRESH_TOKEN: ${{ secrets.DRIVE_REFRESH_TOKEN }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           VIDEO_TOPIC: ${{ github.event.inputs.video_topic }}
-        run: python pipeline.py
+        run: |
+          python -c "import requests, os; print([m['name'] for m in requests.get('https://generativelanguage.googleapis.com/v1beta/models?key=' + os.environ['GEMINI_API_KEY']).json().get('models', [])])"
+          python pipeline.py
 
       - name: Commit Memory and Code Updates
         run: |
