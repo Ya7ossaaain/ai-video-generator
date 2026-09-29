@@ -3,7 +3,7 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.24 - Async Session Fixed & Wikipedia 403 Patched
+HYBRID V22.25 - ChatResponse Unpacking & Chrome User-Agent Cloaking
 """
 
 import os
@@ -239,7 +239,7 @@ ARCHIVE
 
                 data = json.loads(match.group(0))
                 if not isinstance(data, list) or not data:
-                    log.warning("⚠️️ السيناريو فارغ.")
+                    log.warning("⚠ السيناريو فارغ.")
                     time.sleep(5)
                     continue
 
@@ -260,43 +260,31 @@ ARCHIVE
         raise RuntimeError("🛑 فشل إنشاء السيناريو بعد 3 جولات.")
 
     async def _chat_to_text(self, agent, content):
+        """
+        استخراج النص بصرامة من كائن ChatResponse الخاص بـ Antigravity
+        """
         try:
             response = await agent.chat(content)
+            
+            # إذا كان الرد يحتوي على خاصية text، نستخرجها فوراً
+            if hasattr(response, 'text'):
+                return str(response.text).strip()
+                
+            # محاولة بديلة إذا كان الرد يستخدم بنية message.content
+            if hasattr(response, 'message') and hasattr(response.message, 'content'):
+                return str(response.message.content).strip()
+                
+            # إذا كان نصاً مباشراً
+            if isinstance(response, str):
+                return response.strip()
+                
+            # كملاذ أخير، تحويل الكائن إلى نص (لا يفضل لأنه قد يرجع Memory Address)
+            log.warning("⚠️ لم يتم العثور على خاصية text في الرد، سيتم تحويل الكائن إلى نص.")
+            return str(response).strip()
+            
         except Exception as e:
-            log.error(f"⚠️️ فشل استدعاء agent.chat: {e}")
+            log.error(f"⚠️ فشل استخراج النص من المراجع: {e}")
             return ""
-
-        if isinstance(response, str):
-            return response.strip()
-
-        try:
-            if hasattr(response, "text"):
-                val = response.text
-                if callable(val):
-                    val = val()
-                if asyncio.iscoroutine(val):
-                    val = await val
-                if val:
-                    return str(val).strip()
-        except Exception:
-            pass
-
-        chunks = []
-        try:
-            if hasattr(response, "__aiter__"):
-                async for chunk in response:
-                    if isinstance(chunk, str):
-                        chunks.append(chunk)
-                    elif hasattr(chunk, "text"):
-                        val = chunk.text
-                        if callable(val): 
-                            val = val()
-                        chunks.append(str(val))
-                return "".join(chunks).strip()
-        except Exception:
-            pass
-
-        return str(response).strip()
 
     async def _async_evaluate_scout(self, media_path, narration, source):
         config = LocalAgentConfig(model="gemini-3.6-flash", effort="high")
@@ -333,12 +321,11 @@ ARCHIVE
 
         media_input = load_ag_media(media_path)
         
-        # ✅ الإصلاح: استخدام async with كما طلب الخطأ بالضبط لفتح الجلسة
         async with Agent(config=config) as agent:
             return await self._chat_to_text(agent, [prompt, media_input])
 
     def evaluate_scene_with_scout(self, media_path, narration, source):
-        log.info(f"👁️ Antigravity Vision Scout يفحص الوسيط من {source}...")
+        log.info(f"👁️️ Antigravity Vision Scout يفحص الوسيط من {source}...")
         try:
             result_text = str(
                 asyncio.run(
@@ -348,14 +335,14 @@ ARCHIVE
                 )
             ).strip()
 
-            if not result_text:
-                log.warning("⚠️ رد Antigravity فارغ تماماً.")
+            if not result_text or "<google.antigravity" in result_text:
+                log.warning("⚠️ رد المراجع عبارة عن كائن برمجي فارغ، تم رفض المشهد.")
                 return {
                     "accepted": False,
                     "montage": "ZOOM_IN",
                     "new_query": "investigation evidence",
                     "score": 0.0,
-                    "reason": "Empty Response"
+                    "reason": "Empty or Object Response"
                 }
 
             log.info(f"🗣️ نتيجة المراجع:\n{result_text}")
@@ -424,7 +411,6 @@ ARCHIVE
 
         media_input = load_ag_media(final_video)
         
-        # ✅ الإصلاح: استخدام async with لفتح الجلسة
         async with Agent(config=config) as agent:
             return await self._chat_to_text(agent, [prompt, media_input])
 
@@ -545,8 +531,11 @@ ARCHIVE
 
 class MediaFetcher:
     def __init__(self):
-        # ✅ الإصلاح: وضع كلمة Bot صراحة لتفادي خطأ 403 من ويكيبيديا
-        self.h = {"User-Agent": "HybridBot/1.0 (" + "https://" + "[github.com/Ya7ossaaain](https://github.com/Ya7ossaaain); contact@example.com)"}
+        # ✅ التنكر كمتصفح Chrome حقيقي لتفادي حظر 403 من Wikimedia Commons
+        self.h = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 HybridBot/1.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        }
 
     def _get(self, url, **kwargs):
         kwargs.setdefault("timeout", 30)
@@ -976,7 +965,7 @@ def upload_youtube(vid):
                 "description": (
                     "تم الإنتاج عبر "
                     "UNIVERSAL INVESTIGATIVE "
-                    "DOCUMENTARY ENGINE V22.24"
+                    "DOCUMENTARY ENGINE V22.25"
                 ),
                 "categoryId": "24",
             },
@@ -1009,7 +998,7 @@ def main():
     start_time = datetime.now()
 
     log.info(
-        f"▶ بدء المحرك V22.24 | القضية: {CONFIG.topic}"
+        f"▶ بدء المحرك V22.25 | القضية: {CONFIG.topic}"
     )
 
     director = Hybrid_Director()
