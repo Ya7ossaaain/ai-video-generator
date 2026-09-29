@@ -328,7 +328,7 @@ ARCHIVE
         try:
             cmd = [
                 "agy",
-                "--model", "gemini-3.1-flash",
+                "--model", "gemini-3.8-flash",
                 "--dangerously-skip-permissions",
                 "-p", prompt,
             ]
