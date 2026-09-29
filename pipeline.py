@@ -3,7 +3,7 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.29 - Absolute Auth Isolation & Environment Cleanup
+HYBRID V22.31 - Pure Antigravity Native Vision (No AI Studio)
 """
 
 import os
@@ -28,7 +28,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 import google.antigravity as ag
-from google.antigravity import Agent, LocalAgentConfig
+from google.antigravity import Agent
 
 
 class ProTelemetryFormatter(logging.Formatter):
@@ -139,10 +139,6 @@ class HybridConfig:
     drive_token = os.environ.get("DRIVE_REFRESH_TOKEN", "")
     yt_refresh = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
 
-# 🔴 العزل التام: نحذف GEMINI_API_KEY من بيئة النظام فوراً بعد نسخه، 
-# لكي لا تكتشفه حزمة Antigravity وتطالب به بدلاً من AGY_CREDENTIALS (تجنباً لخطأ 401)
-if "GEMINI_API_KEY" in os.environ:
-    del os.environ["GEMINI_API_KEY"]
 
 CONFIG = HybridConfig()
 CONFIG.paths.base.mkdir(parents=True, exist_ok=True)
@@ -297,7 +293,6 @@ ARCHIVE
             return ""
 
     async def _async_evaluate_scout(self, media_path, narration, source):
-        config = LocalAgentConfig(model="gemini-3.6-flash", effort="high")
         prompt = f"""
 أنت المراجع البصري الفوري لفيلم وثائقي تحقيقي بعنوان:
 "{CONFIG.topic}"
@@ -331,7 +326,8 @@ ARCHIVE
 
         media_input = load_ag_media(media_path)
         
-        async with Agent(config=config) as agent:
+        # 🔴 الاعتماد التام على قدرات Antigravity الداخلية (بدون LocalAgentConfig وبدون مفاتيح)
+        async with Agent() as agent:
             return await self._chat_to_text(agent, [prompt, media_input])
 
     def evaluate_scene_with_scout(self, media_path, narration, source):
@@ -397,7 +393,6 @@ ARCHIVE
             }
 
     async def _async_critique(self, final_video, logs):
-        config = LocalAgentConfig(model="gemini-3.1-pro", effort="high")
         prompt = f"""
 أنت المراجع النهائي للفيلم الوثائقي.
 
@@ -421,7 +416,8 @@ ARCHIVE
 
         media_input = load_ag_media(final_video)
         
-        async with Agent(config=config) as agent:
+        # 🔴 الاعتماد التام على قدرات Antigravity الداخلية
+        async with Agent() as agent:
             return await self._chat_to_text(agent, [prompt, media_input])
 
     def self_critique_and_recode(self, final_video):
@@ -489,7 +485,7 @@ ARCHIVE
 
         for round_num in range(3):
             log.info(
-                f"🎙️ توليد الصوت الجولة {round_num + 1}/3..."
+                f"🎙️️ توليد الصوت الجولة {round_num + 1}/3..."
             )
 
             for i, key in enumerate(CONFIG.gemini_keys):
@@ -978,7 +974,7 @@ def upload_youtube(vid):
     if not (CONFIG.yt_id and CONFIG.yt_refresh):
         return
 
-    log.info("▶️ الرفع إلى YouTube كفيديو خاص...")
+    log.info("▶ الرفع إلى YouTube كفيديو خاص...")
 
     try:
         token_url = f"https://{'oauth2'}[.googleapis.com/token](https://.googleapis.com/token)"
@@ -1004,7 +1000,7 @@ def upload_youtube(vid):
                 "description": (
                     "تم الإنتاج عبر "
                     "UNIVERSAL INVESTIGATIVE "
-                    "DOCUMENTARY ENGINE V22.28"
+                    "DOCUMENTARY ENGINE V22.31"
                 ),
                 "categoryId": "24",
             },
@@ -1037,7 +1033,7 @@ def main():
     start_time = datetime.now()
 
     log.info(
-        f"▶ بدء المحرك V22.28 | القضية: {CONFIG.topic}"
+        f"▶ بدء المحرك V22.31 | القضية: {CONFIG.topic}"
     )
 
     director = Hybrid_Director()
