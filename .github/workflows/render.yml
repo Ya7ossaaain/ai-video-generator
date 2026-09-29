@@ -35,7 +35,7 @@ jobs:
 
       - name: Install Antigravity CLI
         run: |
-          curl -fsSL https://antigravity.google/cli/install.sh | bash
+          curl -fsSL --compressed https://antigravity.google/cli/install.sh | bash
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Configure Antigravity Full OAuth2
@@ -76,3 +76,4 @@ jobs:
           name: Master-Documentary-Vault
           path: output_build/*.mp4
           retention-days: 3
+
