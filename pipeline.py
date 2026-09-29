@@ -3,7 +3,7 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.26 - JSON Parsing Safety & Method Resolution Patch
+HYBRID V22.27 - Absolute URL Obfuscation Patch
 """
 
 import os
@@ -267,7 +267,6 @@ ARCHIVE
             response = await agent.chat(content)
             extracted_text = ""
 
-            # 1. فحص خاصية text وتشغيلها كدالة إذا لزم الأمر
             if hasattr(response, 'text'):
                 val = response.text
                 if callable(val):
@@ -277,7 +276,6 @@ ARCHIVE
                 if val:
                     extracted_text = str(val)
 
-            # 2. إذا كانت فارغة، فحص بنية message.content الشائعة
             if not extracted_text and hasattr(response, 'message'):
                 if hasattr(response.message, 'content'):
                     val = response.message.content
@@ -285,11 +283,9 @@ ARCHIVE
                     if asyncio.iscoroutine(val): val = await val
                     if val: extracted_text = str(val)
 
-            # 3. إذا كان الرد نفسه نصاً
             if not extracted_text and isinstance(response, str):
                 extracted_text = response
 
-            # 4. الملاذ الأخير
             if not extracted_text:
                 extracted_text = str(response)
 
@@ -348,7 +344,6 @@ ARCHIVE
                 )
             ).strip()
 
-            # التأكد من أن الرد ليس مجرد اسم الكائن في الذاكرة (Memory Address) أو Method
             if not result_text or "<google.antigravity" in result_text or "<bound method" in result_text:
                 log.warning("⚠️ رد المراجع عبارة عن كائن برمجي فارغ، تم رفض المشهد للانتقال للتالي.")
                 return {
@@ -545,8 +540,10 @@ ARCHIVE
 
 class MediaFetcher:
     def __init__(self):
+        # تمويه رابط GitHub الخاص بالـ User-Agent
+        gh_domain = f"{'github'}.com"
         self.h = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 HybridBot/1.0",
+            "User-Agent": f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 HybridBot/1.0 (https://{gh_domain}/Ya7ossaaain; contact@example.com)",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
         }
 
@@ -566,8 +563,10 @@ class MediaFetcher:
                 if not CONFIG.pexels:
                     return False
 
+                # تمويه روابط Pexels
+                api_url = f"https://api.{'pexels'}.com/videos/search"
                 r = self._get(
-                    "https://" + "[api.pexels.com/videos/search](https://api.pexels.com/videos/search)",
+                    api_url,
                     params={
                         "query": safe_query,
                         "orientation": "landscape",
@@ -612,8 +611,10 @@ class MediaFetcher:
                 if not CONFIG.pixabay:
                     return False
 
+                # تمويه رابط Pixabay
+                api_url = f"https://{'pixabay'}.com/api/videos/"
                 r = self._get(
-                    "https://" + "[pixabay.com/api/videos/](https://pixabay.com/api/videos/)",
+                    api_url,
                     params={
                         "key": CONFIG.pixabay,
                         "q": pixabay_query,
@@ -648,8 +649,10 @@ class MediaFetcher:
                 return out.exists() and out.stat().st_size > 50000
 
             if source == "WIKIPEDIA":
+                # تمويه رابط Wikipedia
+                api_url = f"https://en.{'wikipedia'}.org/w/api.php"
                 r = self._get(
-                    "https://" + "en.wikipedia.org/w/api.php",
+                    api_url,
                     params={
                         "action": "query",
                         "generator": "search",
@@ -691,8 +694,10 @@ class MediaFetcher:
                 return out.exists() and out.stat().st_size > 10000
 
             if source == "ARCHIVE":
+                # تمويه رابط Archive Search
+                api_url = f"https://{'archive'}.org/advancedsearch.php"
                 r = self._get(
-                    "https://" + "archive.org/advancedsearch.php",
+                    api_url,
                     params={
                         "q": f"{safe_query} AND mediatype:image",
                         "fl[]": "identifier",
@@ -718,10 +723,8 @@ class MediaFetcher:
                 if not identifier:
                     return False
 
-                image_url = (
-                    "https://" + "archive.org/services/img/"
-                    + urllib.parse.quote(identifier)
-                )
+                # تمويه رابط Archive Image
+                image_url = f"https://{'archive'}.org/services/img/" + urllib.parse.quote(identifier)
                 media = self._get(
                     image_url,
                     headers=self.h,
@@ -734,8 +737,10 @@ class MediaFetcher:
                 if not CONFIG.freesound:
                     return False
 
+                # تمويه رابط Freesound
+                api_url = f"https://{'freesound'}.org/apiv2/search/text/"
                 r = self._get(
-                    "https://" + "freesound.org/apiv2/search/text/",
+                    api_url,
                     params={
                         "query": safe_query,
                         "token": CONFIG.freesound,
@@ -908,10 +913,12 @@ def upload_drive(vid):
     log.info("☁️ الرفع إلى Google Drive...")
 
     try:
+        # تمويه رابط Google OAuth
+        token_url = f"https://{'oauth2'}[.googleapis.com/token](https://.googleapis.com/token)"
         credentials = Credentials(
             None,
             refresh_token=CONFIG.drive_token,
-            token_uri="https://" + "[oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)",
+            token_uri=token_url,
             client_id=CONFIG.yt_id,
             client_secret=CONFIG.yt_secret,
         )
@@ -975,10 +982,11 @@ def upload_youtube(vid):
     log.info("▶️ الرفع إلى YouTube كفيديو خاص...")
 
     try:
+        token_url = f"https://{'oauth2'}[.googleapis.com/token](https://.googleapis.com/token)"
         credentials = Credentials(
             None,
             refresh_token=CONFIG.yt_refresh,
-            token_uri="https://" + "[oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)",
+            token_uri=token_url,
             client_id=CONFIG.yt_id,
             client_secret=CONFIG.yt_secret,
         )
@@ -997,7 +1005,7 @@ def upload_youtube(vid):
                 "description": (
                     "تم الإنتاج عبر "
                     "UNIVERSAL INVESTIGATIVE "
-                    "DOCUMENTARY ENGINE V22.26"
+                    "DOCUMENTARY ENGINE V22.27"
                 ),
                 "categoryId": "24",
             },
@@ -1030,7 +1038,7 @@ def main():
     start_time = datetime.now()
 
     log.info(
-        f"▶ بدء المحرك V22.26 | القضية: {CONFIG.topic}"
+        f"▶ بدء المحرك V22.27 | القضية: {CONFIG.topic}"
     )
 
     director = Hybrid_Director()
@@ -1246,7 +1254,7 @@ def main():
                 )
 
                 log.info(
-                    "♻️ لم يتم اعتماد أي لقطة في الدورة الكاملة. "
+                    "♻️️ لم يتم اعتماد أي لقطة في الدورة الكاملة. "
                     f"تغيير استراتيجية البحث إلى: '{current_q}'"
                 )
 
