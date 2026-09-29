@@ -131,6 +131,8 @@ class HybridConfig:
         for k in os.environ.get("GEMINI_API_KEY", "").split(",")
         if k.strip()
     ]
+    # Remove it from environment so google-antigravity SDK doesn't route to AI Studio
+    os.environ.pop("GEMINI_API_KEY", None)
     pexels = os.environ.get("PEXELS_API_KEY", "")
     pixabay = os.environ.get("PIXABAY_API_KEY", "")
     freesound = os.environ.get("FREESOUND_API_KEY", "")
@@ -293,7 +295,8 @@ ARCHIVE
             return ""
 
     async def _async_evaluate_scout(self, media_path, narration, source):
-        config = LocalAgentConfig(model="gemini-3.1-flash", effort="high", api_key=CONFIG.gemini_keys[0] if CONFIG.gemini_keys else None)
+        # 🔴 إصلاح الخطأ: تمرير config بدون api_key لضمان عمل Agent وعدم توجيهه لـ AI Studio
+        config = LocalAgentConfig(model="gemini-3.1-flash", effort="high")
         prompt = f"""
 أنت المراجع البصري الفوري لفيلم وثائقي تحقيقي بعنوان:
 "{CONFIG.topic}"
@@ -393,7 +396,8 @@ ARCHIVE
             }
 
     async def _async_critique(self, final_video, logs):
-        config = LocalAgentConfig(model="gemini-3.1-pro", effort="high", api_key=CONFIG.gemini_keys[0] if CONFIG.gemini_keys else None)
+        # 🔴 إصلاح الخطأ: تمرير config بدون api_key
+        config = LocalAgentConfig(model="gemini-3.1-pro", effort="high")
         prompt = f"""
 أنت المراجع النهائي للفيلم الوثائقي.
 
