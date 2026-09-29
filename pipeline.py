@@ -3,7 +3,7 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.21 - Antigravity Chat Output & Infinite Loop Patched (Fixed Async Context)
+HYBRID V22.22 - Links Cleaned
 """
 
 import os
@@ -541,7 +541,7 @@ ARCHIVE
 
 class MediaFetcher:
     def __init__(self):
-        self.h = {"User-Agent": "HybridPipeline/22.21 ([https://github.com/Ya7ossaaain/ai-video-generator](https://github.com/Ya7ossaaain/ai-video-generator); contact@example.com)"}
+        self.h = {"User-Agent": "HybridPipeline/22.22 ([https://github.com/Ya7ossaaain/ai-video-generator](https://github.com/Ya7ossaaain/ai-video-generator); contact@example.com)"}
 
     def _get(self, url, **kwargs):
         kwargs.setdefault("timeout", 30)
@@ -971,7 +971,7 @@ def upload_youtube(vid):
                 "description": (
                     "تم الإنتاج عبر "
                     "UNIVERSAL INVESTIGATIVE "
-                    "DOCUMENTARY ENGINE V22.21"
+                    "DOCUMENTARY ENGINE V22.22"
                 ),
                 "categoryId": "24",
             },
@@ -1004,7 +1004,7 @@ def main():
     start_time = datetime.now()
 
     log.info(
-        f"▶ بدء المحرك V22.21 | القضية: {CONFIG.topic}"
+        f"▶ بدء المحرك V22.22 | القضية: {CONFIG.topic}"
     )
 
     director = Hybrid_Director()
@@ -1045,7 +1045,7 @@ def main():
             c_mp4.exists()
             and c_mp4.stat().st_size > 50000
         ):
-            log.info(f"⏭️️ المشهد {i + 1} موجود في الكاش.")
+            log.info(f"⏭ المشهد {i + 1} موجود في الكاش.")
             clips.append(c_mp4)
             continue
 
@@ -1146,7 +1146,7 @@ def main():
 
             if found and c_media.exists():
                 log.info(
-                    f"👁️️ تم العثور على وسيط من {current_source}. "
+                    f"👁 تم العثور على وسيط من {current_source}. "
                     "إرساله إلى Antigravity..."
                 )
 
