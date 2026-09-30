@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.36 - Stable Render / Audio / Concat / Cache
+HYBRID V22.37 - Stable Render / Audio / Concat / Cache
 
 أهم الإصلاحات:
 - توحيد كل المشاهد على 1920x1080 / 30fps / H.264 / AAC 48kHz.
@@ -12,6 +12,8 @@ HYBRID V22.36 - Stable Render / Audio / Concat / Cache
 - تنظيف الكاش القديم عند اختلاف نسخة المحرك.
 - حماية أفضل من JSON غير الصالح وملفات الصوت الفارغة.
 - الحفاظ على تبريد الصوت 30 ثانية بعد نجاح التوليد.
+- إصلاح فحص صلاحية وسائط الصور (is_valid_media) وإنقاذ المشاهد الأرشيفية.
+- تحديث تعليمات Vision Scout لاستخدام أداة المعاينة البصرية للمسار المحلي.
 """
 
 import os
@@ -32,12 +34,18 @@ from typing import List, Dict
 import requests
 from google import genai
 from google.genai import types
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+try:
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+except Exception:
+    Credentials = None
+    build = None
+    MediaFileUpload = None
 
 
-ENGINE_VERSION = "V22.36"
+ENGINE_VERSION = "V22.37"
+
 TARGET_W = 1920
 TARGET_H = 1080
 TARGET_FPS = 30
@@ -111,8 +119,49 @@ def probe_duration(path):
         return 0.0
 
 
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+
+
 def is_valid_media(path, minimum=1000):
-    return path.exists() and path.is_file() and path.stat().st_size >= minimum and probe_duration(path) > 0.1
+    if path is None:
+        return False
+    path = Path(path)
+    if not (path.exists() and path.is_file() and path.stat().st_size >= minimum):
+        return False
+    ext = path.suffix.lower()
+    if ext in IMAGE_EXTENSIONS:
+        try:
+            from PIL import Image
+            with Image.open(path) as img:
+                img.verify()
+            with Image.open(path) as img:
+                w, h = img.size
+                if w <= 0 or h <= 0:
+                    return False
+            return True
+        except Exception:
+            try:
+                r = subprocess.run(
+                    [
+                        "ffprobe", "-v", "error",
+                        "-select_streams", "v:0",
+                        "-show_entries", "stream=width,height",
+                        "-of", "default=noprint_wrappers=1:nokey=1",
+                        str(path),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                if r.returncode != 0:
+                    return False
+                nums = [int(line.strip()) for line in r.stdout.strip().splitlines() if line.strip().isdigit()]
+                return len(nums) >= 2 and nums[0] > 0 and nums[1] > 0
+            except Exception:
+                return False
+    return probe_duration(path) > 0.1
+
+
 
 
 def enforce_english_query(query, max_chars=90):
@@ -219,18 +268,21 @@ search_query إنجليزية فقط، narration عربية.
         raise RuntimeError("🛑 فشل إنشاء السيناريو بعد 3 جولات.")
 
     async def _async_evaluate_scout(self, media_path, narration, source):
+        resolved_media = Path(media_path).resolve()
         prompt = f'''أنت المراجع البصري الفوري لفيلم وثائقي بعنوان "{CONFIG.topic}".
 نوع المصدر: {source}
 التعليق الصوتي: "{narration}"
-الوسيط المراد فحصه موجود في المسار المحلي التالي:
-{Path(media_path).resolve()}
+مسار ملف الوسيط المحلي:
+{resolved_media}
 
-مهم: إذا كان إصدار agy الحالي لا يدعم إرفاق الملف تلقائياً عبر النص، فلا تدّع أنك شاهدت الصورة.
-في هذه الحالة أرجع decision="REJECT", score=0, reason="MEDIA_NOT_ATTACHED".
-إذا كنت قادراً فعلياً على رؤية الوسيط، قيّم ملاءمته للجو الوثائقي، واقبل اللقطات التعبيرية والرمزية إذا كانت تخدم النص.
-أخرج JSON فقط:
-{{"decision":"ACCEPT","score":0.85,"reason":"...","montage":"NORMAL","new_query":"English query"}}
+تعليمات المراجعة البصرية الإلزامية:
+1. قم بمعاينة وفحص ملف الوسيط من المسار المحلي أعلاه باستخدام أداة قراءة/معاينة الملفات view_file.
+2. لا تُرجع MEDIA_NOT_ATTACHED دون محاولة معاينة الملف أولاً عبر أداة القراءة.
+3. قيّم ملاءمة اللقطة للجو الوثائقي والتعليق الصوتي. اقبل اللقطات التعبيرية، الرمزية، والأرشيفية إذا كانت تخدم السياق العام.
+4. أخرج النتيجة بتنسيق JSON فقط دون أي كود Markdown خارجي:
+{{"decision":"ACCEPT","score":0.85,"reason":"سبب القبول أو الرفض بالتفصيل","montage":"NORMAL","new_query":"English search query if rejected"}}
 '''
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 "agy", "--model", "gemini-3.8-flash", "--effort", "high",
@@ -367,7 +419,7 @@ class MediaFetcher:
                 pages = [p for p in r.json().get("query", {}).get("pages", {}).values() if p.get("thumbnail", {}).get("source")]
                 if not pages: return False
                 out.write_bytes(self._get(pages[index % len(pages)]["thumbnail"]["source"], timeout=60).content)
-                return out.exists() and out.stat().st_size > 10000
+                return is_valid_media(out, 5000)
 
             if source == "ARCHIVE":
                 r = self._get("https://archive.org/advancedsearch.php", params={"q": f"{safe_query} AND mediatype:image", "fl[]":"identifier", "output":"json", "rows":10})
@@ -377,7 +429,7 @@ class MediaFetcher:
                 if not identifier: return False
                 url = "https://archive.org/services/img/" + urllib.parse.quote(identifier)
                 out.write_bytes(self._get(url, timeout=60).content)
-                return out.exists() and out.stat().st_size > 10000
+                return is_valid_media(out, 5000)
 
             if source == "FREESOUND":
                 if not CONFIG.freesound: return False
@@ -387,7 +439,7 @@ class MediaFetcher:
                 url = results[0].get("previews", {}).get("preview-hq-mp3")
                 if not url: return False
                 out.write_bytes(self._get(url, timeout=60).content)
-                return out.exists() and out.stat().st_size > 1000
+                return is_valid_media(out, 1000)
         except requests.RequestException as e:
             log.warning(f"🌐 خطأ شبكة {source}: {str(e)[:180]}")
         except Exception as e:
@@ -397,8 +449,9 @@ class MediaFetcher:
 
 def get_source_pool(media_type):
     if str(media_type).upper() in ["PEXELS", "PIXABAY"]:
-        return ["PEXELS", "PEXELS", "PEXELS", "PIXABAY", "PIXABAY", "PIXABAY"]
-    return ["WIKIPEDIA", "WIKIPEDIA", "WIKIPEDIA", "ARCHIVE", "ARCHIVE", "ARCHIVE"]
+        return ["PEXELS", "PIXABAY", "PEXELS", "PIXABAY", "PEXELS", "PIXABAY", "WIKIPEDIA", "ARCHIVE"]
+    return ["WIKIPEDIA", "ARCHIVE", "WIKIPEDIA", "ARCHIVE", "PEXELS", "PIXABAY"]
+
 
 
 def process_audio(voice, foley, has_foley, out):
@@ -456,9 +509,11 @@ def render_scene(media, is_vid, aud, out, dur, montage):
     if r.returncode != 0:
         raise RuntimeError(r.stderr[-2000:])
     actual = probe_duration(out)
-    if actual < 0.5 or not is_valid_media(out, 50000):
+    if actual < 0.5 or not is_valid_media(out, 1000):
         raise RuntimeError(f"Rendered scene invalid: duration={actual}")
     log.info(f"🎬 Render OK | {out.name} | {actual:.2f}s")
+
+
 
 
 def clean_old_scene_cache(pfx):
@@ -555,8 +610,9 @@ def main():
         c_mp3 = pfx.with_suffix(".m4a")
 
         # الكاش يستخدم فقط إذا كان الفيديو نفسه صالحاً ويمكن قياس مدته.
-        if is_valid_media(c_mp4, 50000):
+        if is_valid_media(c_mp4, 10000):
             cached_dur = probe_duration(c_mp4)
+
             clips.append(c_mp4)
             total_expected += cached_dur
             log.info(f"⏭ المشهد {i+1} من الكاش | {cached_dur:.1f}s")
@@ -603,19 +659,23 @@ def main():
             safe_q = enforce_english_query(current_q)
             log.info(f"🔎 محاولة {attempt+1}/{max_attempts} | {source} | {safe_q}")
             found = fetcher.fetch_media(source, safe_q, c_media, idx)
-            if found:
+            if found and is_valid_media(c_media, 1000):
                 eval_res = director.evaluate_scene_with_scout(c_media, txt, source)
                 score = float(eval_res.get("score", 0))
-                if score > best_score:
+                if score > best_score or best_media is None:
                     best_score = score
                     best_montage = eval_res.get("montage", "NORMAL")
-                    best_media = Path(str(pfx) + f"_best_backup{ext}")
-                    try: shutil.copy2(c_media, best_media)
-                    except Exception: best_media = None
+                    backup_candidate = Path(str(pfx) + f"_best_backup{ext}")
+                    try:
+                        shutil.copy2(c_media, backup_candidate)
+                        best_media = backup_candidate
+                    except Exception:
+                        pass
                 if eval_res.get("accepted"):
                     scene_approved = True
                     montage_style = eval_res.get("montage", "NORMAL")
                     break
+
                 new_q = enforce_english_query(eval_res.get("new_query", ""))
                 current_q = new_q if new_q not in ["mystery evidence", safe_q] else enforce_english_query(f"{base_q} {query_variants[attempt % len(query_variants)]}")
             else:
