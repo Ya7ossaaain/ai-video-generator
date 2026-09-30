@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.33 - Stable Render / Audio / Concat / Cache
+HYBRID V22.36 - Stable Render / Audio / Concat / Cache
 
 أهم الإصلاحات:
 - توحيد كل المشاهد على 1920x1080 / 30fps / H.264 / AAC 48kHz.
@@ -37,7 +37,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 
-ENGINE_VERSION = "V22.35"
+ENGINE_VERSION = "V22.36"
 TARGET_W = 1920
 TARGET_H = 1080
 TARGET_FPS = 30
@@ -462,7 +462,7 @@ def render_scene(media, is_vid, aud, out, dur, montage):
 
 
 def clean_old_scene_cache(pfx):
-    for suffix in [".mp4", ".wav", ".m4a", ".mp3", ".jpg", ".pcm", "_foley.mp3", "_best_backup.mp4", "_best_backup.jpg"]:
+    for suffix in [".mp4", ".wav", ".m4a", ".mp3", ".jpg", ".pcm", "_media.mp4", "_media.jpg", "_foley.mp3", "_best_backup.mp4", "_best_backup.jpg"]:
         p = Path(str(pfx) + suffix) if suffix.startswith("_") else pfx.with_suffix(suffix)
         if p.exists():
             try: p.unlink()
@@ -592,7 +592,11 @@ def main():
             source = sources_pool[attempt % len(sources_pool)]
             idx = attempt % 3
             ext = ".mp4" if source in ["PEXELS","PIXABAY"] else ".jpg"
-            c_media = pfx.with_suffix(ext)
+            # مهم: ملف الوسيط الخام يجب أن يكون منفصلاً عن ملف المشهد النهائي.
+            # النسخة السابقة كانت تستخدم s_000.mp4 للاثنين معاً، فيحاول FFmpeg
+            # قراءة s_000.mp4 وكتابته في الوقت نفسه، فينتج:
+            # "FFmpeg cannot edit existing files in-place" / "Invalid argument".
+            c_media = pfx.with_name(pfx.name + "_media" + ext)
             if c_media.exists():
                 try: c_media.unlink()
                 except Exception: pass
@@ -620,7 +624,8 @@ def main():
 
         if not scene_approved and best_media and is_valid_media(best_media, 1000):
             log.warning(f"⚠️ إنقاذ المشهد {i+1} بأفضل لقطة Score={best_score:.2f}")
-            c_media = pfx.with_suffix(".mp4" if best_media.name.endswith(".mp4") else ".jpg")
+            media_ext = ".mp4" if best_media.name.endswith(".mp4") else ".jpg"
+            c_media = pfx.with_name(pfx.name + "_media" + media_ext)
             shutil.copy2(best_media, c_media)
             scene_approved = True
             montage_style = best_montage
@@ -631,6 +636,7 @@ def main():
             continue
 
         try:
+            log.info(f"🧩 Render input: {c_media.name} → output: {c_mp4.name}")
             render_scene(c_media, c_media.suffix.lower() == ".mp4", c_mp3, c_mp4, dur, montage_style)
             clips.append(c_mp4)
             total_expected += probe_duration(c_mp4)
