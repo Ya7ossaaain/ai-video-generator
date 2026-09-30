@@ -3,7 +3,7 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.32 - Config Argument Restored & Ultimate Stealth Headers
+HYBRID V22.32 - Config Argument Restored & Ultimate Stealth Headers + Smart Scout Fallback
 """
 
 import os
@@ -16,6 +16,7 @@ import subprocess
 import base64
 import asyncio
 import urllib.parse
+import shutil # تمت الإضافة من أجل نظام النسخ الاحتياطي لأفضل لقطة
 from pathlib import Path
 from typing import List, Dict
 from datetime import datetime
@@ -261,65 +262,32 @@ ARCHIVE
 
         raise RuntimeError("🛑 فشل إنشاء السيناريو بعد 3 جولات.")
 
-    async def _chat_to_text(self, agent, content):
-        try:
-            response = await agent.chat(content)
-            extracted_text = ""
-
-            if hasattr(response, 'text'):
-                val = response.text
-                if callable(val):
-                    val = val()
-                if asyncio.iscoroutine(val):
-                    val = await val
-                if val:
-                    extracted_text = str(val)
-
-            if not extracted_text and hasattr(response, 'message'):
-                if hasattr(response.message, 'content'):
-                    val = response.message.content
-                    if callable(val): val = val()
-                    if asyncio.iscoroutine(val): val = await val
-                    if val: extracted_text = str(val)
-
-            if not extracted_text and isinstance(response, str):
-                extracted_text = response
-
-            if not extracted_text:
-                extracted_text = str(response)
-
-            return extracted_text.strip()
-            
-        except Exception as e:
-            log.error(f"⚠️️ فشل استخراج النص من المراجع: {e}")
-            return ""
-
     async def _async_evaluate_scout(self, media_path, narration, source):
-        prompt = f'''أنت المراجع البصري الفوري لفيلم وثائقي تحقيقي بعنوان:
+        # 🔴 تم تعديل البرومبت هنا ليكون المراجع أذكى ويقبل اللقطات التعبيرية
+        prompt = f'''أنت المراجع البصري الفوري (مخرج وثائقي محترف) لفيلم تحقيقي بعنوان:
 "{CONFIG.topic}"
 
 نوع المصدر:
 {source}
 
-التعليق الصوتي:
+التعليق الصوتي للمشهد:
 "{narration}"
 
 شاهد الوسيط المرفق بعناية:
 {media_path}
 
-قواعد صارمة:
-1. ACCEPT فقط إذا كان المحتوى المرئي مرتبطاً ارتباطاً مباشراً وواضحاً بالنص.
-2. إذا كان التطابق عاماً أو غير مؤكد اختر REJECT.
-3. لا تقبل اللقطة لمجرد أنها جميلة أو سينمائية.
-4. اشرح سبب القرار باختصار.
-5. عند الرفض اقترح new_query باللغة الإنجليزية فقط.
-6. score بين 0 و1.
-7. أخرج JSON فقط بلا Markdown، وتأكد أن يبدأ بـ {{ وينتهي بـ }}.
+قواعد التقييم كمخرج سينمائي:
+1. لا تبحث عن التطابق الحرفي الممل فقط. اقبل (ACCEPT) اللقطات التعبيرية، الرمزية، أو الأجواء العامة (B-Roll) إذا كانت تخدم النص (مثلاً: نص عن تحقيق مالي يقبل مشهد للأوراق، آلة حاسبة، أو شارع مظلم).
+2. أعطِ درجة (score) من 0.0 إلى 1.0 تعكس مدى جودة اللقطة لخدمة جو الفيلم.
+3. اختر ACCEPT إذا كانت اللقطة مناسبة للجو العام للوثائقي، واختر REJECT إذا كانت اللقطة مشتتة أو سيئة أو لا علاقة لها إطلاقاً.
+4. اشرح سبب القرار باختصار كأنك مخرج.
+5. عند الرفض اقترح new_query باللغة الإنجليزية لتوجيه البحث لزاوية تصوير أوسع أو مختلفة تماماً.
+6. أخرج JSON فقط بلا Markdown، وتأكد أن يبدأ بـ {{ وينتهي بـ }}.
 
 البنية:
 {{
   "decision": "ACCEPT",
-  "score": 0.95,
+  "score": 0.85,
   "reason": "سبب القرار بالعربية",
   "montage": "ZOOM_IN",
   "new_query": "English replacement query"
@@ -394,8 +362,9 @@ ARCHIVE
             score = float(data.get("score", 0.0))
             decision = str(data.get("decision", "")).upper()
 
+            # 🔴 تم تخفيض شرط القبول إلى 60% لإعطاء مرونة للقطات التعبيرية
             return {
-                "accepted": decision == "ACCEPT" and score >= 0.70,
+                "accepted": decision == "ACCEPT" and score >= 0.60,
                 "montage": data.get("montage", "NORMAL"),
                 "new_query": data.get("new_query", ""),
                 "score": score,
@@ -575,7 +544,6 @@ ARCHIVE
 
 class MediaFetcher:
     def __init__(self):
-        # 🔴 استراتيجية التخفي القصوى لتجاوز حظر 403 الخاص بـ Wikimedia Commons
         self.h = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -1170,6 +1138,11 @@ def main():
         ]
         base_q = enforce_english_query(original_q)
 
+        # 🔴 متغيرات تتبع أفضل لقطة لتجنب ترك المشهد فارغاً
+        best_score = -1.0
+        best_media_ext = ".jpg"
+        best_montage = "NORMAL"
+
         while not scene_approved and attempt_counter < MAX_ATTEMPTS:
             elapsed = (
                 datetime.now() - start_time
@@ -1225,6 +1198,17 @@ def main():
                     txt,
                     current_source,
                 )
+
+                current_score = eval_res.get("score", 0.0)
+
+                # 🔴 حفظ أفضل لقطة (Backup) لاستخدامها إذا فشلت كل المحاولات
+                if current_score > best_score and c_media.exists() and c_media.stat().st_size > 1000:
+                    best_score = current_score
+                    best_montage = eval_res.get("montage", "NORMAL")
+                    best_media_ext = c_media.suffix
+                    backup_path = pfx.with_name(pfx.name + "_best_backup" + best_media_ext)
+                    shutil.copy2(c_media, backup_path)
+                    log.info(f"💾 تم حفظ هذه اللقطة كأفضل بديل حتى الآن (Score: {best_score}).")
 
                 if eval_res.get("accepted", False):
                     scene_approved = True
@@ -1294,17 +1278,31 @@ def main():
                     f"تغيير استراتيجية البحث إلى: '{current_q}'"
                 )
 
+        # 🔴 نظام الإنقاذ الذكي إذا فشلت جميع المحاولات
         if not scene_approved:
-            log.error(f"❌ تعذر اعتماد المشهد {i + 1} بعد {MAX_ATTEMPTS} محاولة.")
-            if c_media.exists() and c_media.stat().st_size > 1000:
-                log.warning("⚠️ إجبار استخدام آخر لقطة تم تحميلها كإجراء إنقاذي للمشهد.")
+            log.error(f"❌ استنفذت جميع المحاولات الـ {MAX_ATTEMPTS} للمشهد {i + 1}.")
+            
+            backup_path = pfx.with_name(pfx.name + "_best_backup" + best_media_ext)
+            
+            if best_score > -1.0 and backup_path.exists() and backup_path.stat().st_size > 1000:
+                log.warning(f"⚠️ إجبار استخدام أفضل لقطة بديلة تم العثور عليها (Score: {best_score}) كإجراء إنقاذي.")
+                c_media = pfx.with_suffix(best_media_ext)
+                shutil.move(backup_path, c_media)
                 scene_approved = True
+                montage_style = best_montage
             else:
                 append_memory(
                     f"Scene {i + 1} completely failed after {MAX_ATTEMPTS} attempts. "
                     f"Original query: {original_q}"
                 )
                 continue
+
+        # تنظيف أي ملفات نسخ احتياطي متبقية لتوفير المساحة
+        try:
+            for backup_file in pfx.parent.glob(pfx.name + "_best_backup*"):
+                backup_file.unlink()
+        except Exception:
+            pass
 
         try:
             render_scene(
