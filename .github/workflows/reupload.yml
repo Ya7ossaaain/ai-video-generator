@@ -1,33 +1,582 @@
-name: إعادة الرفع السريع إلى YouTube
+name: 📤 Re-Upload Existing Documentary
 
 on:
   workflow_dispatch:
     inputs:
-      topic:
-        description: 'عنوان الفيديو'
-        required: false
-        default: 'لغز القاتل زودياك: وثائق التحقيق والشفرات الجنائية المفقودة'
+      run_id:
+        description: "رقم الـ Run الذي يحتوي على الفيديو"
+        required: true
+        default: "36648947542"
+
+      artifact_name:
+        description: "اسم الـ Artifact"
+        required: true
+        default: "Master-Documentary-Vault"
+
+      video_title:
+        description: "عنوان الفيديو في YouTube"
+        required: true
+        default: "لغز اختفاء طائرة دي بي كوبر"
+
+      youtube_privacy:
+        description: "خصوصية فيديو YouTube"
+        required: true
+        type: choice
+        options:
+          - private
+          - unlisted
+          - public
+        default: private
+
 
 jobs:
-  fast-upload:
+  reupload:
+    name: 📤 Re-Upload Existing Video
     runs-on: ubuntu-latest
-    steps:
-      - name: استدعاء المشروع
-        uses: actions/checkout@v4
 
-      - name: إعداد بيئة بايثون
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+
+      # ==========================================================
+      # 1. تنزيل الـ Artifact من الـ Run القديم
+      # ==========================================================
+
+      - name: 📥 Download Existing Artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ./downloaded_video
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ==========================================================
+      # 2. عرض الملفات التي تم تنزيلها
+      # ==========================================================
+
+      - name: 🔎 Inspect Downloaded Artifact
+        run: |
+          echo "=========================================="
+          echo "📦 Downloaded Artifact"
+          echo "=========================================="
+
+          find ./downloaded_video -type f -printf '%p\n'
+
+          echo ""
+          echo "=========================================="
+          echo "📏 File sizes"
+          echo "=========================================="
+
+          du -ah ./downloaded_video
+
+      # ==========================================================
+      # 3. تثبيت Python
+      # ==========================================================
+
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: تثبيت مكتبات جوجل
-        run: pip install google-api-python-client google-auth-oauthlib google-auth-httplib2
+      # ==========================================================
+      # 4. تثبيت مكتبات Google فقط
+      # لا يوجد Gemini / Antigravity / FFmpeg
+      # ==========================================================
 
-      - name: النقل من درايف إلى يوتيوب
+      - name: 📦 Install Google API Dependencies
+        run: |
+          python -m pip install --upgrade pip
+
+          pip install \
+            google-api-python-client \
+            google-auth-httplib2 \
+            google-auth-oauthlib
+
+      # ==========================================================
+      # 5. البحث عن ملف MP4
+      # ==========================================================
+
+      - name: 🎬 Find Final MP4
+        id: find_video
+        shell: bash
+        run: |
+
+          VIDEO=$(find ./downloaded_video \
+            -type f \
+            -iname "*.mp4" \
+            | head -n 1)
+
+          if [ -z "$VIDEO" ]; then
+            echo "❌ لم يتم العثور على أي MP4 داخل الـ Artifact."
+            echo ""
+            echo "📂 الملفات الموجودة:"
+            find ./downloaded_video -type f
+            exit 1
+          fi
+
+          echo "=========================================="
+          echo "🎬 VIDEO FOUND"
+          echo "=========================================="
+
+          echo "$VIDEO"
+
+          SIZE=$(du -h "$VIDEO" | cut -f1)
+
+          echo "📏 Size: $SIZE"
+
+          echo "VIDEO_PATH=$VIDEO" >> "$GITHUB_ENV"
+
+      # ==========================================================
+      # 6. التحقق من الفيديو
+      # ==========================================================
+
+      - name: 🔍 Verify Video
+        run: |
+          echo "=========================================="
+          echo "🔍 VIDEO INFORMATION"
+          echo "=========================================="
+
+          file "$VIDEO_PATH"
+
+          ls -lh "$VIDEO_PATH"
+
+      # ==========================================================
+      # 7. إعادة الرفع إلى Google Drive + YouTube
+      # ==========================================================
+
+      - name: ☁️📺 Re-Upload To Drive And YouTube
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           DRIVE_REFRESH_TOKEN: ${{ secrets.DRIVE_REFRESH_TOKEN }}
-          VIDEO_TOPIC: ${{ github.event.inputs.topic }}
-        run: python reupload.py
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+
+          VIDEO_TITLE: ${{ inputs.video_title }}
+          YOUTUBE_PRIVACY: ${{ inputs.youtube_privacy }}
+
+        run: |
+
+          cat > reupload.py <<'PYTHON'
+
+          import os
+          import sys
+          import time
+          from pathlib import Path
+
+          from google.oauth2.credentials import Credentials
+          from googleapiclient.discovery import build
+          from googleapiclient.http import MediaFileUpload
+
+
+          VIDEO = Path(os.environ["VIDEO_PATH"])
+
+          CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+          CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+
+          DRIVE_REFRESH_TOKEN = os.environ.get(
+              "DRIVE_REFRESH_TOKEN",
+              ""
+          )
+
+          YOUTUBE_REFRESH_TOKEN = os.environ.get(
+              "YOUTUBE_REFRESH_TOKEN",
+              ""
+          )
+
+          VIDEO_TITLE = os.environ.get(
+              "VIDEO_TITLE",
+              "Documentary"
+          )
+
+          YOUTUBE_PRIVACY = os.environ.get(
+              "YOUTUBE_PRIVACY",
+              "private"
+          )
+
+
+          def check_environment():
+
+              print()
+              print("=" * 60)
+              print("🔐 CHECKING GOOGLE CREDENTIALS")
+              print("=" * 60)
+
+              required = {
+                  "GOOGLE_CLIENT_ID": CLIENT_ID,
+                  "GOOGLE_CLIENT_SECRET": CLIENT_SECRET,
+                  "DRIVE_REFRESH_TOKEN": DRIVE_REFRESH_TOKEN,
+                  "YOUTUBE_REFRESH_TOKEN": YOUTUBE_REFRESH_TOKEN,
+              }
+
+              failed = False
+
+              for name, value in required.items():
+
+                  if value:
+                      print(f"✅ {name}")
+                  else:
+                      print(f"❌ {name} MISSING")
+                      failed = True
+
+              if failed:
+                  raise RuntimeError(
+                      "بعض Google Secrets غير موجودة."
+                  )
+
+
+          def make_credentials(refresh_token):
+
+              return Credentials(
+                  None,
+                  refresh_token=refresh_token,
+                  token_uri="https://oauth2.googleapis.com/token",
+                  client_id=CLIENT_ID,
+                  client_secret=CLIENT_SECRET,
+              )
+
+
+          # ======================================================
+          # GOOGLE DRIVE
+          # ======================================================
+
+          def upload_drive():
+
+              print()
+              print("=" * 60)
+              print("☁️ GOOGLE DRIVE")
+              print("=" * 60)
+
+              if not DRIVE_REFRESH_TOKEN:
+                  raise RuntimeError(
+                      "DRIVE_REFRESH_TOKEN غير موجود."
+                  )
+
+              credentials = make_credentials(
+                  DRIVE_REFRESH_TOKEN
+              )
+
+              drive = build(
+                  "drive",
+                  "v3",
+                  credentials=credentials,
+              )
+
+              print("🔎 البحث عن Broadcast_Vault...")
+
+              result = drive.files().list(
+                  q=(
+                      "name='Broadcast_Vault' "
+                      "and mimeType='application/vnd.google-apps.folder' "
+                      "and trashed=false"
+                  ),
+                  spaces="drive",
+                  fields="files(id,name)",
+              ).execute()
+
+              folders = result.get("files", [])
+
+              if folders:
+
+                  folder_id = folders[0]["id"]
+
+                  print(
+                      f"📁 تم العثور على Broadcast_Vault: "
+                      f"{folder_id}"
+                  )
+
+              else:
+
+                  print(
+                      "📁 Broadcast_Vault غير موجود. "
+                      "سيتم إنشاؤه..."
+                  )
+
+                  folder = drive.files().create(
+                      body={
+                          "name": "Broadcast_Vault",
+                          "mimeType": (
+                              "application/vnd.google-apps.folder"
+                          ),
+                      },
+                      fields="id",
+                  ).execute()
+
+                  folder_id = folder["id"]
+
+                  print(
+                      f"✅ تم إنشاء المجلد: {folder_id}"
+                  )
+
+
+              # --------------------------------------------------
+              # رفع الفيديو
+              # --------------------------------------------------
+
+              print()
+              print("⬆️ بدء رفع الفيديو إلى Google Drive...")
+              print(f"🎬 الملف: {VIDEO.name}")
+
+              media = MediaFileUpload(
+                  str(VIDEO),
+                  mimetype="video/mp4",
+                  resumable=True,
+                  chunksize=5 * 1024 * 1024,
+              )
+
+              request = drive.files().create(
+                  body={
+                      "name": VIDEO.name,
+                      "parents": [folder_id],
+                  },
+                  media_body=media,
+                  fields="id,name,webViewLink",
+              )
+
+              response = None
+
+              while response is None:
+
+                  status, response = request.next_chunk()
+
+                  if status:
+
+                      percent = int(
+                          status.progress() * 100
+                      )
+
+                      print(
+                          f"☁️ Drive Upload: {percent}%"
+                      )
+
+              print()
+              print("✅ تم رفع الفيديو إلى Google Drive.")
+
+              print(
+                  f"📄 Drive File ID: "
+                  f"{response.get('id')}"
+              )
+
+              if response.get("webViewLink"):
+                  print(
+                      f"🔗 Drive Link: "
+                      f"{response['webViewLink']}"
+                  )
+
+              return response
+
+
+          # ======================================================
+          # YOUTUBE
+          # ======================================================
+
+          def upload_youtube():
+
+              print()
+              print("=" * 60)
+              print("▶️ YOUTUBE")
+              print("=" * 60)
+
+              if not YOUTUBE_REFRESH_TOKEN:
+                  raise RuntimeError(
+                      "YOUTUBE_REFRESH_TOKEN غير موجود."
+                  )
+
+              credentials = make_credentials(
+                  YOUTUBE_REFRESH_TOKEN
+              )
+
+              youtube = build(
+                  "youtube",
+                  "v3",
+                  credentials=credentials,
+              )
+
+              print()
+              print("⬆️ بدء رفع الفيديو إلى YouTube...")
+              print(f"🎬 العنوان: {VIDEO_TITLE}")
+              print(
+                  f"🔒 الخصوصية: "
+                  f"{YOUTUBE_PRIVACY}"
+              )
+
+              body = {
+                  "snippet": {
+                      "title": VIDEO_TITLE,
+                      "description": (
+                          "تمت إعادة رفع النسخة النهائية "
+                          "من Universal Investigative "
+                          "Documentary Engine."
+                      ),
+                      "categoryId": "24",
+                  },
+                  "status": {
+                      "privacyStatus": YOUTUBE_PRIVACY
+                  },
+              }
+
+              media = MediaFileUpload(
+                  str(VIDEO),
+                  mimetype="video/mp4",
+                  chunksize=-1,
+                  resumable=True,
+              )
+
+              request = youtube.videos().insert(
+                  part="snippet,status",
+                  body=body,
+                  media_body=media,
+              )
+
+              response = None
+
+              while response is None:
+
+                  status, response = request.next_chunk()
+
+                  if status:
+
+                      percent = int(
+                          status.progress() * 100
+                      )
+
+                      print(
+                          f"▶️ YouTube Upload: "
+                          f"{percent}%"
+                      )
+
+              video_id = response.get("id")
+
+              print()
+              print("✅ تم رفع الفيديو إلى YouTube.")
+              print(
+                  f"🆔 Video ID: {video_id}"
+              )
+
+              print(
+                  f"🔗 https://www.youtube.com/watch?v={video_id}"
+              )
+
+              return response
+
+
+          # ======================================================
+          # MAIN
+          # ======================================================
+
+          def main():
+
+              print()
+              print("=" * 60)
+              print("🎬 DOCUMENTARY RE-UPLOAD ENGINE")
+              print("=" * 60)
+
+              print()
+              print(f"🎞️ Video: {VIDEO}")
+
+              if not VIDEO.exists():
+
+                  raise RuntimeError(
+                      "ملف الفيديو غير موجود."
+                  )
+
+              size_mb = (
+                  VIDEO.stat().st_size
+                  / 1024
+                  / 1024
+              )
+
+              print(
+                  f"📦 Size: {size_mb:.2f} MB"
+              )
+
+              check_environment()
+
+              drive_ok = False
+              youtube_ok = False
+
+              # --------------------------------------------------
+              # Drive
+              # --------------------------------------------------
+
+              try:
+
+                  upload_drive()
+                  drive_ok = True
+
+              except Exception as e:
+
+                  print()
+                  print(
+                      f"❌ Google Drive FAILED: {e}"
+                  )
+
+              # --------------------------------------------------
+              # YouTube
+              # --------------------------------------------------
+
+              try:
+
+                  upload_youtube()
+                  youtube_ok = True
+
+              except Exception as e:
+
+                  print()
+                  print(
+                      f"❌ YouTube FAILED: {e}"
+                  )
+
+              # --------------------------------------------------
+              # Final status
+              # --------------------------------------------------
+
+              print()
+              print("=" * 60)
+              print("📊 FINAL RESULT")
+              print("=" * 60)
+
+              print(
+                  f"Google Drive: "
+                  f"{'✅ SUCCESS' if drive_ok else '❌ FAILED'}"
+              )
+
+              print(
+                  f"YouTube: "
+                  f"{'✅ SUCCESS' if youtube_ok else '❌ FAILED'}"
+              )
+
+              if not drive_ok or not youtube_ok:
+
+                  print()
+                  print(
+                      "⚠️ فشل أحد الرفعَين أو كلاهما."
+                  )
+
+                  sys.exit(1)
+
+              print()
+              print(
+                  "🎉 تمت إعادة عملية الرفع بنجاح."
+              )
+
+
+          if __name__ == "__main__":
+              main()
+
+          PYTHON
+
+          python reupload.py
+
+      # ==========================================================
+      # 8. الاحتفاظ بالفيديو في هذا الـRun أيضًا
+      # ==========================================================
+
+      - name: 💾 Save Re-Uploaded Video As Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Reuploaded-Documentary
+          path: ${{ env.VIDEO_PATH }}
+          retention-days: 3
