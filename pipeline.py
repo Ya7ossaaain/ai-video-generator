@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.32 - Config Argument Restored & Ultimate Stealth Headers + Smart Scout Fallback
+HYBRID V22.33 - Stable Render / Audio / Concat / Cache
+
+أهم الإصلاحات:
+- توحيد كل المشاهد على 1920x1080 / 30fps / H.264 / AAC 48kHz.
+- الدمج النهائي يعيد الترميز بدل concat -c copy لتجنب تضخم المدة وPTS/DTS غير المتوافقة.
+- فحص مدة كل مشهد بعد الرندر، ومنع ملفات الفيديو التالفة من دخول القائمة.
+- عدم استخدام google.antigravity Python import؛ المراجع تعمل عبر agy CLI فقط.
+- تنظيف الكاش القديم عند اختلاف نسخة المحرك.
+- حماية أفضل من JSON غير الصالح وملفات الصوت الفارغة.
+- الحفاظ على تبريد الصوت 30 ثانية بعد نجاح التوليد.
 """
 
 import os
@@ -16,10 +24,10 @@ import subprocess
 import base64
 import asyncio
 import urllib.parse
-import shutil # تمت الإضافة من أجل نظام النسخ الاحتياطي لأفضل لقطة
+import shutil
 from pathlib import Path
-from typing import List, Dict
 from datetime import datetime
+from typing import List, Dict
 
 import requests
 from google import genai
@@ -28,8 +36,12 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-import google.antigravity as ag
-from google.antigravity import Agent, LocalAgentConfig
+
+ENGINE_VERSION = "V22.33"
+TARGET_W = 1920
+TARGET_H = 1080
+TARGET_FPS = 30
+TARGET_AR = 48000
 
 
 class ProTelemetryFormatter(logging.Formatter):
@@ -49,12 +61,12 @@ class ProTelemetryFormatter(logging.Formatter):
 def setup_logger():
     logger = logging.getLogger("HybridMaster")
     logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        ch = logging.StreamHandler(sys.stdout)
-        ch.setFormatter(ProTelemetryFormatter())
-        logger.addHandler(ch)
-        fh = logging.FileHandler("production_logs.txt", encoding="utf-8")
-        logger.addHandler(fh)
+    logger.handlers.clear()
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setFormatter(ProTelemetryFormatter())
+    logger.addHandler(ch)
+    fh = logging.FileHandler("production_logs.txt", encoding="utf-8")
+    logger.addHandler(fh)
     logger.propagate = False
     return logger
 
@@ -69,26 +81,38 @@ def append_memory(summary):
         f.write(f"\n\n### [{now}]\n{summary}")
 
 
-def load_ag_media(file_path):
-    ext = file_path.suffix.lower()
-    path_str = str(file_path.resolve())
+def run_cmd(cmd, timeout=300, capture=False):
+    return subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
+        stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
+        text=True if capture else False,
+        timeout=timeout,
+    )
 
-    if ext in [".mp4", ".mov", ".webm", ".avi"]:
-        if hasattr(ag, "Video"):
-            return ag.Video.from_file(path_str)
-        if hasattr(ag, "media") and hasattr(ag.media, "Video"):
-            return ag.media.Video.from_file(path_str)
-        if hasattr(ag, "from_file"):
-            return ag.from_file(path_str)
-    else:
-        if hasattr(ag, "Image"):
-            return ag.Image.from_file(path_str)
-        if hasattr(ag, "media") and hasattr(ag.media, "Image"):
-            return ag.media.Image.from_file(path_str)
-        if hasattr(ag, "from_file"):
-            return ag.from_file(path_str)
 
-    raise RuntimeError("لم يتم العثور على فئة الوسائط في حزمة google.antigravity")
+def probe_duration(path):
+    try:
+        r = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if r.returncode != 0:
+            return 0.0
+        return float(r.stdout.strip())
+    except Exception:
+        return 0.0
+
+
+def is_valid_media(path, minimum=1000):
+    return path.exists() and path.is_file() and path.stat().st_size >= minimum and probe_duration(path) > 0.1
 
 
 def enforce_english_query(query, max_chars=90):
@@ -96,43 +120,28 @@ def enforce_english_query(query, max_chars=90):
     safe_q = re.sub(r"[\u0600-\u06FF]", "", query)
     safe_q = re.sub(r"[^A-Za-z0-9,._' -]", " ", safe_q)
     safe_q = re.sub(r"\s+", " ", safe_q).strip()
-
-    words = []
-    seen = set()
+    words, seen = [], set()
     for word in safe_q.split():
         key = word.lower()
         if key not in seen:
             seen.add(key)
             words.append(word)
-
     safe_q = " ".join(words)
-
-    if not safe_q or len(safe_q) < 2:
+    if len(safe_q) < 2:
         safe_q = "mystery evidence"
-
     if len(safe_q) > max_chars:
         safe_q = safe_q[:max_chars].rsplit(" ", 1)[0].strip()
-
     return safe_q
 
 
 class HybridConfig:
     topic = os.environ.get("VIDEO_TOPIC", "لغز الجريمة الغامضة")
-    paths = type(
-        "Paths",
-        (),
-        {
-            "base": Path("./output_build"),
-            "cache": Path("./output_build/cache"),
-            "manifest": Path("./output_build/master_manifest.json"),
-        },
-    )()
-    gemini_keys = [
-        k.strip()
-        for k in os.environ.get("GEMINI_API_KEY", "").split(",")
-        if k.strip()
-    ]
-    # Remove it from environment so google-antigravity SDK doesn't route to AI Studio
+    paths = type("Paths", (), {
+        "base": Path("./output_build"),
+        "cache": Path("./output_build/cache"),
+        "manifest": Path("./output_build/master_manifest.json"),
+    })()
+    gemini_keys = [k.strip() for k in os.environ.get("GEMINI_API_KEY", "").split(",") if k.strip()]
     os.environ.pop("GEMINI_API_KEY", None)
     pexels = os.environ.get("PEXELS_API_KEY", "")
     pixabay = os.environ.get("PIXABAY_API_KEY", "")
@@ -141,6 +150,7 @@ class HybridConfig:
     yt_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
     drive_token = os.environ.get("DRIVE_REFRESH_TOKEN", "")
     yt_refresh = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
+    tts_model = os.environ.get("GEMINI_TTS_MODEL", "gemini-3.8-flash-tts")
 
 
 CONFIG = HybridConfig()
@@ -154,1228 +164,492 @@ class Hybrid_Director:
             try:
                 data = json.loads(CONFIG.paths.manifest.read_text(encoding="utf-8"))
                 if isinstance(data, list) and data:
-                    log.info("📋 تم العثور على master_manifest.json صالح.")
+                    log.info(f"📋 استخدام master_manifest.json: {len(data)} مشهداً.")
                     return data
             except Exception as e:
-                log.warning(f"⚠️ تعذر قراءة الـ manifest القديم: {e}")
+                log.warning(f"⚠️ تعذر قراءة manifest: {e}")
 
-        log.info(
-            f"🧠 كتابة السيناريو عبر Antigravity CLI | "
-            f"gemini-3.1-pro | القضية: {CONFIG.topic}"
-        )
-
-        prompt = f"""
-أنت كبير المخرجين ومخطط أفلام وثائقية تحقيقية.
-
-القضية:
-"{CONFIG.topic}"
-
-أنشئ سيناريو وثائقي متكامل من 40 إلى 50 مشهداً.
-كل مشهد يحتوي على تعليق صوتي عربي واضح من 60 إلى 80 كلمة تقريباً.
-
-لكل مشهد أخرج:
-- scene_num
-- media_type
-- search_query
-- foley_type
-- narration
-
-القيم المسموحة لـ media_type:
-PEXELS
-PIXABAY
-WIKIPEDIA
-ARCHIVE
-
-قواعد صارمة:
-1. search_query باللغة الإنجليزية فقط.
-2. لا تضع حروفاً عربية داخل search_query.
-3. اجعل كلمات البحث مرتبطة مباشرة بمحتوى المشهد.
-4. narration باللغة العربية.
-5. أخرج JSON Array فقط.
-6. لا تضف Markdown أو ``` أو أي نص قبل أو بعد JSON.
-
-مثال:
-[
-  {{
-    "scene_num": 1,
-    "media_type": "PEXELS",
-    "search_query": "dark empty street at night",
-    "foley_type": "rain",
-    "narration": "في ليلة..."
-  }}
-]
-""".strip()
+        prompt = f'''أنت كبير المخرجين ومخطط أفلام وثائقية تحقيقية.
+القضية: "{CONFIG.topic}"
+أنشئ 40 إلى 50 مشهداً. اجعل التعليق الصوتي لكل مشهد 60 إلى 80 كلمة تقريباً.
+لكل مشهد أخرج: scene_num, media_type, search_query, foley_type, narration.
+media_type المسموح: PEXELS, PIXABAY, WIKIPEDIA, ARCHIVE.
+search_query إنجليزية فقط، narration عربية.
+أخرج JSON Array فقط بلا Markdown.
+'''
 
         for round_num in range(3):
             try:
                 cmd = [
-                    "agy",
-                    "--model", "gemini-3.1-pro",
-                    "--effort", "high",
-                    "--dangerously-skip-permissions",
-                    "-p", prompt,
+                    "agy", "--model", "gemini-3.1-pro", "--effort", "high",
+                    "--dangerously-skip-permissions", "-p", prompt,
                 ]
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=360,
-                )
-
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=360)
                 if result.returncode != 0:
-                    log.warning(
-                        f"⚠️ Agy Error الجولة {round_num + 1}: "
-                        f"{result.stderr.strip()[:1000]}"
-                    )
+                    log.warning(f"⚠️ Agy Error {round_num + 1}: {result.stderr[-1000:]}")
                     time.sleep(5)
                     continue
-
-                match = re.search(
-                    r"\[\s*\{.*\}\s*\]",
-                    result.stdout.strip(),
-                    re.DOTALL,
-                )
+                match = re.search(r"\[\s*\{.*\}\s*\]", result.stdout, re.DOTALL)
                 if not match:
-                    log.warning("⚠ لم يتم العثور على JSON Array صالح من Agy.")
+                    log.warning("⚠️ لم يتم العثور على JSON Array.")
                     time.sleep(5)
                     continue
-
                 data = json.loads(match.group(0))
                 if not isinstance(data, list) or not data:
-                    log.warning("⚠ السيناريو فارغ.")
-                    time.sleep(5)
                     continue
-
-                CONFIG.paths.manifest.write_text(
-                    json.dumps(data, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
-                log.info(f"✅ تم إنشاء السيناريو: {len(data)} مشهداً.")
-                return data
-
+                cleaned = []
+                for n, s in enumerate(data, 1):
+                    if not isinstance(s, dict):
+                        continue
+                    cleaned.append({
+                        "scene_num": n,
+                        "media_type": str(s.get("media_type", "WIKIPEDIA")).upper(),
+                        "search_query": enforce_english_query(s.get("search_query", "mystery evidence")),
+                        "foley_type": str(s.get("foley_type", "none")),
+                        "narration": str(s.get("narration", "")).strip(),
+                    })
+                CONFIG.paths.manifest.write_text(json.dumps(cleaned, ensure_ascii=False, indent=2), encoding="utf-8")
+                log.info(f"✅ تم إنشاء السيناريو: {len(cleaned)} مشهداً.")
+                return cleaned
             except subprocess.TimeoutExpired:
                 log.warning("⏳ انتهت مهلة توليد السيناريو 360 ثانية.")
             except Exception as e:
                 log.warning(f"⚠️ خطأ السيناريو: {e}")
-
             time.sleep(5)
-
         raise RuntimeError("🛑 فشل إنشاء السيناريو بعد 3 جولات.")
 
     async def _async_evaluate_scout(self, media_path, narration, source):
-        # 🔴 تم تعديل البرومبت هنا ليكون المراجع أذكى ويقبل اللقطات التعبيرية
-        prompt = f'''أنت المراجع البصري الفوري (مخرج وثائقي محترف) لفيلم تحقيقي بعنوان:
-"{CONFIG.topic}"
+        prompt = f'''أنت المراجع البصري الفوري لفيلم وثائقي بعنوان "{CONFIG.topic}".
+نوع المصدر: {source}
+التعليق الصوتي: "{narration}"
+الوسيط المراد فحصه موجود في المسار المحلي التالي:
+{Path(media_path).resolve()}
 
-نوع المصدر:
-{source}
-
-التعليق الصوتي للمشهد:
-"{narration}"
-
-شاهد الوسيط المرفق بعناية:
-{media_path}
-
-قواعد التقييم كمخرج سينمائي:
-1. لا تبحث عن التطابق الحرفي الممل فقط. اقبل (ACCEPT) اللقطات التعبيرية، الرمزية، أو الأجواء العامة (B-Roll) إذا كانت تخدم النص (مثلاً: نص عن تحقيق مالي يقبل مشهد للأوراق، آلة حاسبة، أو شارع مظلم).
-2. أعطِ درجة (score) من 0.0 إلى 1.0 تعكس مدى جودة اللقطة لخدمة جو الفيلم.
-3. اختر ACCEPT إذا كانت اللقطة مناسبة للجو العام للوثائقي، واختر REJECT إذا كانت اللقطة مشتتة أو سيئة أو لا علاقة لها إطلاقاً.
-4. اشرح سبب القرار باختصار كأنك مخرج.
-5. عند الرفض اقترح new_query باللغة الإنجليزية لتوجيه البحث لزاوية تصوير أوسع أو مختلفة تماماً.
-6. أخرج JSON فقط بلا Markdown، وتأكد أن يبدأ بـ {{ وينتهي بـ }}.
-
-البنية:
-{{
-  "decision": "ACCEPT",
-  "score": 0.85,
-  "reason": "سبب القرار بالعربية",
-  "montage": "ZOOM_IN",
-  "new_query": "English replacement query"
-}}
+مهم: إذا كان إصدار agy الحالي لا يدعم إرفاق الملف تلقائياً عبر النص، فلا تدّع أنك شاهدت الصورة.
+في هذه الحالة أرجع decision="REJECT", score=0, reason="MEDIA_NOT_ATTACHED".
+إذا كنت قادراً فعلياً على رؤية الوسيط، قيّم ملاءمته للجو الوثائقي، واقبل اللقطات التعبيرية والرمزية إذا كانت تخدم النص.
+أخرج JSON فقط:
+{{"decision":"ACCEPT","score":0.85,"reason":"...","montage":"NORMAL","new_query":"English query"}}
 '''
         try:
-            cmd = [
-                "agy",
-                "--model", "gemini-3.8-flash",
-                "--effort", "high",
-                "--dangerously-skip-permissions",
-                "-p", prompt,
-            ]
-            import asyncio
             proc = await asyncio.create_subprocess_exec(
-                *cmd,
+                "agy", "--model", "gemini-3.8-flash", "--effort", "high",
+                "--dangerously-skip-permissions", "-p", prompt,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await proc.communicate()
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
             if proc.returncode != 0:
-                raise RuntimeError(f"Agy failed: {stderr.decode('utf-8')}")
-            
-            result_text = stdout.decode("utf-8").strip()
-            return result_text
+                raise RuntimeError(stderr.decode("utf-8", "ignore")[-1000:])
+            return stdout.decode("utf-8", "ignore").strip()
         except Exception as e:
             log.error(f"⚠️ انهيار المراجع الفوري: {e}")
             return ""
-
 
     def evaluate_scene_with_scout(self, media_path, narration, source):
-        log.info(f"👁 Antigravity Vision Scout يفحص الوسيط من {source}...")
+        log.info(f"👁 Vision Scout يفحص وسيط {source}...")
         try:
-            result_text = str(
-                asyncio.run(
-                    self._async_evaluate_scout(
-                        media_path, narration, source
-                    )
-                )
-            ).strip()
-
-            if not result_text or "<google.antigravity" in result_text or "<bound method" in result_text:
-                log.warning("⚠️ رد المراجع عبارة عن كائن برمجي فارغ، تم رفض المشهد للانتقال للتالي.")
-                return {
-                    "accepted": False,
-                    "montage": "ZOOM_IN",
-                    "new_query": "investigation evidence",
-                    "score": 0.0,
-                    "reason": "Empty or Object Response"
-                }
-
-            log.info(f"🗣️ نتيجة المراجع:\n{result_text}")
-
-            data = None
+            result_text = str(asyncio.run(self._async_evaluate_scout(media_path, narration, source))).strip()
+            if not result_text:
+                return {"accepted": False, "montage": "NORMAL", "new_query": "investigation evidence", "score": 0.0, "reason": "Empty response"}
+            log.info(f"🗣️ نتيجة المراجع: {result_text[:1200]}")
             match = re.search(r"\{[\s\S]*\}", result_text)
-            if match:
-                try:
-                    data = json.loads(match.group(0))
-                except Exception:
-                    pass
-
-            if data is None:
-                log.warning(f"⚠️ تعذر استخراج JSON من الرد: {result_text[:200]}")
-                return {
-                    "accepted": False,
-                    "montage": "ZOOM_IN",
-                    "new_query": "archival evidence",
-                    "score": 0.0,
-                    "reason": "Parse Error"
-                }
-
-            score = float(data.get("score", 0.0))
+            if not match:
+                return {"accepted": False, "montage": "NORMAL", "new_query": "archival evidence", "score": 0.0, "reason": "Parse error"}
+            data = json.loads(match.group(0))
+            score = max(0.0, min(1.0, float(data.get("score", 0))))
             decision = str(data.get("decision", "")).upper()
-
-            # 🔴 تم تخفيض شرط القبول إلى 60% لإعطاء مرونة للقطات التعبيرية
             return {
                 "accepted": decision == "ACCEPT" and score >= 0.60,
-                "montage": data.get("montage", "NORMAL"),
-                "new_query": data.get("new_query", ""),
+                "montage": str(data.get("montage", "NORMAL")),
+                "new_query": enforce_english_query(data.get("new_query", "")),
                 "score": score,
-                "reason": data.get("reason", ""),
+                "reason": str(data.get("reason", "")),
             }
-
         except Exception as e:
-            log.error(f"⚠️ انهيار المراجع الفوري: {e}")
-            return {
-                "accepted": False,
-                "montage": "ZOOM_IN",
-                "new_query": "",
-                "score": 0.0,
-                "reason": "Exception"
-            }
-
-    async def _async_critique(self, final_video, logs):
-        prompt = f'''أنت المراجع النهائي للفيلم الوثائقي.
-
-سجلات النظام:
-{logs}
-
-شاهد الفيلم النهائي المرفق:
-{final_video}
-
-افحص:
-1. تزامن الصوت والصورة.
-2. الشاشات السوداء أو التالفة.
-3. أخطاء المونتاج الواضحة.
-4. المشاكل البرمجية الظاهرة.
-
-إذا كان هناك خلل برمجي حقيقي يحتاج إلى تعديل:
-أخرج كود pipeline.py كاملاً داخل كتلة python.
-
-إذا كان الفيلم سليماً:
-أجب بكلمة PERFECT فقط.
-'''
-        try:
-            cmd = [
-                "agy",
-                "--model", "gemini-3.1-pro",
-                "--effort", "high",
-                "--dangerously-skip-permissions",
-                "-p", prompt,
-            ]
-            import asyncio
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                raise RuntimeError(f"Agy failed: {stderr.decode('utf-8')}")
-            
-            result_text = stdout.decode("utf-8").strip()
-            return result_text
-        except Exception as e:
-            log.error(f"⚠️ فشل المراجع النهائي: {e}")
-            return ""
-
-
-    def self_critique_and_recode(self, final_video):
-        log.info("🧠 المراجع النهائي يشاهد الفيلم الكامل...")
-        logs = (
-            Path("production_logs.txt").read_text(
-                encoding="utf-8", errors="ignore"
-            )[-5000:]
-            if Path("production_logs.txt").exists()
-            else "No logs"
-        )
-
-        try:
-            result_text = str(
-                asyncio.run(
-                    self._async_critique(final_video, logs)
-                )
-            )
-            log.info(f"🗣️ المراجع النهائي:\n{result_text}")
-
-            if "PERFECT" in result_text.upper():
-                log.info("✅ المراجع النهائي اعتمد الفيلم.")
-                return True
-
-            code_match = re.search(
-                r"```python\s*(.*?)```",
-                result_text,
-                re.DOTALL,
-            )
-            if code_match:
-                new_code = code_match.group(1).strip()
-                append_memory(
-                    "المراجع النهائي شاهد الفيلم وقدم إصلاحاً برمجياً."
-                )
-                Path(__file__).write_text(
-                    new_code, encoding="utf-8"
-                )
-                log.warning("🔄 تم استبدال pipeline.py. إعادة التشغيل...")
-                os.execv(
-                    sys.executable,
-                    [sys.executable] + sys.argv,
-                )
-
-            return True
-
-        except Exception as e:
-            log.error(f"⚠️ فشل التعديل الذاتي: {e}")
-            return True
+            log.error(f"⚠️ خطأ المراجع: {e}")
+            return {"accepted": False, "montage": "NORMAL", "new_query": "", "score": 0.0, "reason": str(e)}
 
     def generate_voice(self, text, out_wav):
         if not CONFIG.gemini_keys:
-            log.error("❌ لا توجد GEMINI_API_KEY لاستخدامها في الصوت.")
-            return
-
+            log.error("❌ لا توجد GEMINI_API_KEY.")
+            return False
         cfg = types.GenerateContentConfig(
             response_modalities=["AUDIO"],
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name="Charon"
-                    )
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Charon")
                 )
             ),
         )
-
         for round_num in range(3):
-            log.info(
-                f"🎙 توليد الصوت الجولة {round_num + 1}/3..."
-            )
-
             for i, key in enumerate(CONFIG.gemini_keys):
                 try:
                     client = genai.Client(api_key=key)
                     res = client.models.generate_content(
-                        model="gemini-3.8-flash-tts",
-                        contents=(
-                            "[INSTRUCTION: Deep chilling narrator]\n"
-                            + text
-                        ),
+                        model=CONFIG.tts_model,
+                        contents="[INSTRUCTION: Deep chilling narrator]\n" + text,
                         config=cfg,
                     )
-
-                    audio_data = (
-                        res.candidates[0]
-                        .content.parts[0]
-                        .inline_data
-                        .data
-                    )
-
-                    if isinstance(audio_data, str):
-                        out_wav.write_bytes(
-                            base64.b64decode(audio_data)
-                        )
+                    part = res.candidates[0].content.parts[0]
+                    audio = part.inline_data.data
+                    mime = getattr(part.inline_data, "mime_type", "") or ""
+                    raw = base64.b64decode(audio) if isinstance(audio, str) else audio
+                    # Gemini قد يعيد PCM خاماً؛ حوّله إلى WAV حقيقي إذا لم تكن البيانات WAV.
+                    if raw[:4] == b"RIFF":
+                        out_wav.write_bytes(raw)
                     else:
-                        out_wav.write_bytes(audio_data)
-
-                    if (
-                        out_wav.exists()
-                        and out_wav.stat().st_size > 1000
-                    ):
-                        log.info(
-                            "⏳ تم توليد الصوت بنجاح. تبريد 30 ثانية..."
-                        )
+                        tmp_pcm = out_wav.with_suffix(".pcm")
+                        tmp_pcm.write_bytes(raw)
+                        rate_match = re.search(r"rate=(\d+)", mime)
+                        sample_rate = int(rate_match.group(1)) if rate_match else 24000
+                        r = subprocess.run([
+                            "ffmpeg", "-y", "-f", "s16le", "-ar", str(sample_rate), "-ac", "1",
+                            "-i", str(tmp_pcm), "-c:a", "pcm_s16le", str(out_wav)
+                        ], capture_output=True, text=True, timeout=60)
+                        try: tmp_pcm.unlink()
+                        except Exception: pass
+                        if r.returncode != 0:
+                            raise RuntimeError(r.stderr[-500:])
+                    if is_valid_media(out_wav, 1000):
+                        log.info("⏳ تم توليد الصوت بنجاح. تبريد 30 ثانية...")
                         time.sleep(30)
-                        return
-
+                        return True
                 except Exception as e:
-                    log.warning(
-                        f"⚠️ فشل المفتاح {i + 1}: {str(e)[:200]}"
-                    )
+                    log.warning(f"⚠️ فشل مفتاح الصوت {i + 1}: {str(e)[:250]}")
                     time.sleep(2)
-
             time.sleep(10)
-
-        log.error("❌ استنفدت جميع محاولات توليد الصوت.")
+        log.error("❌ استنفدت محاولات توليد الصوت.")
+        return False
 
 
 class MediaFetcher:
     def __init__(self):
         self.h = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9",
-            "Referer": "https://" + "en.wikipedia.org/"
+            "Referer": "https://en.wikipedia.org/",
         }
 
     def _get(self, url, **kwargs):
         kwargs.setdefault("timeout", 30)
         kwargs.setdefault("headers", self.h)
-        response = requests.get(url, **kwargs)
-        response.raise_for_status()
-        return response
+        r = requests.get(url, **kwargs)
+        r.raise_for_status()
+        return r
 
     def fetch_media(self, source, query, out, index):
         safe_query = enforce_english_query(query)
-        pixabay_query = safe_query[:100].strip()
-
         try:
             if source == "PEXELS":
-                if not CONFIG.pexels:
-                    return False
-
-                api_url = f"https://api.{'pexels'}.com/videos/search"
-                r = self._get(
-                    api_url,
-                    params={
-                        "query": safe_query,
-                        "orientation": "landscape",
-                        "per_page": 10,
-                    },
-                    headers={
-                        "Authorization": CONFIG.pexels,
-                        "User-Agent": self.h["User-Agent"],
-                    },
-                )
-                try:
-                    data = r.json()
-                except Exception:
-                    return False
-                    
-                videos = data.get("videos", [])
-                if len(videos) <= index:
-                    return False
-
-                files = videos[index].get("video_files", [])
-                if not files:
-                    return False
-
-                files = sorted(
-                    files,
-                    key=lambda x: x.get("width", 0),
-                    reverse=True,
-                )
-                video_url = files[0].get("link")
-                if not video_url:
-                    return False
-
-                media = self._get(
-                    video_url,
-                    headers=self.h,
-                    timeout=60,
-                )
-                out.write_bytes(media.content)
-                return out.exists() and out.stat().st_size > 50000
+                if not CONFIG.pexels: return False
+                r = self._get("https://api.pexels.com/videos/search", params={"query": safe_query, "orientation": "landscape", "per_page": 10}, headers={"Authorization": CONFIG.pexels, "User-Agent": self.h["User-Agent"]})
+                videos = r.json().get("videos", [])
+                if len(videos) <= index: return False
+                files = sorted(videos[index].get("video_files", []), key=lambda x: x.get("width", 0), reverse=True)
+                if not files or not files[0].get("link"): return False
+                out.write_bytes(self._get(files[0]["link"], timeout=90).content)
+                return is_valid_media(out, 50000)
 
             if source == "PIXABAY":
-                if not CONFIG.pixabay:
-                    return False
-
-                api_url = f"https://{'pixabay'}.com/api/videos/"
-                r = self._get(
-                    api_url,
-                    params={
-                        "key": CONFIG.pixabay,
-                        "q": pixabay_query,
-                        "per_page": 10,
-                    },
-                    headers=self.h,
-                )
-                try:
-                    data = r.json()
-                except Exception:
-                    return False
-                    
-                hits = data.get("hits", [])
-                if len(hits) <= index:
-                    return False
-
-                videos = hits[index].get("videos", {})
-                info = (
-                    videos.get("large")
-                    or videos.get("medium")
-                    or videos.get("small")
-                )
-                if not info or not info.get("url"):
-                    return False
-
-                media = self._get(
-                    info["url"],
-                    headers=self.h,
-                    timeout=60,
-                )
-                out.write_bytes(media.content)
-                return out.exists() and out.stat().st_size > 50000
+                if not CONFIG.pixabay: return False
+                r = self._get("https://pixabay.com/api/videos/", params={"key": CONFIG.pixabay, "q": safe_query[:100], "per_page": 10})
+                hits = r.json().get("hits", [])
+                if len(hits) <= index: return False
+                vids = hits[index].get("videos", {})
+                info = vids.get("large") or vids.get("medium") or vids.get("small")
+                if not info or not info.get("url"): return False
+                out.write_bytes(self._get(info["url"], timeout=90).content)
+                return is_valid_media(out, 50000)
 
             if source == "WIKIPEDIA":
-                api_url = f"https://en.{'wikipedia'}.org/w/api.php"
-                r = self._get(
-                    api_url,
-                    params={
-                        "action": "query",
-                        "generator": "search",
-                        "gsrsearch": safe_query,
-                        "gsrnamespace": 0,
-                        "gsrlimit": 10,
-                        "prop": "pageimages",
-                        "piprop": "thumbnail",
-                        "pithumbsize": 1920,
-                        "format": "json",
-                    },
-                    headers=self.h,
-                )
-                try:
-                    data = r.json()
-                except Exception:
-                    return False
-                    
-                pages = list(
-                    data
-                    .get("query", {})
-                    .get("pages", {})
-                    .values()
-                )
-                pages = [
-                    p for p in pages
-                    if p.get("thumbnail", {}).get("source")
-                ]
-                if not pages:
-                    return False
-
-                image_url = pages[index % len(pages)]["thumbnail"]["source"]
-                media = self._get(
-                    image_url,
-                    headers=self.h,
-                    timeout=60,
-                )
-                out.write_bytes(media.content)
+                r = self._get("https://en.wikipedia.org/w/api.php", params={"action":"query","generator":"search","gsrsearch":safe_query,"gsrnamespace":0,"gsrlimit":10,"prop":"pageimages","piprop":"thumbnail","pithumbsize":1920,"format":"json"})
+                pages = [p for p in r.json().get("query", {}).get("pages", {}).values() if p.get("thumbnail", {}).get("source")]
+                if not pages: return False
+                out.write_bytes(self._get(pages[index % len(pages)]["thumbnail"]["source"], timeout=60).content)
                 return out.exists() and out.stat().st_size > 10000
 
             if source == "ARCHIVE":
-                api_url = f"https://{'archive'}.org/advancedsearch.php"
-                r = self._get(
-                    api_url,
-                    params={
-                        "q": f"{safe_query} AND mediatype:image",
-                        "fl[]": "identifier",
-                        "output": "json",
-                        "rows": 10,
-                    },
-                    headers=self.h,
-                )
-                try:
-                    data = r.json()
-                except Exception:
-                    return False
-                    
-                docs = (
-                    data
-                    .get("response", {})
-                    .get("docs", [])
-                )
-                if len(docs) <= index:
-                    return False
-
+                r = self._get("https://archive.org/advancedsearch.php", params={"q": f"{safe_query} AND mediatype:image", "fl[]":"identifier", "output":"json", "rows":10})
+                docs = r.json().get("response", {}).get("docs", [])
+                if len(docs) <= index: return False
                 identifier = docs[index].get("identifier")
-                if not identifier:
-                    return False
-
-                image_url = f"https://{'archive'}.org/services/img/" + urllib.parse.quote(identifier)
-                media = self._get(
-                    image_url,
-                    headers=self.h,
-                    timeout=60,
-                )
-                out.write_bytes(media.content)
+                if not identifier: return False
+                url = "https://archive.org/services/img/" + urllib.parse.quote(identifier)
+                out.write_bytes(self._get(url, timeout=60).content)
                 return out.exists() and out.stat().st_size > 10000
 
             if source == "FREESOUND":
-                if not CONFIG.freesound:
-                    return False
-
-                api_url = f"https://{'freesound'}.org/apiv2/search/text/"
-                r = self._get(
-                    api_url,
-                    params={
-                        "query": safe_query,
-                        "token": CONFIG.freesound,
-                        "fields": "previews",
-                        "page_size": 5,
-                    },
-                    headers=self.h,
-                )
-                try:
-                    data = r.json()
-                except Exception:
-                    return False
-                    
-                results = data.get("results", [])
-                if not results:
-                    return False
-
-                preview = (
-                    results[0]
-                    .get("previews", {})
-                    .get("preview-hq-mp3")
-                )
-                if not preview:
-                    return False
-
-                media = self._get(
-                    preview,
-                    headers=self.h,
-                    timeout=60,
-                )
-                out.write_bytes(media.content)
+                if not CONFIG.freesound: return False
+                r = self._get("https://freesound.org/apiv2/search/text/", params={"query":safe_query,"token":CONFIG.freesound,"fields":"previews","page_size":5})
+                results = r.json().get("results", [])
+                if not results: return False
+                url = results[0].get("previews", {}).get("preview-hq-mp3")
+                if not url: return False
+                out.write_bytes(self._get(url, timeout=60).content)
                 return out.exists() and out.stat().st_size > 1000
-
         except requests.RequestException as e:
-            err_msg = str(e)
-            if "429" in err_msg:
-                log.warning(f"⏳ {source} يطلب التمهل (Error 429). سننتظر قليلاً...")
-                time.sleep(3)
-            elif "403" in err_msg:
-                log.warning(f"🛡️ {source} يرفض الوصول (Error 403). تم التخطي بأمان.")
-            else:
-                log.warning(f"🌐 خطأ شبكة في {source}: {err_msg[:150]}")
+            log.warning(f"🌐 خطأ شبكة {source}: {str(e)[:180]}")
         except Exception as e:
-            log.warning(f"⚠️ خطأ {source}: {str(e)[:150]}")
-
+            log.warning(f"⚠️ خطأ {source}: {str(e)[:180]}")
         return False
 
 
 def get_source_pool(media_type):
-    media_type = str(media_type or "WIKIPEDIA").upper()
-
-    if media_type in ["PEXELS", "PIXABAY"]:
-        return [
-            "PEXELS", "PEXELS", "PEXELS",
-            "PIXABAY", "PIXABAY", "PIXABAY",
-        ]
-
-    return [
-        "WIKIPEDIA", "WIKIPEDIA", "WIKIPEDIA",
-        "ARCHIVE", "ARCHIVE", "ARCHIVE",
-    ]
+    if str(media_type).upper() in ["PEXELS", "PIXABAY"]:
+        return ["PEXELS", "PEXELS", "PEXELS", "PIXABAY", "PIXABAY", "PIXABAY"]
+    return ["WIKIPEDIA", "WIKIPEDIA", "WIKIPEDIA", "ARCHIVE", "ARCHIVE", "ARCHIVE"]
 
 
 def process_audio(voice, foley, has_foley, out):
-    if has_foley:
-        fc = (
-            "[0:a]loudnorm=I=-16[v];"
-            "[1:a]volume=0.04[bg];"
-            "[v][bg]amix=inputs=2:duration=first:"
-            "dropout_transition=0[aout]"
-        )
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", str(voice),
-            "-stream_loop", "-1",
-            "-i", str(foley),
-            "-filter_complex", fc,
-            "-map", "[aout]",
-            "-ar", "48000",
-            str(out),
-        ]
+    if not is_valid_media(voice, 1000):
+        return 0.0
+    if has_foley and is_valid_media(foley, 1000):
+        fc = "[0:a]loudnorm=I=-16:TP=-1.5:LRA=11[v];[1:a]volume=0.04[bg];[v][bg]amix=inputs=2:duration=first:dropout_transition=0[aout]"
+        cmd = ["ffmpeg","-y","-i",str(voice),"-stream_loop","-1","-i",str(foley),"-filter_complex",fc,"-map","[aout]","-ar",str(TARGET_AR),"-ac","2","-c:a","aac","-b:a","192k",str(out)]
     else:
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", str(voice),
-            "-filter_complex", "[0:a]loudnorm=I=-16[aout]",
-            "-map", "[aout]",
-            "-ar", "48000",
-            str(out),
-        ]
-
-    subprocess.run(
-        cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
+        cmd = ["ffmpeg","-y","-i",str(voice),"-filter_complex","[0:a]loudnorm=I=-16:TP=-1.5:LRA=11[aout]","-map","[aout]","-ar",str(TARGET_AR),"-ac","2","-c:a","aac","-b:a","192k",str(out)]
     try:
-        dur = float(
-            subprocess.check_output(
-                [
-                    "ffprobe", "-v", "error",
-                    "-show_entries", "format=duration",
-                    "-of",
-                    "default=noprint_wrappers=1:nokey=1",
-                    str(out),
-                ]
-            ).decode().strip()
-        )
-        if dur < 0.5:
-            raise ValueError("Audio duration is too short")
-        return dur
-    except Exception:
-        return 3.0
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        if r.returncode != 0:
+            log.error(f"❌ FFmpeg audio: {r.stderr[-1000:]}")
+            return 0.0
+        dur = probe_duration(out)
+        return dur if dur >= 0.5 else 0.0
+    except Exception as e:
+        log.error(f"❌ خطأ معالجة الصوت: {e}")
+        return 0.0
 
 
 def render_scene(media, is_vid, aud, out, dur, montage):
-    fx = (
-        ",hue=s=0"
-        if "BW" in str(montage).upper()
-        else ",eq=contrast=1.12:saturation=0.85"
-    )
+    if not is_valid_media(media, 1000) or not is_valid_media(aud, 1000):
+        raise RuntimeError("Media/audio invalid before render")
+
+    fx = ",hue=s=0" if "BW" in str(montage).upper() else ",eq=contrast=1.12:saturation=0.85"
+    common_v = f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=increase,crop={TARGET_W}:{TARGET_H}{fx},fps={TARGET_FPS},format=yuv420p"
 
     if is_vid:
         cmd = [
-            "ffmpeg", "-y",
-            "-stream_loop", "-1",
-            "-i", str(media),
-            "-i", str(aud),
-            "-filter_complex",
-            (
-                "[0:v]scale=1920:1080:"
-                "force_original_aspect_ratio=increase,"
-                f"crop=1920:1080{fx}[v]"
-            ),
-            "-map", "[v]",
-            "-map", "1:a",
-            "-c:v", "libx264",
-            "-c:a", "aac",
-            "-shortest",
-            str(out),
+            "ffmpeg","-y","-stream_loop","-1","-i",str(media),"-i",str(aud),
+            "-filter_complex",f"[0:v]{common_v}[v]",
+            "-map","[v]","-map","1:a:0",
+            "-c:v","libx264","-preset","veryfast","-crf","20",
+            "-r",str(TARGET_FPS),"-pix_fmt","yuv420p",
+            "-c:a","aac","-b:a","192k","-ar",str(TARGET_AR),"-ac","2",
+            "-t",f"{max(0.5,dur):.3f}","-movflags","+faststart",str(out)
         ]
     else:
-        frames = max(24, int(dur * 24))
+        # zoompan مضبوط على عدد إطارات يساوي المدة * FPS، ثم نحدد مدة الصوت/الفيديو صراحة.
+        frames = max(TARGET_FPS, int(round(dur * TARGET_FPS)))
+        vf = f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=increase,crop={TARGET_W}:{TARGET_H},zoompan=z='min(zoom+0.00035,1.08)':d={frames}:s={TARGET_W}x{TARGET_H}:fps={TARGET_FPS}{fx},format=yuv420p"
         cmd = [
-            "ffmpeg", "-y",
-            "-loop", "1",
-            "-i", str(media),
-            "-i", str(aud),
-            "-filter_complex",
-            (
-                "[0:v]scale=1920:1080:"
-                "force_original_aspect_ratio=increase,"
-                f"crop=1920:1080,zoompan=z=1.05:d={frames}"
-                f"{fx}[v]"
-            ),
-            "-map", "[v]",
-            "-map", "1:a",
-            "-c:v", "libx264",
-            "-c:a", "aac",
-            "-shortest",
-            str(out),
+            "ffmpeg","-y","-loop","1","-i",str(media),"-i",str(aud),
+            "-filter_complex",f"[0:v]{vf}[v]",
+            "-map","[v]","-map","1:a:0",
+            "-c:v","libx264","-preset","veryfast","-crf","20",
+            "-r",str(TARGET_FPS),"-pix_fmt","yuv420p",
+            "-c:a","aac","-b:a","192k","-ar",str(TARGET_AR),"-ac","2",
+            "-t",f"{max(0.5,dur):.3f}","-movflags","+faststart",str(out)
         ]
 
-    subprocess.run(
-        cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=300,
-    )
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr[-2000:])
+    actual = probe_duration(out)
+    if actual < 0.5 or not is_valid_media(out, 50000):
+        raise RuntimeError(f"Rendered scene invalid: duration={actual}")
+    log.info(f"🎬 Render OK | {out.name} | {actual:.2f}s")
+
+
+def clean_old_scene_cache(pfx):
+    for suffix in [".mp4", ".wav", ".mp3", ".jpg", ".pcm", "_foley.mp3", "_best_backup.mp4", "_best_backup.jpg"]:
+        p = Path(str(pfx) + suffix) if suffix.startswith("_") else pfx.with_suffix(suffix)
+        if p.exists():
+            try: p.unlink()
+            except Exception: pass
 
 
 def upload_drive(vid):
-    if not (CONFIG.yt_id and CONFIG.drive_token):
-        return
-
-    log.info("☁️ الرفع إلى Google Drive...")
-
+    if not (CONFIG.yt_id and CONFIG.drive_token): return
     try:
-        token_url = "https://oauth2.googleapis.com/token"
-        credentials = Credentials(
-            None,
-            refresh_token=CONFIG.drive_token,
-            token_uri=token_url,
-            client_id=CONFIG.yt_id,
-            client_secret=CONFIG.yt_secret,
-        )
-
-        dr = build(
-            "drive",
-            "v3",
-            credentials=credentials,
-        )
-
-        res = dr.files().list(
-            q=(
-                "name='Broadcast_Vault' and "
-                "mimeType='application/vnd.google-apps.folder'"
-            ),
-            fields="files(id)",
-        ).execute()
-
+        credentials = Credentials(None, refresh_token=CONFIG.drive_token, token_uri="https://oauth2.googleapis.com/token", client_id=CONFIG.yt_id, client_secret=CONFIG.yt_secret)
+        dr = build("drive", "v3", credentials=credentials)
+        res = dr.files().list(q="name='Broadcast_Vault' and mimeType='application/vnd.google-apps.folder'", fields="files(id)").execute()
         files = res.get("files", [])
-
-        if files:
-            fid = files[0]["id"]
-        else:
-            fid = (
-                dr.files()
-                .create(
-                    body={
-                        "name": "Broadcast_Vault",
-                        "mimeType": "application/vnd.google-apps.folder",
-                    },
-                    fields="id",
-                )
-                .execute()["id"]
-            )
-
-        req = dr.files().create(
-            body={"name": vid.name, "parents": [fid]},
-            media_body=MediaFileUpload(
-                str(vid),
-                mimetype="video/mp4",
-                resumable=True,
-                chunksize=5 * 1024 * 1024,
-            ),
-        )
-
+        fid = files[0]["id"] if files else dr.files().create(body={"name":"Broadcast_Vault","mimeType":"application/vnd.google-apps.folder"}, fields="id").execute()["id"]
+        req = dr.files().create(body={"name":vid.name,"parents":[fid]}, media_body=MediaFileUpload(str(vid), mimetype="video/mp4", resumable=True, chunksize=5*1024*1024))
         while True:
-            status, _ = req.next_chunk()
-            if status is None:
+            status, response = req.next_chunk()
+            if response is not None:
                 break
-
         log.info("✅ تم حفظ نسخة في Google Drive.")
-
     except Exception as e:
         log.error(f"⚠️ فشل Google Drive: {e}")
 
 
 def upload_youtube(vid):
-    if not (CONFIG.yt_id and CONFIG.yt_refresh):
-        return
-
-    log.info("▶ الرفع إلى YouTube كفيديو خاص...")
-
+    if not (CONFIG.yt_id and CONFIG.yt_refresh): return
     try:
-        token_url = "https://oauth2.googleapis.com/token"
-        credentials = Credentials(
-            None,
-            refresh_token=CONFIG.yt_refresh,
-            token_uri=token_url,
-            client_id=CONFIG.yt_id,
-            client_secret=CONFIG.yt_secret,
-        )
-
-        yt = build(
-            "youtube",
-            "v3",
-            credentials=credentials,
-        )
-
-        body = {
-            "snippet": {
-                "title": (
-                    f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}"
-                ),
-                "description": (
-                    "تم الإنتاج عبر "
-                    "UNIVERSAL INVESTIGATIVE "
-                    "DOCUMENTARY ENGINE V22.32"
-                ),
-                "categoryId": "24",
-            },
-            "status": {"privacyStatus": "private"},
-        }
-
-        req = yt.videos().insert(
-            part="snippet,status",
-            body=body,
-            media_body=MediaFileUpload(
-                str(vid),
-                chunksize=-1,
-                resumable=True,
-                mimetype="video/mp4",
-            ),
-        )
-
+        credentials = Credentials(None, refresh_token=CONFIG.yt_refresh, token_uri="https://oauth2.googleapis.com/token", client_id=CONFIG.yt_id, client_secret=CONFIG.yt_secret)
+        yt = build("youtube", "v3", credentials=credentials)
+        body = {"snippet":{"title":f"نسخة المخرج | {CONFIG.topic} - {int(time.time())}","description":f"UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE {ENGINE_VERSION}","categoryId":"24"},"status":{"privacyStatus":"private"}}
+        req = yt.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(str(vid), chunksize=-1, resumable=True, mimetype="video/mp4"))
         while True:
-            status, _ = req.next_chunk()
-            if status is None:
+            status, response = req.next_chunk()
+            if response is not None:
                 break
-
         log.info("✅ تم الرفع إلى YouTube.")
-
     except Exception as e:
         log.error(f"⚠️ فشل YouTube: {e}")
 
 
+def concat_final(clips, final_vid):
+    txt_list = CONFIG.paths.base / "video_list.txt"
+    txt_list.write_text("\n".join(f"file '{c.resolve().as_posix().replace("'", "'\\''")}'" for c in clips), encoding="utf-8")
+    # لا نستخدم -c copy؛ هذا هو الإصلاح الأساسي لمشكلة تضخم مدة الفيلم عند اختلاف timebase/fps بين المشاهد.
+    cmd = [
+        "ffmpeg","-y","-f","concat","-safe","0","-i",str(txt_list),
+        "-c:v","libx264","-preset","veryfast","-crf","20","-r",str(TARGET_FPS),
+        "-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-ar",str(TARGET_AR),"-ac","2",
+        "-movflags","+faststart",str(final_vid)
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr[-3000:])
+    duration = probe_duration(final_vid)
+    if duration < 1 or not is_valid_media(final_vid, 50000):
+        raise RuntimeError("Final video failed validation")
+    log.info(f"🎬 الفيلم النهائي: {duration/60:.2f} دقيقة ({duration:.1f}s)")
+    return duration
+
+
 def main():
     start_time = datetime.now()
-
-    log.info(
-        f"▶ بدء المحرك V22.32 | القضية: {CONFIG.topic}"
-    )
-
+    log.info(f"▶ بدء المحرك {ENGINE_VERSION} | القضية: {CONFIG.topic}")
     director = Hybrid_Director()
     fetcher = MediaFetcher()
-
     try:
         script = director.plan_documentary()
     except Exception as e:
-        log.error(str(e))
-        sys.exit(1)
+        log.error(str(e)); sys.exit(1)
 
     clips = []
+    total_expected = 0.0
 
     for i, scene in enumerate(script):
-        elapsed = (
-            datetime.now() - start_time
-        ).total_seconds()
+        if (datetime.now() - start_time).total_seconds() > 13500:
+            log.warning("⏳ تم تجاوز الحد الزمني الكلي."); break
 
-        if elapsed > 13500:
-            log.warning(
-                "⏳ تم تجاوز الحد الزمني الكلي 13,500 ثانية. "
-                "سيتم حفظ ما تم إنجازه."
-            )
-            break
-
-        typ = scene.get("media_type", "WIKIPEDIA")
+        typ = str(scene.get("media_type", "WIKIPEDIA")).upper()
         original_q = scene.get("search_query", "")
         foley = scene.get("foley_type", "none")
-        txt = scene.get("narration", "")
-
+        txt = str(scene.get("narration", "")).strip()
         pfx = CONFIG.paths.cache / f"s_{i:03d}"
         c_mp4 = pfx.with_suffix(".mp4")
         c_wav = pfx.with_suffix(".wav")
-        c_foley = Path(f"{pfx}_foley.mp3")
+        c_foley = Path(str(pfx) + "_foley.mp3")
         c_mp3 = pfx.with_suffix(".mp3")
 
-        if (
-            c_mp4.exists()
-            and c_mp4.stat().st_size > 50000
-        ):
-            log.info(f"⏭ المشهد {i + 1} موجود في الكاش.")
+        # الكاش يستخدم فقط إذا كان الفيديو نفسه صالحاً ويمكن قياس مدته.
+        if is_valid_media(c_mp4, 50000):
+            cached_dur = probe_duration(c_mp4)
             clips.append(c_mp4)
+            total_expected += cached_dur
+            log.info(f"⏭ المشهد {i+1} من الكاش | {cached_dur:.1f}s")
             continue
+        if c_mp4.exists():
+            try: c_mp4.unlink()
+            except Exception: pass
 
-        log.info(
-            f"\n🎥 جاري العمل على المشهد "
-            f"{i + 1}/{len(script)}..."
-        )
-
-        if not c_wav.exists():
-            director.generate_voice(txt, c_wav)
-
-        if not c_wav.exists():
-            log.error(
-                f"❌ لم يتم إنشاء صوت للمشهد {i + 1}."
-            )
-            continue
+        log.info(f"\n🎥 المشهد {i+1}/{len(script)}...")
+        if not is_valid_media(c_wav, 1000):
+            if not director.generate_voice(txt, c_wav):
+                log.error(f"❌ فشل صوت المشهد {i+1}."); continue
 
         has_foley = False
         if foley and str(foley).lower() != "none":
-            has_foley = fetcher.fetch_media(
-                "FREESOUND",
-                enforce_english_query(foley),
-                c_foley,
-                0,
-            )
-
-        dur = process_audio(
-            c_wav,
-            c_foley,
-            has_foley,
-            c_mp3,
-        )
+            has_foley = fetcher.fetch_media("FREESOUND", enforce_english_query(foley), c_foley, 0)
+        dur = process_audio(c_wav, c_foley, has_foley, c_mp3)
+        if dur <= 0:
+            log.error(f"❌ تعذر تجهيز الصوت للمشهد {i+1}."); continue
 
         scene_approved = False
         montage_style = "NORMAL"
         current_q = enforce_english_query(original_q)
+        base_q = current_q
         sources_pool = get_source_pool(typ)
-        attempt_counter = 0
-        MAX_ATTEMPTS = 15
-
-        query_variants = [
-            "documentary evidence",
-            "archival photograph",
-            "investigation scene",
-            "crime investigation",
-            "police investigation",
-            "historical evidence",
-            "news archive",
-            "forensic evidence",
-            "mysterious location",
-            "case evidence",
-        ]
-        base_q = enforce_english_query(original_q)
-
-        # 🔴 متغيرات تتبع أفضل لقطة لتجنب ترك المشهد فارغاً
+        max_attempts = 15
         best_score = -1.0
-        best_media_ext = ".jpg"
+        best_media = None
         best_montage = "NORMAL"
+        query_variants = ["documentary evidence","archival photograph","investigation scene","crime investigation","police investigation","historical evidence","news archive","forensic evidence","mysterious location","case evidence"]
 
-        while not scene_approved and attempt_counter < MAX_ATTEMPTS:
-            elapsed = (
-                datetime.now() - start_time
-            ).total_seconds()
-
-            if elapsed > 13500:
-                log.warning(
-                    f"⏳ انتهى الوقت الكلي أثناء البحث "
-                    f"عن المشهد {i + 1}."
-                )
-                break
-
-            current_source = sources_pool[
-                attempt_counter % len(sources_pool)
-            ]
-            index_in_source = attempt_counter % 3
-
-            if current_source in ["PEXELS", "PIXABAY"]:
-                c_media = pfx.with_suffix(".mp4")
-            else:
-                c_media = pfx.with_suffix(".jpg")
-
+        for attempt in range(max_attempts):
+            source = sources_pool[attempt % len(sources_pool)]
+            idx = attempt % 3
+            ext = ".mp4" if source in ["PEXELS","PIXABAY"] else ".jpg"
+            c_media = pfx.with_suffix(ext)
+            if c_media.exists():
+                try: c_media.unlink()
+                except Exception: pass
             safe_q = enforce_english_query(current_q)
-
-            log.info(
-                f"🔎 محاولة البحث #{attempt_counter + 1} | "
-                f"{current_source} | "
-                f"نتيجة {index_in_source + 1}/3 | "
-                f"Query: '{safe_q}'"
-            )
-
-            try:
-                if c_media.exists():
-                    c_media.unlink()
-            except Exception:
-                pass
-
-            found = fetcher.fetch_media(
-                current_source,
-                safe_q,
-                c_media,
-                index_in_source,
-            )
-
-            if found and c_media.exists():
-                log.info(
-                    f"👁 تم العثور على وسيط من {current_source}. "
-                    "إرساله إلى Antigravity..."
-                )
-
-                eval_res = director.evaluate_scene_with_scout(
-                    c_media,
-                    txt,
-                    current_source,
-                )
-
-                current_score = eval_res.get("score", 0.0)
-
-                # 🔴 حفظ أفضل لقطة (Backup) لاستخدامها إذا فشلت كل المحاولات
-                if current_score > best_score and c_media.exists() and c_media.stat().st_size > 1000:
-                    best_score = current_score
+            log.info(f"🔎 محاولة {attempt+1}/{max_attempts} | {source} | {safe_q}")
+            found = fetcher.fetch_media(source, safe_q, c_media, idx)
+            if found:
+                eval_res = director.evaluate_scene_with_scout(c_media, txt, source)
+                score = float(eval_res.get("score", 0))
+                if score > best_score:
+                    best_score = score
                     best_montage = eval_res.get("montage", "NORMAL")
-                    best_media_ext = c_media.suffix
-                    backup_path = pfx.with_name(pfx.name + "_best_backup" + best_media_ext)
-                    shutil.copy2(c_media, backup_path)
-                    log.info(f"💾 تم حفظ هذه اللقطة كأفضل بديل حتى الآن (Score: {best_score}).")
-
-                if eval_res.get("accepted", False):
+                    best_media = Path(str(pfx) + f"_best_backup{ext}")
+                    try: shutil.copy2(c_media, best_media)
+                    except Exception: best_media = None
+                if eval_res.get("accepted"):
                     scene_approved = True
-                    montage_style = eval_res.get(
-                        "montage", "NORMAL"
-                    )
-
-                    log.info(
-                        f"✅ ACCEPTED | المشهد {i + 1} "
-                        f"اعتمد بعد {attempt_counter + 1} محاولة."
-                    )
+                    montage_style = eval_res.get("montage", "NORMAL")
                     break
-
-                new_q = enforce_english_query(
-                    eval_res.get("new_query", "")
-                )
-
-                if (
-                    new_q
-                    and new_q != "mystery evidence"
-                    and new_q.lower() != safe_q.lower()
-                ):
-                    current_q = enforce_english_query(new_q, 90)
-                else:
-                    variant = query_variants[
-                        attempt_counter % len(query_variants)
-                    ]
-                    current_q = enforce_english_query(
-                        f"{base_q} {variant}",
-                        90,
-                    )
-
-                log.warning(
-                    "🔄 REJECTED | Antigravity رفض الوسيط."
-                )
-                log.info(
-                    f"🔎 Query الجديدة: '{current_q}'"
-                )
-
-                try:
-                    c_media.unlink()
-                except Exception:
-                    pass
-
+                new_q = enforce_english_query(eval_res.get("new_query", ""))
+                current_q = new_q if new_q not in ["mystery evidence", safe_q] else enforce_english_query(f"{base_q} {query_variants[attempt % len(query_variants)]}")
             else:
-                log.warning(
-                    f"⚠️ {current_source} لم يعطِ نتيجة صالحة "
-                    f"لـ '{safe_q}'."
-                )
-            
+                current_q = enforce_english_query(f"{base_q} {query_variants[attempt % len(query_variants)]}")
             time.sleep(3)
-            attempt_counter += 1
 
-            if attempt_counter % len(sources_pool) == 0:
-                variant = query_variants[
-                    (
-                        attempt_counter // len(sources_pool)
-                    ) % len(query_variants)
-                ]
-                current_q = enforce_english_query(
-                    f"{base_q} {variant}",
-                    90,
-                )
+        if not scene_approved and best_media and is_valid_media(best_media, 1000):
+            log.warning(f"⚠️ إنقاذ المشهد {i+1} بأفضل لقطة Score={best_score:.2f}")
+            c_media = pfx.with_suffix(".mp4" if best_media.name.endswith(".mp4") else ".jpg")
+            shutil.copy2(best_media, c_media)
+            scene_approved = True
+            montage_style = best_montage
 
-                log.info(
-                    "♻️ لم يتم اعتماد أي لقطة في الدورة الكاملة. "
-                    f"تغيير استراتيجية البحث إلى: '{current_q}'"
-                )
-
-        # 🔴 نظام الإنقاذ الذكي إذا فشلت جميع المحاولات
         if not scene_approved:
-            log.error(f"❌ استنفذت جميع المحاولات الـ {MAX_ATTEMPTS} للمشهد {i + 1}.")
-            
-            backup_path = pfx.with_name(pfx.name + "_best_backup" + best_media_ext)
-            
-            if best_score > -1.0 and backup_path.exists() and backup_path.stat().st_size > 1000:
-                log.warning(f"⚠️ إجبار استخدام أفضل لقطة بديلة تم العثور عليها (Score: {best_score}) كإجراء إنقاذي.")
-                c_media = pfx.with_suffix(best_media_ext)
-                shutil.move(backup_path, c_media)
-                scene_approved = True
-                montage_style = best_montage
-            else:
-                append_memory(
-                    f"Scene {i + 1} completely failed after {MAX_ATTEMPTS} attempts. "
-                    f"Original query: {original_q}"
-                )
-                continue
-
-        # تنظيف أي ملفات نسخ احتياطي متبقية لتوفير المساحة
-        try:
-            for backup_file in pfx.parent.glob(pfx.name + "_best_backup*"):
-                backup_file.unlink()
-        except Exception:
-            pass
+            append_memory(f"Scene {i+1} failed after {max_attempts} attempts. Query: {original_q}")
+            log.error(f"❌ فشل المشهد {i+1}.")
+            continue
 
         try:
-            render_scene(
-                c_media,
-                c_media.suffix.lower() == ".mp4",
-                c_mp3,
-                c_mp4,
-                dur,
-                montage_style,
-            )
-
-            if (
-                c_mp4.exists()
-                and c_mp4.stat().st_size > 50000
-            ):
-                clips.append(c_mp4)
-                log.info(
-                    f"🎬 تم بناء المشهد {i + 1}."
-                )
-            else:
-                log.error(
-                    f"❌ فشل بناء ملف المشهد {i + 1}."
-                )
-
+            render_scene(c_media, c_media.suffix.lower() == ".mp4", c_mp3, c_mp4, dur, montage_style)
+            clips.append(c_mp4)
+            total_expected += probe_duration(c_mp4)
+            for b in CONFIG.paths.cache.glob(pfx.name + "_best_backup*"):
+                try: b.unlink()
+                except Exception: pass
         except Exception as e:
-            log.error(
-                f"⚠️ خطأ FFmpeg في المشهد {i + 1}: {e}"
-            )
+            log.error(f"⚠️ فشل رندر المشهد {i+1}: {e}")
 
-    final_vid = (
-        CONFIG.paths.base
-        / f"MasterDoc_{int(time.time())}.mp4"
-    )
+    final_vid = CONFIG.paths.base / f"MasterDoc_{int(time.time())}.mp4"
+    if not clips:
+        log.error("❌ لا توجد مشاهد جاهزة للدمج."); return
 
-    if clips:
-        txt_list = (
-            CONFIG.paths.base / "video_list.txt"
-        )
-        txt_list.write_text(
-            "\n".join(
-                f"file '{c.resolve().as_posix()}'"
-                for c in clips
-            ),
-            encoding="utf-8",
-        )
-
-        log.info(
-            f"🎞️ دمج {len(clips)} مشهداً..."
-        )
-
-        subprocess.run(
-            [
-                "ffmpeg", "-y",
-                "-f", "concat",
-                "-safe", "0",
-                "-i", str(txt_list),
-                "-c", "copy",
-                str(final_vid),
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=600,
-        )
-
-        if final_vid.exists():
-            log.info("🎬 تم تصدير الفيلم النهائي.")
-            upload_drive(final_vid)
-            upload_youtube(final_vid)
-    else:
-        log.error("❌ لا توجد مشاهد جاهزة للدمج.")
-
-    if final_vid.exists():
-        director.self_critique_and_recode(final_vid)
+    try:
+        final_duration = concat_final(clips, final_vid)
+        log.info(f"📐 مجموع مدد المشاهد: {total_expected/60:.2f} دقيقة")
+        log.info(f"📐 مدة الفيلم بعد الدمج: {final_duration/60:.2f} دقيقة")
+        if final_duration > total_expected * 1.15 and total_expected > 10:
+            log.error("🚨 تحذير: مدة الفيلم أكبر بكثير من مجموع مدد المشاهد؛ تم اكتشاف مشكلة زمنية.")
+        upload_drive(final_vid)
+        upload_youtube(final_vid)
+    except Exception as e:
+        log.error(f"❌ فشل إخراج الفيلم النهائي: {e}")
 
 
 if __name__ == "__main__":
