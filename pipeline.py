@@ -37,7 +37,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 
-ENGINE_VERSION = "V22.33"
+ENGINE_VERSION = "V22.35"
 TARGET_W = 1920
 TARGET_H = 1080
 TARGET_FPS = 30
@@ -462,7 +462,7 @@ def render_scene(media, is_vid, aud, out, dur, montage):
 
 
 def clean_old_scene_cache(pfx):
-    for suffix in [".mp4", ".wav", ".mp3", ".jpg", ".pcm", "_foley.mp3", "_best_backup.mp4", "_best_backup.jpg"]:
+    for suffix in [".mp4", ".wav", ".m4a", ".mp3", ".jpg", ".pcm", "_foley.mp3", "_best_backup.mp4", "_best_backup.jpg"]:
         p = Path(str(pfx) + suffix) if suffix.startswith("_") else pfx.with_suffix(suffix)
         if p.exists():
             try: p.unlink()
@@ -552,7 +552,7 @@ def main():
         c_mp4 = pfx.with_suffix(".mp4")
         c_wav = pfx.with_suffix(".wav")
         c_foley = Path(str(pfx) + "_foley.mp3")
-        c_mp3 = pfx.with_suffix(".mp3")
+        c_mp3 = pfx.with_suffix(".m4a")
 
         # الكاش يستخدم فقط إذا كان الفيديو نفسه صالحاً ويمكن قياس مدته.
         if is_valid_media(c_mp4, 50000):
