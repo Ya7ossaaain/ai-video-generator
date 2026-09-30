@@ -505,7 +505,11 @@ def upload_youtube(vid):
 
 def concat_final(clips, final_vid):
     txt_list = CONFIG.paths.base / "video_list.txt"
-    txt_list.write_text("\n".join(f"file '{c.resolve().as_posix().replace("'", "'\\''")}'" for c in clips), encoding="utf-8")
+    concat_lines = []
+    for c in clips:
+        path_str = c.resolve().as_posix().replace("'", "'\''")
+        concat_lines.append("file '" + path_str + "'")
+    txt_list.write_text("\n".join(concat_lines), encoding="utf-8")
     # لا نستخدم -c copy؛ هذا هو الإصلاح الأساسي لمشكلة تضخم مدة الفيلم عند اختلاف timebase/fps بين المشاهد.
     cmd = [
         "ffmpeg","-y","-f","concat","-safe","0","-i",str(txt_list),
