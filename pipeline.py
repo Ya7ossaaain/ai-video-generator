@@ -918,7 +918,7 @@ def upload_drive(vid):
     log.info("☁️ الرفع إلى Google Drive...")
 
     try:
-        token_url = f"https://{'oauth2'}[.googleapis.com/token](https://.googleapis.com/token)"
+        token_url = "https://oauth2.googleapis.com/token"
         credentials = Credentials(
             None,
             refresh_token=CONFIG.drive_token,
@@ -986,7 +986,7 @@ def upload_youtube(vid):
     log.info("▶ الرفع إلى YouTube كفيديو خاص...")
 
     try:
-        token_url = f"https://{'oauth2'}[.googleapis.com/token](https://.googleapis.com/token)"
+        token_url = "https://oauth2.googleapis.com/token"
         credentials = Credentials(
             None,
             refresh_token=CONFIG.yt_refresh,
