@@ -23,6 +23,14 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Restore Production Cache
+        uses: actions/cache@v4
+        with:
+          path: output_build
+          key: prod-vault-${{ github.run_id }}
+          restore-keys: |
+            prod-vault-
+
       - name: Install System Dependencies
         run: |
           sudo apt-get update
@@ -62,18 +70,31 @@ jobs:
         run: python pipeline.py
 
       - name: Commit Memory and Code Updates
+        if: always()
         run: |
           git config --global user.name "Hybrid-AI-Director"
           git config --global user.email "actions@github.com"
           git add director_memory.md pipeline.py
           git commit -m "🧠 تحديث الذاكرة التراكمية والكود المصدري" || echo "لا توجد تحديثات لرفعها"
-          git push
+          git pull --rebase origin main || true
+          git push || true
+
+      - name: Save Production Cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: output_build
+          key: prod-vault-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload Master Vault Artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: Master-Documentary-Vault
-          path: output_build/*.mp4
+          path: |
+            output_build/*.mp4
+            output_build/cache/*.mp4
+            output_build/master_manifest.json
+            production_logs.txt
+            director_memory.md
           retention-days: 3
-
