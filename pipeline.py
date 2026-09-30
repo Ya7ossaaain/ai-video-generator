@@ -3,12 +3,7 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.33 - MONTAGE ONLY
-- السيناريو و Antigravity و Scout و TTS كما هي في V22.32
-- إصلاح فصل مصدر الفيديو عن ملف الـ Render
-- إصلاح كاش المشاهد
-- فرض مدة المشهد = مدة الصوت
-- التحقق من مدد المشاهد قبل الدمج
+HYBRID V22.32 - Config Argument Restored & Ultimate Stealth Headers + Smart Scout Fallback
 """
 
 import os
@@ -21,7 +16,7 @@ import subprocess
 import base64
 import asyncio
 import urllib.parse
-import shutil
+import shutil # تمت الإضافة من أجل نظام النسخ الاحتياطي لأفضل لقطة
 from pathlib import Path
 from typing import List, Dict
 from datetime import datetime
@@ -66,12 +61,6 @@ def setup_logger():
 
 log = setup_logger()
 MEMORY_FILE = Path("director_memory.md")
-
-# ============================================================
-# MONTAGE VERSION ONLY
-# ============================================================
-
-RENDER_VERSION = "V22.33_MONTAGE_ONLY"
 
 
 def append_memory(summary):
@@ -159,48 +148,6 @@ CONFIG.paths.base.mkdir(parents=True, exist_ok=True)
 CONFIG.paths.cache.mkdir(parents=True, exist_ok=True)
 
 
-# ============================================================
-# MONTAGE UTILITY
-# ============================================================
-
-def probe_duration(path):
-    """
-    قراءة مدة ملف صوت/فيديو باستخدام ffprobe.
-    تُستخدم فقط للتحقق من المونتاج والكاش.
-    """
-    try:
-        if not Path(path).exists():
-            return 0.0
-
-        result = subprocess.run(
-            [
-                "ffprobe",
-                "-v", "error",
-                "-show_entries", "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                str(path),
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=30,
-        )
-
-        if result.returncode != 0:
-            return 0.0
-
-        value = float(result.stdout.strip())
-
-        if value <= 0:
-            return 0.0
-
-        return value
-
-    except Exception:
-        return 0.0
-
-
 class Hybrid_Director:
     def plan_documentary(self) -> List[Dict]:
         if CONFIG.paths.manifest.exists():
@@ -284,7 +231,7 @@ ARCHIVE
                     continue
 
                 match = re.search(
-                    r"\s*\{.*\}\s*",
+                    r"\[\s*\{.*\}\s*\]",
                     result.stdout.strip(),
                     re.DOTALL,
                 )
@@ -908,204 +855,60 @@ def process_audio(voice, foley, has_foley, out):
         return 3.0
 
 
-# ============================================================
-# MONTAGE RENDERER - ONLY CHANGED SECTION
-# ============================================================
-
 def render_scene(media, is_vid, aud, out, dur, montage):
-    """
-    V22.33 Montage Fix
-
-    أهم إصلاح:
-    - المصدر media منفصل تماماً عن out.
-    - الفيديو لا يستطيع أن يتجاوز مدة الصوت.
-    - الصورة لا تستطيع أن تتجاوز مدة الصوت.
-    - 25 FPS ثابت.
-    """
-
     fx = (
         ",hue=s=0"
         if "BW" in str(montage).upper()
         else ",eq=contrast=1.12:saturation=0.85"
     )
 
-    # حماية إضافية
-    try:
-        dur = float(dur)
-    except Exception:
-        return False
-
-    if dur <= 0.5:
-        log.error("❌ مدة المشهد غير صالحة.")
-        return False
-
-    # --------------------------------------------------------
-    # VIDEO SOURCE
-    # --------------------------------------------------------
-
     if is_vid:
         cmd = [
             "ffmpeg", "-y",
-
-            # تكرار المصدر فقط إذا كان أقصر من التعليق.
             "-stream_loop", "-1",
-
             "-i", str(media),
             "-i", str(aud),
-
             "-filter_complex",
             (
-                "[0:v]"
-                "scale=1920:1080:"
+                "[0:v]scale=1920:1080:"
                 "force_original_aspect_ratio=increase,"
-                "crop=1920:1080"
-                f"{fx},"
-                "fps=25"
-                "[v]"
+                f"crop=1920:1080{fx}[v]"
             ),
-
             "-map", "[v]",
             "-map", "1:a",
-
-            # إجبار المدة على مدة الصوت.
-            "-t", f"{dur:.3f}",
-
-            "-r", "25",
-            "-fps_mode", "cfr",
-
             "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "20",
-
-            "-pix_fmt", "yuv420p",
-
             "-c:a", "aac",
-            "-ar", "48000",
-
-            "-movflags", "+faststart",
-
+            "-shortest",
             str(out),
         ]
-
-    # --------------------------------------------------------
-    # IMAGE SOURCE
-    # --------------------------------------------------------
-
     else:
+        frames = max(24, int(dur * 24))
         cmd = [
             "ffmpeg", "-y",
-
             "-loop", "1",
             "-i", str(media),
             "-i", str(aud),
-
             "-filter_complex",
             (
-                "[0:v]"
-                "scale=1920:1080:"
+                "[0:v]scale=1920:1080:"
                 "force_original_aspect_ratio=increase,"
-                "crop=1920:1080,"
-                "zoompan="
-                "z='min(zoom+0.00008,1.10)':"
-                "x='iw/2-(iw/zoom/2)':"
-                "y='ih/2-(ih/zoom/2)':"
-                "d=1:"
-                "s=1920x1080:"
-                "fps=25"
-                f"{fx}"
-                "[v]"
+                f"crop=1920:1080,zoompan=z=1.05:d={frames}"
+                f"{fx}[v]"
             ),
-
             "-map", "[v]",
             "-map", "1:a",
-
-            # إجبار المدة على مدة الصوت.
-            "-t", f"{dur:.3f}",
-
-            "-r", "25",
-            "-fps_mode", "cfr",
-
             "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "20",
-
-            "-pix_fmt", "yuv420p",
-
             "-c:a", "aac",
-            "-ar", "48000",
-
-            "-movflags", "+faststart",
-
+            "-shortest",
             str(out),
         ]
 
-    try:
-        if out.exists():
-            out.unlink()
-    except Exception:
-        pass
-
-    try:
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=300,
-        )
-
-        if result.returncode != 0:
-            log.error(
-                f"❌ FFmpeg فشل في Render: "
-                f"{result.stderr[-1200:]}"
-            )
-            return False
-
-    except subprocess.TimeoutExpired:
-        log.error("⏳ انتهت مهلة Render للمشهد بعد 300 ثانية.")
-        return False
-
-    except Exception as e:
-        log.error(f"❌ خطأ Render: {e}")
-        return False
-
-    # --------------------------------------------------------
-    # VALIDATION
-    # --------------------------------------------------------
-
-    if not out.exists() or out.stat().st_size <= 50000:
-        log.error("❌ FFmpeg لم ينتج ملف Scene صالح.")
-        return False
-
-    actual_duration = probe_duration(out)
-
-    if actual_duration <= 0:
-        log.error("❌ تعذر قراءة مدة ملف Scene الناتج.")
-        return False
-
-    difference = abs(actual_duration - dur)
-
-    log.info(
-        f"⏱ Scene Render: المطلوب {dur:.2f}s | "
-        f"الناتج {actual_duration:.2f}s | "
-        f"الفرق {difference:.2f}s"
+    subprocess.run(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=300,
     )
-
-    # هامش بسيط بسبب timestamps/FFmpeg.
-    if difference > 0.75:
-        log.error(
-            f"❌ تم رفض Scene لأن مدته لا تطابق الصوت. "
-            f"الفرق {difference:.2f}s"
-        )
-
-        try:
-            out.unlink()
-        except Exception:
-            pass
-
-        return False
-
-    return True
 
 
 def upload_drive(vid):
@@ -1253,9 +1056,6 @@ def main():
 
     clips = []
 
-    # مجموع مدد المشاهد المقبولة فعلياً
-    rendered_durations = []
-
     for i, scene in enumerate(script):
         elapsed = (
             datetime.now() - start_time
@@ -1274,100 +1074,18 @@ def main():
         txt = scene.get("narration", "")
 
         pfx = CONFIG.paths.cache / f"s_{i:03d}"
-
-        # ====================================================
-        # IMPORTANT:
-        # c_mp4 = ملف الـRender النهائي
-        # c_media = ملف المصدر
-        #
-        # لا يجوز أن يكونا نفس المسار.
-        # ====================================================
-
         c_mp4 = pfx.with_suffix(".mp4")
-
         c_wav = pfx.with_suffix(".wav")
         c_foley = Path(f"{pfx}_foley.mp3")
         c_mp3 = pfx.with_suffix(".mp3")
 
-        render_stamp = pfx.with_suffix(".render.json")
-
-        # ----------------------------------------------------
-        # V22.33 CACHE VALIDATION
-        # ----------------------------------------------------
-
-        cache_valid = False
-
         if (
             c_mp4.exists()
             and c_mp4.stat().st_size > 50000
-            and render_stamp.exists()
         ):
-            try:
-                stamp_data = json.loads(
-                    render_stamp.read_text(
-                        encoding="utf-8"
-                    )
-                )
-
-                stamp_version = stamp_data.get(
-                    "render_version",
-                    ""
-                )
-
-                cached_duration = probe_duration(c_mp4)
-                audio_duration = probe_duration(c_mp3)
-
-                if (
-                    stamp_version == RENDER_VERSION
-                    and cached_duration > 0
-                    and audio_duration > 0
-                    and abs(
-                        cached_duration - audio_duration
-                    ) <= 0.75
-                ):
-                    cache_valid = True
-
-                    log.info(
-                        f"⏭ المشهد {i + 1} موجود في كاش "
-                        f"V22.33 صالح | "
-                        f"{cached_duration:.2f}s"
-                    )
-
-                    clips.append(c_mp4)
-                    rendered_durations.append(
-                        cached_duration
-                    )
-                    continue
-
-            except Exception as e:
-                log.warning(
-                    f"⚠️ كاش المشهد {i + 1} غير صالح: {e}"
-                )
-
-        # ----------------------------------------------------
-        # IMPORTANT:
-        # إذا كان MP4 قديماً من V22.32 ولا يملك stamp،
-        # نحذفه لأنه قد يكون في الحقيقة فيديو المصدر الخام.
-        # ----------------------------------------------------
-
-        if c_mp4.exists() and not cache_valid:
-            log.warning(
-                f"♻️ حذف MP4 قديم/غير موثوق للمشهد {i + 1} "
-                f"لمنع استخدام فيديو خام كـ Scene."
-            )
-
-            try:
-                c_mp4.unlink()
-            except Exception as e:
-                log.warning(
-                    f"⚠️ تعذر حذف الكاش القديم: {e}"
-                )
-
-        try:
-            if render_stamp.exists():
-                render_stamp.unlink()
-        except Exception:
-            pass
+            log.info(f"⏭ المشهد {i + 1} موجود في الكاش.")
+            clips.append(c_mp4)
+            continue
 
         log.info(
             f"\n🎥 جاري العمل على المشهد "
@@ -1442,19 +1160,10 @@ def main():
             ]
             index_in_source = attempt_counter % 3
 
-            # =================================================
-            # MONTAGE FIX:
-            # المصدر أصبح منفصلاً عن ملف الـRender النهائي.
-            # =================================================
-
             if current_source in ["PEXELS", "PIXABAY"]:
-                c_media = pfx.with_name(
-                    pfx.name + "_source.mp4"
-                )
+                c_media = pfx.with_suffix(".mp4")
             else:
-                c_media = pfx.with_name(
-                    pfx.name + "_source.jpg"
-                )
+                c_media = pfx.with_suffix(".jpg")
 
             safe_q = enforce_english_query(current_q)
 
@@ -1577,18 +1286,8 @@ def main():
             
             if best_score > -1.0 and backup_path.exists() and backup_path.stat().st_size > 1000:
                 log.warning(f"⚠️ إجبار استخدام أفضل لقطة بديلة تم العثور عليها (Score: {best_score}) كإجراء إنقاذي.")
-
-                # =================================================
-                # نفس الإصلاح:
-                # الـ backup يصبح source وليس output.
-                # =================================================
-
-                c_media = pfx.with_name(
-                    pfx.name + "_source" + best_media_ext
-                )
-
+                c_media = pfx.with_suffix(best_media_ext)
                 shutil.move(backup_path, c_media)
-
                 scene_approved = True
                 montage_style = best_montage
             else:
@@ -1605,12 +1304,8 @@ def main():
         except Exception:
             pass
 
-        # ====================================================
-        # MONTAGE RENDER
-        # ====================================================
-
         try:
-            render_ok = render_scene(
+            render_scene(
                 c_media,
                 c_media.suffix.lower() == ".mp4",
                 c_mp3,
@@ -1619,50 +1314,14 @@ def main():
                 montage_style,
             )
 
-            if render_ok:
-                actual_duration = probe_duration(c_mp4)
-
-                if (
-                    actual_duration > 0
-                    and abs(actual_duration - dur) <= 0.75
-                ):
-                    # حفظ ختم خاص بـ V22.33
-                    render_stamp.write_text(
-                        json.dumps(
-                            {
-                                "render_version": RENDER_VERSION,
-                                "expected_duration": dur,
-                                "actual_duration": actual_duration,
-                                "timestamp": datetime.now().isoformat(),
-                            },
-                            ensure_ascii=False,
-                            indent=2,
-                        ),
-                        encoding="utf-8",
-                    )
-
-                    clips.append(c_mp4)
-                    rendered_durations.append(
-                        actual_duration
-                    )
-
-                    log.info(
-                        f"🎬 تم بناء المشهد {i + 1} | "
-                        f"المدة {actual_duration:.2f}s"
-                    )
-
-                else:
-                    log.error(
-                        f"❌ تم رفض Scene {i + 1}: "
-                        f"مدة غير صحيحة "
-                        f"({actual_duration:.2f}s مقابل {dur:.2f}s)."
-                    )
-
-                    try:
-                        c_mp4.unlink()
-                    except Exception:
-                        pass
-
+            if (
+                c_mp4.exists()
+                and c_mp4.stat().st_size > 50000
+            ):
+                clips.append(c_mp4)
+                log.info(
+                    f"🎬 تم بناء المشهد {i + 1}."
+                )
             else:
                 log.error(
                     f"❌ فشل بناء ملف المشهد {i + 1}."
@@ -1673,10 +1332,6 @@ def main():
                 f"⚠️ خطأ FFmpeg في المشهد {i + 1}: {e}"
             )
 
-    # ========================================================
-    # FINAL CONCAT
-    # ========================================================
-
     final_vid = (
         CONFIG.paths.base
         / f"MasterDoc_{int(time.time())}.mp4"
@@ -1686,7 +1341,6 @@ def main():
         txt_list = (
             CONFIG.paths.base / "video_list.txt"
         )
-
         txt_list.write_text(
             "\n".join(
                 f"file '{c.resolve().as_posix()}'"
@@ -1695,20 +1349,11 @@ def main():
             encoding="utf-8",
         )
 
-        expected_total = sum(
-            rendered_durations
-        )
-
         log.info(
             f"🎞️ دمج {len(clips)} مشهداً..."
         )
 
-        log.info(
-            f"⏱ مجموع مدد المشاهد قبل الدمج: "
-            f"{expected_total / 60:.2f} دقيقة"
-        )
-
-        concat_result = subprocess.run(
+        subprocess.run(
             [
                 "ffmpeg", "-y",
                 "-f", "concat",
@@ -1718,117 +1363,14 @@ def main():
                 str(final_vid),
             ],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
+            stderr=subprocess.DEVNULL,
             timeout=600,
         )
 
-        # ----------------------------------------------------
-        # إذا فشل concat copy، نستخدم re-encode احتياطي.
-        # ----------------------------------------------------
-
-        if (
-            concat_result.returncode != 0
-            or not final_vid.exists()
-            or final_vid.stat().st_size <= 50000
-        ):
-            log.warning(
-                "⚠️ فشل الدمج المباشر. "
-                "سيتم استخدام دمج FFmpeg بإعادة الترميز."
-            )
-
-            fallback_vid = (
-                CONFIG.paths.base
-                / f"MasterDoc_{int(time.time())}_fallback.mp4"
-            )
-
-            fallback_result = subprocess.run(
-                [
-                    "ffmpeg", "-y",
-                    "-f", "concat",
-                    "-safe", "0",
-                    "-i", str(txt_list),
-
-                    "-c:v", "libx264",
-                    "-preset", "veryfast",
-                    "-crf", "20",
-
-                    "-pix_fmt", "yuv420p",
-
-                    "-c:a", "aac",
-                    "-ar", "48000",
-
-                    "-movflags", "+faststart",
-
-                    str(fallback_vid),
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=900,
-            )
-
-            if (
-                fallback_result.returncode == 0
-                and fallback_vid.exists()
-                and fallback_vid.stat().st_size > 50000
-            ):
-                try:
-                    if final_vid.exists():
-                        final_vid.unlink()
-                except Exception:
-                    pass
-
-                fallback_vid.replace(final_vid)
-
-            else:
-                log.error(
-                    "❌ فشل الدمج الاحتياطي أيضاً."
-                )
-
-        # ----------------------------------------------------
-        # FINAL DURATION VALIDATION
-        # ----------------------------------------------------
-
         if final_vid.exists():
-            final_duration = probe_duration(
-                final_vid
-            )
-
-            log.info(
-                f"🎬 مدة الفيلم النهائي: "
-                f"{final_duration / 60:.2f} دقيقة"
-            )
-
-            difference = abs(
-                final_duration - expected_total
-            )
-
-            log.info(
-                f"⏱ فرق مدة الفيلم عن مجموع المشاهد: "
-                f"{difference:.2f} ثانية"
-            )
-
-            if difference > 2.0:
-                log.error(
-                    "❌ تحذير خطير: مدة الفيلم النهائي "
-                    "لا تطابق مجموع مدد المشاهد."
-                )
-
-                # لا نرفع الفيديو إذا ظهرت مشكلة مدة كبيرة.
-                log.error(
-                    "🛑 تم إيقاف الرفع لمنع نشر فيديو "
-                    "بمدة مونتاج خاطئة."
-                )
-
-            else:
-                log.info(
-                    "🎬 تم تصدير الفيلم النهائي بنجاح."
-                )
-
-                upload_drive(final_vid)
-                upload_youtube(final_vid)
-
+            log.info("🎬 تم تصدير الفيلم النهائي.")
+            upload_drive(final_vid)
+            upload_youtube(final_vid)
     else:
         log.error("❌ لا توجد مشاهد جاهزة للدمج.")
 
