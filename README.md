@@ -1,36 +1,57 @@
-# V24 Professional Single-Scene GitHub Test
+# UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE — V24.2 / 7-SCENE PILOT
 
-هذا المستودع يختبر **مشهدًا واحدًا فقط** من محرك الوثائقي V24:
+هذا اختبار مصغر للحلقة الكاملة: **خطة واحدة + Edit Bible واحدة + أول 7 مشاهد مترابطة**.
 
-1. توليد خطة مشهد واحدة.
-2. Gemini TTS بصوت Charon.
-3. Groq Whisper word timestamps.
-4. جلب وسيط حقيقي تلقائيًا من المصادر المتاحة.
-5. FFmpeg Professional Render.
-6. منع إعادة تشغيل الفيديو عند انتهاء المصدر؛ يتم تثبيت آخر إطار بدل التكرار.
-7. حرق الترجمة العربية داخل الفيديو.
-8. رفع MP4 وASS وJSON والـlogs كـ GitHub Artifacts.
+## ما الذي يختبره؟
+- Gemini 3.1 Pro عبر **agy الموجود أصلًا في بيئة GitHub/Antigravity**.
+- Episode Edit Bible موحدة للحلقة.
+- Scene Directives وBeat Plan.
+- Media Scout + Vision Scout.
+- Gemini TTS.
+- Groq Whisper word timing للترجمة.
+- FFmpeg 1080p/30fps/H.264/AAC.
+- دمج المشاهد السبعة في Master MP4.
+- OpenTimelineIO أو JSON fallback.
+- Thumbnail.
 
-## GitHub Secrets
+## مهم جدًا: agy
+الاختبار **لا يثبت agy ولا يحدثه ولا يعيد تهيئته ولا يعدل PATH**.
 
-أضف من **Settings → Secrets and variables → Actions**:
+يفترض أن `agy` متاح أصلًا في بيئة GitHub/Antigravity التي تستخدمها. الـworkflow يكتفي بالتحقق من وجود الأمر ثم يستخدمه كما هو.
 
-- `GEMINI_API_KEY` — مطلوب. يمكن وضع عدة مفاتيح مفصولة بفاصلة.
-- `GROQ_API_KEY` — مطلوب للترجمة المتزامنة.
-- `PEXELS_API_KEY` — اختياري، لكنه مفيد لجلب فيديو حقيقي.
-- `PIXABAY_API_KEY` — اختياري.
-- `FREESOUND_API_KEY` — اختياري.
+الأوامر التي **لا توجد** في هذا الاختبار:
+- `npm install agy`
+- أي `curl | sh` لتثبيت Antigravity
+- أي تحديث تلقائي لـ agy
+- أي تعديل لـ PATH
+- أي إعادة تسجيل دخول أو إعادة تهيئة لـ agy
 
-لا تضع المفاتيح داخل الملفات أو الكود.
+## Secrets
+أضف في Repository Secrets:
+- `GEMINI_API_KEY`
+- `GROQ_API_KEY`
+- `PEXELS_API_KEY`
+- `PIXABAY_API_KEY`
+- `FREESOUND_API_KEY`
+
+لا تضع المفاتيح داخل الكود.
 
 ## التشغيل
+1. ارفع محتويات هذا المجلد إلى المستودع.
+2. افتح GitHub → Actions.
+3. اختر `V24.2 — 7 Scene Pilot Test`.
+4. اختر `Run workflow`.
+5. اكتب موضوع الاختبار.
+6. بعد انتهاء الـworkflow حمّل Artifact باسم `V24.2-7scene-pilot`.
 
-Actions → **V24 Professional Single Scene Test** → Run workflow → اكتب موضوع الاختبار → Run.
+## النتيجة
+سيتم تنفيذ أول 7 مشاهد من **خطة واحدة**، وليس 7 prompts منفصلة. الهدف هو تقييم:
+- الاستمرارية البصرية
+- الإيقاع
+- كثافة المعلومات والمرئيات
+- الترجمة والتوقيت
+- الصوت وFoley
+- جودة الـFFmpeg render
+- تماسك المخرج بين المشاهد
 
-الافتراضي:
-
-`لغز اختفاء طائرة`
-
-بعد الانتهاء افتح **Artifacts** وحمّل `scene-test-output`.
-
-> في GitHub Actions لا يوجد تسجيل دخول تفاعلي إلى Antigravity. لذلك يستخدم الاختبار `agy` إذا توفر، وإلا يستخدم Gemini API لإنتاج خطة المشهد. بقية مسار TTS → Groq → Media → FFmpeg هو مسار الاختبار الحقيقي.
+هذا اختبار إنتاجي مصغر فقط؛ لا يرفع إلى YouTube أو Google Drive.
