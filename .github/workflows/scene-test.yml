@@ -1,0 +1,76 @@
+name: V24 Professional Single Scene Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: 'موضوع المشهد الوثائقي'
+        required: true
+        default: 'لغز اختفاء طائرة'
+      planner_model:
+        description: 'Gemini model for GitHub planner fallback'
+        required: false
+        default: 'gemini-3-flash-preview'
+
+jobs:
+  scene-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    env:
+      VIDEO_TOPIC: ${{ inputs.topic }}
+      GITHUB_PLANNER_MODEL: ${{ inputs.planner_model }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+      FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
+      GEMINI_TTS_MODEL: gemini-3.8-flash-tts
+      GROQ_STT_MODEL: whisper-large-v3
+      GENERATE_THUMBNAIL: '0'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version | head -1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run one professional scene
+        run: |
+          mkdir -p output_build/scene_test
+          python documentary_engine_scene_test.py --scene-test --topic "$VIDEO_TOPIC" 2>&1 | tee output_build/scene_test/github_scene_test.log
+
+      - name: Validate output
+        run: |
+          test -s output_build/scene_test/scene_test_professional.mp4
+          ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 output_build/scene_test/scene_test_professional.mp4
+          test -s output_build/scene_test/scene.ass
+          echo '=== TEST PASSED: MP4 + ASS exist ==='
+
+      - name: Upload scene artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scene-test-output
+          path: |
+            output_build/scene_test/scene_test_professional.mp4
+            output_build/scene_test/scene.ass
+            output_build/scene_test/scene.words.json
+            output_build/scene_test/scene_voice.wav
+            output_build/scene_test/scene_audio.m4a
+            output_build/scene_test/github_scene_test.log
+          if-no-files-found: warn
+          retention-days: 7
