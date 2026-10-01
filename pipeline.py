@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.37 - Stable Render / Audio / Concat / Cache
+HYBRID V22.37 - Image Media Fix / Slow Loop / Stable Render
 
 أهم الإصلاحات:
 - توحيد كل المشاهد على 1920x1080 / 30fps / H.264 / AAC 48kHz.
@@ -12,8 +12,8 @@ HYBRID V22.37 - Stable Render / Audio / Concat / Cache
 - تنظيف الكاش القديم عند اختلاف نسخة المحرك.
 - حماية أفضل من JSON غير الصالح وملفات الصوت الفارغة.
 - الحفاظ على تبريد الصوت 30 ثانية بعد نجاح التوليد.
-- إصلاح فحص صلاحية وسائط الصور (is_valid_media) وإنقاذ المشاهد الأرشيفية.
-- تحديث تعليمات Vision Scout لاستخدام أداة المعاينة البصرية للمسار المحلي.
+- إصلاح التحقق من صور WIKIPEDIA وARCHIVE: الصور لا تحتاج ffprobe duration.
+- فيديو المشهد يبطؤ قليلاً قبل إعادة التكرار، بدلاً من التكرار الفوري بالسرعة الأصلية.
 """
 
 import os
@@ -24,6 +24,7 @@ import re
 import logging
 import subprocess
 import base64
+import hashlib
 import asyncio
 import urllib.parse
 import shutil
@@ -34,18 +35,12 @@ from typing import List, Dict
 import requests
 from google import genai
 from google.genai import types
-try:
-    from google.oauth2.credentials import Credentials
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaFileUpload
-except Exception:
-    Credentials = None
-    build = None
-    MediaFileUpload = None
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
 
 ENGINE_VERSION = "V22.37"
-
 TARGET_W = 1920
 TARGET_H = 1080
 TARGET_FPS = 30
@@ -119,49 +114,34 @@ def probe_duration(path):
         return 0.0
 
 
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
-
-
 def is_valid_media(path, minimum=1000):
-    if path is None:
-        return False
-    path = Path(path)
-    if not (path.exists() and path.is_file() and path.stat().st_size >= minimum):
-        return False
-    ext = path.suffix.lower()
-    if ext in IMAGE_EXTENSIONS:
-        try:
-            from PIL import Image
-            with Image.open(path) as img:
-                img.verify()
-            with Image.open(path) as img:
-                w, h = img.size
-                if w <= 0 or h <= 0:
-                    return False
-            return True
-        except Exception:
-            try:
-                r = subprocess.run(
-                    [
-                        "ffprobe", "-v", "error",
-                        "-select_streams", "v:0",
-                        "-show_entries", "stream=width,height",
-                        "-of", "default=noprint_wrappers=1:nokey=1",
-                        str(path),
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                )
-                if r.returncode != 0:
-                    return False
-                nums = [int(line.strip()) for line in r.stdout.strip().splitlines() if line.strip().isdigit()]
-                return len(nums) >= 2 and nums[0] > 0 and nums[1] > 0
-            except Exception:
-                return False
-    return probe_duration(path) > 0.1
+    """تحقق مخصص للفيديو/الصوت: يجب أن يكون له duration قابلة للقياس."""
+    return path.exists() and path.is_file() and path.stat().st_size >= minimum and probe_duration(path) > 0.1
 
 
+def is_valid_visual(path, minimum=10000):
+    """تحقق للصور الثابتة: لا تستخدم ffprobe duration لأن الصورة ليس لها مدة زمنية."""
+    if not path.exists() or not path.is_file() or path.stat().st_size < minimum:
+        return False
+    try:
+        r = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height",
+                "-of", "csv=p=0:s=x",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if r.returncode != 0:
+            return False
+        m = re.search(r"(\d+)x(\d+)", r.stdout.strip())
+        return bool(m and int(m.group(1)) > 0 and int(m.group(2)) > 0)
+    except Exception:
+        return False
 
 
 def enforce_english_query(query, max_chars=90):
@@ -185,10 +165,16 @@ def enforce_english_query(query, max_chars=90):
 
 class HybridConfig:
     topic = os.environ.get("VIDEO_TOPIC", "لغز الجريمة الغامضة")
+
+    # هوية مستقلة لكل موضوع حتى لا يمكن لـ manifest/cache الخاص بقصة
+    # سابقة أن يتسلل إلى قصة جديدة.
+    _topic_normalized = re.sub(r"\\s+", " ", str(topic).strip().lower())
+    topic_key = hashlib.sha256(_topic_normalized.encode("utf-8")).hexdigest()[:16]
+
     paths = type("Paths", (), {
         "base": Path("./output_build"),
-        "cache": Path("./output_build/cache"),
-        "manifest": Path("./output_build/master_manifest.json"),
+        "cache": Path(f"./output_build/cache/topic_{topic_key}"),
+        "manifest": Path(f"./output_build/manifests/manifest_{topic_key}.json"),
     })()
     gemini_keys = [k.strip() for k in os.environ.get("GEMINI_API_KEY", "").split(",") if k.strip()]
     os.environ.pop("GEMINI_API_KEY", None)
@@ -205,6 +191,7 @@ class HybridConfig:
 CONFIG = HybridConfig()
 CONFIG.paths.base.mkdir(parents=True, exist_ok=True)
 CONFIG.paths.cache.mkdir(parents=True, exist_ok=True)
+CONFIG.paths.manifest.parent.mkdir(parents=True, exist_ok=True)
 
 
 class Hybrid_Director:
@@ -213,7 +200,7 @@ class Hybrid_Director:
             try:
                 data = json.loads(CONFIG.paths.manifest.read_text(encoding="utf-8"))
                 if isinstance(data, list) and data:
-                    log.info(f"📋 استخدام master_manifest.json: {len(data)} مشهداً.")
+                    log.info(f"📋 استخدام manifest الخاص بالموضوع الحالي: {len(data)} مشهداً | topic_key={CONFIG.topic_key}")
                     return data
             except Exception as e:
                 log.warning(f"⚠️ تعذر قراءة manifest: {e}")
@@ -258,7 +245,7 @@ search_query إنجليزية فقط، narration عربية.
                         "narration": str(s.get("narration", "")).strip(),
                     })
                 CONFIG.paths.manifest.write_text(json.dumps(cleaned, ensure_ascii=False, indent=2), encoding="utf-8")
-                log.info(f"✅ تم إنشاء السيناريو: {len(cleaned)} مشهداً.")
+                log.info(f"✅ تم إنشاء السيناريو الجديد: {len(cleaned)} مشهداً | topic_key={CONFIG.topic_key}")
                 return cleaned
             except subprocess.TimeoutExpired:
                 log.warning("⏳ انتهت مهلة توليد السيناريو 360 ثانية.")
@@ -268,21 +255,18 @@ search_query إنجليزية فقط، narration عربية.
         raise RuntimeError("🛑 فشل إنشاء السيناريو بعد 3 جولات.")
 
     async def _async_evaluate_scout(self, media_path, narration, source):
-        resolved_media = Path(media_path).resolve()
         prompt = f'''أنت المراجع البصري الفوري لفيلم وثائقي بعنوان "{CONFIG.topic}".
 نوع المصدر: {source}
 التعليق الصوتي: "{narration}"
-مسار ملف الوسيط المحلي:
-{resolved_media}
+الوسيط المراد فحصه موجود في المسار المحلي التالي:
+{Path(media_path).resolve()}
 
-تعليمات المراجعة البصرية الإلزامية:
-1. قم بمعاينة وفحص ملف الوسيط من المسار المحلي أعلاه باستخدام أداة قراءة/معاينة الملفات view_file.
-2. لا تُرجع MEDIA_NOT_ATTACHED دون محاولة معاينة الملف أولاً عبر أداة القراءة.
-3. قيّم ملاءمة اللقطة للجو الوثائقي والتعليق الصوتي. اقبل اللقطات التعبيرية، الرمزية، والأرشيفية إذا كانت تخدم السياق العام.
-4. أخرج النتيجة بتنسيق JSON فقط دون أي كود Markdown خارجي:
-{{"decision":"ACCEPT","score":0.85,"reason":"سبب القبول أو الرفض بالتفصيل","montage":"NORMAL","new_query":"English search query if rejected"}}
+مهم: إذا كان إصدار agy الحالي لا يدعم إرفاق الملف تلقائياً عبر النص، فلا تدّع أنك شاهدت الصورة.
+في هذه الحالة أرجع decision="REJECT", score=0, reason="MEDIA_NOT_ATTACHED".
+إذا كنت قادراً فعلياً على رؤية الوسيط، قيّم ملاءمته للجو الوثائقي، واقبل اللقطات التعبيرية والرمزية إذا كانت تخدم النص.
+أخرج JSON فقط:
+{{"decision":"ACCEPT","score":0.85,"reason":"...","montage":"NORMAL","new_query":"English query"}}
 '''
-
         try:
             proc = await asyncio.create_subprocess_exec(
                 "agy", "--model", "gemini-3.8-flash", "--effort", "high",
@@ -419,7 +403,7 @@ class MediaFetcher:
                 pages = [p for p in r.json().get("query", {}).get("pages", {}).values() if p.get("thumbnail", {}).get("source")]
                 if not pages: return False
                 out.write_bytes(self._get(pages[index % len(pages)]["thumbnail"]["source"], timeout=60).content)
-                return is_valid_media(out, 5000)
+                return is_valid_visual(out, 10000)
 
             if source == "ARCHIVE":
                 r = self._get("https://archive.org/advancedsearch.php", params={"q": f"{safe_query} AND mediatype:image", "fl[]":"identifier", "output":"json", "rows":10})
@@ -429,7 +413,7 @@ class MediaFetcher:
                 if not identifier: return False
                 url = "https://archive.org/services/img/" + urllib.parse.quote(identifier)
                 out.write_bytes(self._get(url, timeout=60).content)
-                return is_valid_media(out, 5000)
+                return is_valid_visual(out, 10000)
 
             if source == "FREESOUND":
                 if not CONFIG.freesound: return False
@@ -439,7 +423,7 @@ class MediaFetcher:
                 url = results[0].get("previews", {}).get("preview-hq-mp3")
                 if not url: return False
                 out.write_bytes(self._get(url, timeout=60).content)
-                return is_valid_media(out, 1000)
+                return out.exists() and out.stat().st_size > 1000
         except requests.RequestException as e:
             log.warning(f"🌐 خطأ شبكة {source}: {str(e)[:180]}")
         except Exception as e:
@@ -449,9 +433,8 @@ class MediaFetcher:
 
 def get_source_pool(media_type):
     if str(media_type).upper() in ["PEXELS", "PIXABAY"]:
-        return ["PEXELS", "PIXABAY", "PEXELS", "PIXABAY", "PEXELS", "PIXABAY", "WIKIPEDIA", "ARCHIVE"]
-    return ["WIKIPEDIA", "ARCHIVE", "WIKIPEDIA", "ARCHIVE", "PEXELS", "PIXABAY"]
-
+        return ["PEXELS", "PEXELS", "PEXELS", "PIXABAY", "PIXABAY", "PIXABAY"]
+    return ["WIKIPEDIA", "WIKIPEDIA", "WIKIPEDIA", "ARCHIVE", "ARCHIVE", "ARCHIVE"]
 
 
 def process_audio(voice, foley, has_foley, out):
@@ -475,16 +458,22 @@ def process_audio(voice, foley, has_foley, out):
 
 
 def render_scene(media, is_vid, aud, out, dur, montage):
-    if not is_valid_media(media, 1000) or not is_valid_media(aud, 1000):
+    # الفيديو يحتاج duration، أما الصور فتحتاج فقط أن تكون صورة صالحة.
+    media_ok = is_valid_media(media, 1000) if is_vid else is_valid_visual(media, 10000)
+    if not media_ok or not is_valid_media(aud, 1000):
         raise RuntimeError("Media/audio invalid before render")
 
     fx = ",hue=s=0" if "BW" in str(montage).upper() else ",eq=contrast=1.12:saturation=0.85"
     common_v = f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=increase,crop={TARGET_W}:{TARGET_H}{fx},fps={TARGET_FPS},format=yuv420p"
 
     if is_vid:
+        # إبطاء اللقطة قليلاً (15%) ثم إعادة تشغيلها فقط بعد وصولها لنهايتها.
+        # setpts يطيل المقطع، و-stream_loop يعيد المقطع بعد انتهاء النسخة المبطأة.
+        SLOW_FACTOR = 1.15
+        slow_v = f"setpts=PTS*{SLOW_FACTOR:.2f},{common_v}"
         cmd = [
             "ffmpeg","-y","-stream_loop","-1","-i",str(media),"-i",str(aud),
-            "-filter_complex",f"[0:v]{common_v}[v]",
+            "-filter_complex",f"[0:v]{slow_v}[v]",
             "-map","[v]","-map","1:a:0",
             "-c:v","libx264","-preset","veryfast","-crf","20",
             "-r",str(TARGET_FPS),"-pix_fmt","yuv420p",
@@ -509,11 +498,9 @@ def render_scene(media, is_vid, aud, out, dur, montage):
     if r.returncode != 0:
         raise RuntimeError(r.stderr[-2000:])
     actual = probe_duration(out)
-    if actual < 0.5 or not is_valid_media(out, 1000):
+    if actual < 0.5 or not is_valid_media(out, 50000):
         raise RuntimeError(f"Rendered scene invalid: duration={actual}")
     log.info(f"🎬 Render OK | {out.name} | {actual:.2f}s")
-
-
 
 
 def clean_old_scene_cache(pfx):
@@ -585,6 +572,7 @@ def concat_final(clips, final_vid):
 def main():
     start_time = datetime.now()
     log.info(f"▶ بدء المحرك {ENGINE_VERSION} | القضية: {CONFIG.topic}")
+    log.info(f"🧬 Topic Cache Key: {CONFIG.topic_key} | Manifest: {CONFIG.paths.manifest}")
     director = Hybrid_Director()
     fetcher = MediaFetcher()
     try:
@@ -603,16 +591,26 @@ def main():
         original_q = scene.get("search_query", "")
         foley = scene.get("foley_type", "none")
         txt = str(scene.get("narration", "")).strip()
-        pfx = CONFIG.paths.cache / f"s_{i:03d}"
+        # لا تعتمد هوية الكاش على رقم المشهد فقط.
+        # fingerprint يتغير إذا تغير النص أو query أو نوع الوسيط، وبالتالي
+        # لا يمكن لصوت/فيديو قديم أن يُركّب على قصة جديدة بالصدفة.
+        scene_signature = json.dumps({
+            "scene_num": i,
+            "media_type": typ,
+            "search_query": original_q,
+            "foley_type": foley,
+            "narration": txt,
+        }, ensure_ascii=False, sort_keys=True)
+        scene_key = hashlib.sha256(scene_signature.encode("utf-8")).hexdigest()[:12]
+        pfx = CONFIG.paths.cache / f"s_{i:03d}_{scene_key}"
         c_mp4 = pfx.with_suffix(".mp4")
         c_wav = pfx.with_suffix(".wav")
         c_foley = Path(str(pfx) + "_foley.mp3")
         c_mp3 = pfx.with_suffix(".m4a")
 
-        # الكاش يستخدم فقط إذا كان الفيديو نفسه صالحاً ويمكن قياس مدته.
-        if is_valid_media(c_mp4, 10000):
+        # الكاش هنا مرتبط ببصمة الموضوع + بصمة محتوى المشهد، لذلك لا يُعاد استخدام مشهد من قصة أخرى.
+        if is_valid_media(c_mp4, 50000):
             cached_dur = probe_duration(c_mp4)
-
             clips.append(c_mp4)
             total_expected += cached_dur
             log.info(f"⏭ المشهد {i+1} من الكاش | {cached_dur:.1f}s")
@@ -659,36 +657,39 @@ def main():
             safe_q = enforce_english_query(current_q)
             log.info(f"🔎 محاولة {attempt+1}/{max_attempts} | {source} | {safe_q}")
             found = fetcher.fetch_media(source, safe_q, c_media, idx)
-            if found and is_valid_media(c_media, 1000):
+            if found:
                 eval_res = director.evaluate_scene_with_scout(c_media, txt, source)
                 score = float(eval_res.get("score", 0))
-                if score > best_score or best_media is None:
+                if score > best_score:
                     best_score = score
                     best_montage = eval_res.get("montage", "NORMAL")
-                    backup_candidate = Path(str(pfx) + f"_best_backup{ext}")
-                    try:
-                        shutil.copy2(c_media, backup_candidate)
-                        best_media = backup_candidate
-                    except Exception:
-                        pass
+                    best_media = Path(str(pfx) + f"_best_backup{ext}")
+                    try: shutil.copy2(c_media, best_media)
+                    except Exception: best_media = None
                 if eval_res.get("accepted"):
                     scene_approved = True
                     montage_style = eval_res.get("montage", "NORMAL")
                     break
-
                 new_q = enforce_english_query(eval_res.get("new_query", ""))
                 current_q = new_q if new_q not in ["mystery evidence", safe_q] else enforce_english_query(f"{base_q} {query_variants[attempt % len(query_variants)]}")
             else:
                 current_q = enforce_english_query(f"{base_q} {query_variants[attempt % len(query_variants)]}")
             time.sleep(3)
 
-        if not scene_approved and best_media and is_valid_media(best_media, 1000):
-            log.warning(f"⚠️ إنقاذ المشهد {i+1} بأفضل لقطة Score={best_score:.2f}")
-            media_ext = ".mp4" if best_media.name.endswith(".mp4") else ".jpg"
-            c_media = pfx.with_name(pfx.name + "_media" + media_ext)
-            shutil.copy2(best_media, c_media)
-            scene_approved = True
-            montage_style = best_montage
+        if not scene_approved and best_media:
+            best_is_video = best_media.suffix.lower() == ".mp4"
+            best_is_valid = (
+                is_valid_media(best_media, 1000)
+                if best_is_video
+                else is_valid_visual(best_media, 10000)
+            )
+            if best_is_valid:
+                log.warning(f"⚠️ إنقاذ المشهد {i+1} بأفضل لقطة Score={best_score:.2f}")
+                media_ext = ".mp4" if best_is_video else ".jpg"
+                c_media = pfx.with_name(pfx.name + "_media" + media_ext)
+                shutil.copy2(best_media, c_media)
+                scene_approved = True
+                montage_style = best_montage
 
         if not scene_approved:
             append_memory(f"Scene {i+1} failed after {max_attempts} attempts. Query: {original_q}")
