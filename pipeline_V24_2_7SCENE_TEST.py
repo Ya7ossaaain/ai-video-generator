@@ -45,7 +45,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 
-ENGINE_VERSION = "V24.2-7SCENE-TEST"
+ENGINE_VERSION = "V24.2-7SCENE-FIXED"
 TARGET_W = 1920
 TARGET_H = 1080
 TARGET_FPS = 30
@@ -197,7 +197,7 @@ class HybridConfig:
     newsapi = os.environ.get("NEWS_API_KEY", "")
     nyt = os.environ.get("NYT_API_KEY", "")
     thumbnail_model = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-3.8-flash")
-    thumbnail_enabled = os.environ.get("GENERATE_THUMBNAIL", "1").strip().lower() not in {"0", "false", "no"}
+    thumbnail_enabled = os.environ.get("GENERATE_THUMBNAIL", "0").strip().lower() not in {"0", "false", "no"}
     groq_api_key = os.environ.get("GROQ_API_KEY", "").strip()
     groq_model = os.environ.get("GROQ_STT_MODEL", "whisper-large-v3")
     yt_id = os.environ.get("GOOGLE_CLIENT_ID", "")
@@ -311,7 +311,7 @@ class Hybrid_Director:
                 if isinstance(data, list) and data:
                     # V24.2 requires editorial directives. Old V24 manifests are not reused
                     # because they lack the episode-level Edit Bible/beat plan.
-                    if data and all(isinstance(x, dict) and x.get("beat_plan") is not None for x in data):
+                    if data and all(isinstance(x, dict) and bool(x.get("beat_plan")) for x in data):
                         if not CONFIG.paths.edit_bible.exists(): save_edit_bible(_default_edit_bible())
                         log.info(f"📋 استخدام manifest V24.2 الخاص بالموضوع الحالي: {len(data)} مشهداً | topic_key={CONFIG.topic_key}")
                         return data
@@ -323,10 +323,10 @@ class Hybrid_Director:
         prompt = f'''أنت كبير المخرجين ومخطط أفلام وثائقية تحقيقية.
 القضية: "{CONFIG.topic}"
 أنت لا تكتب السيناريو فقط؛ أنت SHOWRUNNER والمخرج التحريري للحلقة كاملة.
-أنشئ 40 إلى 50 مشهداً، لكن خطط الإيقاع البصري للحلقة كاملة قبل التنفيذ. لا تجعل كل مشهد يبدو كفيديو مستقل.
+للاختبار الحالي أنشئ 7 مشاهد مترابطة فقط، لكن خطط الإيقاع البصري للحلقة كاملة قبل التنفيذ. لا تجعل كل مشهد يبدو كفيديو مستقل. كل مشهد يجب أن يحتوي على تعليق صوتي عربي أصلي بطول تقريبي 95 إلى 125 كلمة (حوالي 38 إلى 55 ثانية بصوت وثائقي طبيعي). لا تختصر المشهد إلى جملة أو فقرة قصيرة. اجعل المشاهد السبعة تشكل بداية/تصعيد/أدلة/تحول/كشف/خاتمة مصغرة واحدة.
 أخرج JSON Object واحداً يحتوي على: edit_bible و scenes.
 edit_bible يجب أن يحدد لغة بصرية واحدة للحلقة، قواعد pacing، camera movement، transition vocabulary، graphics/evidence language، subtitle style، sound strategy، recurring motifs، وما يجب تجنبه.
-لكل مشهد أخرج: scene_num, media_type, search_query, foley_type, narration, attention_level, visual_role, beat_plan, camera_motion, transition_in, transition_out, graphic_intent.
+لكل مشهد أخرج: scene_num, media_type, search_query, foley_type, narration, attention_level, visual_role, beat_plan, camera_motion, transition_in, transition_out, graphic_intent. narration يجب أن يكون 95-125 كلمة عربية تقريباً، مع علامات ترقيم عربية واضحة عند الحاجة.
 beat_plan قائمة من 2 إلى 6 beats، وكل beat يحتوي تقريباً: relative_start, relative_end, action, visual_priority. اجعل beats مرتبطة بمعنى الجملة لا بمؤثرات عشوائية.
 لا تستخدم glitch إلا عندما يخدم السرد. لا تكرر نفس transition بشكل متتالٍ. لا تجعل كل beat يحتاج ملف media جديداً؛ يمكن أن تكون beats حركة/تكبير/كشف دليل داخل نفس الوسيط.
 media_type المسموح: PEXELS, PIXABAY, UNSPLASH, WIKIMEDIA, WIKIPEDIA, ARCHIVE, MAPBOX, APIFLASH.
@@ -442,6 +442,9 @@ media_type المسموح: PEXELS, PIXABAY, UNSPLASH, WIKIMEDIA, WIKIPEDIA, ARCH
             return {"accepted": False, "montage": "NORMAL", "new_query": "", "score": 0.0, "reason": str(e)}
 
     def generate_voice(self, text, out_wav):
+        """Gemini TTS with key rotation + differentiated 429/503 backoff.
+        Never changes the user's local agy installation; this is only API retry logic.
+        """
         if not CONFIG.gemini_keys:
             log.error("❌ لا توجد GEMINI_API_KEY.")
             return False
@@ -453,44 +456,55 @@ media_type المسموح: PEXELS, PIXABAY, UNSPLASH, WIKIMEDIA, WIKIPEDIA, ARCH
                 )
             ),
         )
-        for round_num in range(3):
-            for i, key in enumerate(CONFIG.gemini_keys):
-                try:
-                    client = genai.Client(api_key=key)
-                    res = client.models.generate_content(
-                        model=CONFIG.tts_model,
-                        contents="[INSTRUCTION: Deep chilling narrator]\n" + text,
-                        config=cfg,
-                    )
-                    part = res.candidates[0].content.parts[0]
-                    audio = part.inline_data.data
-                    mime = getattr(part.inline_data, "mime_type", "") or ""
-                    raw = base64.b64decode(audio) if isinstance(audio, str) else audio
-                    # Gemini قد يعيد PCM خاماً؛ حوّله إلى WAV حقيقي إذا لم تكن البيانات WAV.
-                    if raw[:4] == b"RIFF":
-                        out_wav.write_bytes(raw)
-                    else:
-                        tmp_pcm = out_wav.with_suffix(".pcm")
-                        tmp_pcm.write_bytes(raw)
-                        rate_match = re.search(r"rate=(\d+)", mime)
-                        sample_rate = int(rate_match.group(1)) if rate_match else 24000
-                        r = subprocess.run([
-                            "ffmpeg", "-y", "-f", "s16le", "-ar", str(sample_rate), "-ac", "1",
-                            "-i", str(tmp_pcm), "-c:a", "pcm_s16le", str(out_wav)
-                        ], capture_output=True, text=True, timeout=60)
-                        try: tmp_pcm.unlink()
-                        except Exception: pass
-                        if r.returncode != 0:
-                            raise RuntimeError(r.stderr[-500:])
-                    if is_valid_media(out_wav, 1000):
-                        log.info("⏳ تم توليد الصوت بنجاح. تبريد 30 ثانية...")
-                        time.sleep(30)
-                        return True
-                except Exception as e:
-                    log.warning(f"⚠️ فشل مفتاح الصوت {i + 1}: {str(e)[:250]}")
-                    time.sleep(2)
-            time.sleep(10)
-        log.error("❌ استنفدت محاولات توليد الصوت.")
+        total_attempts = max(6, len(CONFIG.gemini_keys) * 4)
+        attempt = 0
+        while attempt < total_attempts:
+            key = CONFIG.gemini_keys[attempt % len(CONFIG.gemini_keys)]
+            attempt += 1
+            try:
+                client = genai.Client(api_key=key)
+                res = client.models.generate_content(
+                    model=CONFIG.tts_model,
+                    contents="[INSTRUCTION: Deep chilling narrator. Natural Arabic documentary delivery. Do not shorten the text.]\n" + text,
+                    config=cfg,
+                )
+                part = res.candidates[0].content.parts[0]
+                audio = part.inline_data.data
+                mime = getattr(part.inline_data, "mime_type", "") or ""
+                raw = base64.b64decode(audio) if isinstance(audio, str) else audio
+                if raw[:4] == b"RIFF":
+                    out_wav.write_bytes(raw)
+                else:
+                    tmp_pcm = out_wav.with_suffix(".pcm")
+                    tmp_pcm.write_bytes(raw)
+                    rate_match = re.search(r"rate=(\d+)", mime)
+                    sample_rate = int(rate_match.group(1)) if rate_match else 24000
+                    r = subprocess.run([
+                        "ffmpeg", "-y", "-f", "s16le", "-ar", str(sample_rate), "-ac", "1",
+                        "-i", str(tmp_pcm), "-c:a", "pcm_s16le", str(out_wav)
+                    ], capture_output=True, text=True, timeout=60)
+                    try: tmp_pcm.unlink()
+                    except Exception: pass
+                    if r.returncode != 0:
+                        raise RuntimeError(r.stderr[-700:])
+                if is_valid_media(out_wav, 1000):
+                    log.info(f"✅ Gemini TTS OK | attempt={attempt} | duration={probe_duration(out_wav):.1f}s")
+                    time.sleep(8)
+                    return True
+            except Exception as e:
+                msg = str(e)
+                if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+                    delay = min(60, 12 * (2 ** min(attempt - 1, 2)))
+                    log.warning(f"⏳ Gemini TTS rate limit (429) | attempt={attempt}/{total_attempts} | sleep={delay}s")
+                    time.sleep(delay)
+                elif "503" in msg or "UNAVAILABLE" in msg:
+                    delay = min(45, 8 * (2 ** min(attempt - 1, 2)))
+                    log.warning(f"⏳ Gemini TTS unavailable (503) | attempt={attempt}/{total_attempts} | sleep={delay}s")
+                    time.sleep(delay)
+                else:
+                    log.warning(f"⚠️ فشل مفتاح الصوت {attempt}/{total_attempts}: {msg[:350]}")
+                    time.sleep(3)
+        log.error("❌ استنفدت محاولات توليد الصوت بعد تدوير المفاتيح والـbackoff.")
         return False
 
 
@@ -675,9 +689,25 @@ def _ass_time(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}.{cs:02d}"
 
 
+def _normalize_subtitle_text(text: str) -> str:
+    """Normalize Arabic punctuation/Unicode without changing the spoken words."""
+    import unicodedata
+    t = unicodedata.normalize("NFC", str(text or ""))
+    replacements = {
+        "\u00a0": " ", "\u200b": "", "\u200c": "", "\u200d": "",
+        "\u2026": "…", "\u201c": "«", "\u201d": "»",
+        "\u2018": "'", "\u2019": "'", "\u2013": "—", "\u2014": "—",
+        "\u2212": "-", "\u00ad": "",
+    }
+    for a,b in replacements.items(): t=t.replace(a,b)
+    # Remove control characters that can corrupt ASS events, but preserve Arabic shaping marks.
+    t = "".join(ch for ch in t if not unicodedata.category(ch).startswith("C") or ch in "\n\t")
+    return re.sub(r"[ \t]+", " ", t).strip()
+
 def _ass_escape(text: str) -> str:
     # ASS uses braces for override tags; escape them so narration cannot become a tag.
-    return str(text or "").replace("\\", "\\\\").replace("{", "\\{" ).replace("}", "\\}")
+    t = _normalize_subtitle_text(text)
+    return t.replace("\\", "\\\\").replace("{", "\\{" ).replace("}", "\\}")
 
 
 def _write_ass_subtitles(words, out_ass: Path, audio_duration: float):
@@ -815,19 +845,28 @@ def _escape_subtitle_path(path: Path) -> str:
 
 
 def _motion_filter(motion, dur, w=TARGET_W, h=TARGET_H):
-    m=str(motion or "slow_push").lower()
-    if m in {"static", "none"}: return f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
-    if m in {"slow_pull", "pull_out"}: z="max(1.0,1.08-0.008*t)"
-    elif m in {"lateral_drift", "pan_right"}: z="1.06"
-    else: z="min(1.0+0.008*t,1.10)"
-    # zoompan gives deterministic cinematic movement on both stills and extracted frames.
-    frames=max(TARGET_FPS,int(round(max(.5,dur)*TARGET_FPS)))
-    if m in {"lateral_drift","pan_right"}:
-        x="iw/2-(iw/zoom/2)+min(iw*0.035,t*iw*0.004)"
-        y="ih/2-(ih/zoom/2)"
+    """Robust Ken-Burns filter. Avoids the fragile `t` variable that broke V24.2.
+    zoompan officially supports `zoom`, `x`, `y`, `d`, `s`, and `fps`; we use the
+    persistent `zoom`/`on` variables only. See FFmpeg zoompan docs.
+    """
+    m = str(motion or "slow_push").lower()
+    # First create a safe oversized canvas. zoompan then emits one frame per input frame.
+    pre = f"scale={int(w*1.14)}:{int(h*1.14)}:force_original_aspect_ratio=increase,crop={int(w*1.14)}:{int(h*1.14)}"
+    if m in {"static", "none"}:
+        return f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
+    if m in {"slow_pull", "pull_out"}:
+        z = "if(eq(on,0),1.10,max(zoom-0.0012,1.0))"
+        x = "iw/2-(iw/zoom/2)"
+        y = "ih/2-(ih/zoom/2)"
+    elif m in {"lateral_drift", "pan_right"}:
+        z = "min(zoom+0.0005,1.06)"
+        x = "max(0,min(iw-iw/zoom,(iw-iw/zoom)*on/1800))"
+        y = "ih/2-(ih/zoom/2)"
     else:
-        x="iw/2-(iw/zoom/2)"; y="ih/2-(ih/zoom/2)"
-    return f"scale={w*1.12}:{h*1.12}:force_original_aspect_ratio=increase,crop={w*1.12}:{h*1.12},zoompan=z='{z}':x='{x}':y='{y}':d={frames}:s={w}x{h}:fps={TARGET_FPS}"
+        z = "min(zoom+0.0012,1.10)"
+        x = "iw/2-(iw/zoom/2)"
+        y = "ih/2-(ih/zoom/2)"
+    return f"{pre},zoompan=z='{z}':x='{x}':y='{y}':d=1:s={w}x{h}:fps={TARGET_FPS}"
 
 
 def render_scene(media, is_vid, aud, out, dur, montage, subtitle_ass=None, directive=None, edit_bible=None):
@@ -863,6 +902,19 @@ def render_scene(media, is_vid, aud, out, dur, montage, subtitle_ass=None, direc
              "-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-ar",str(TARGET_AR),"-ac","2",
              "-af","loudnorm=I=-16:TP=-1.5:LRA=11","-t",f"{max(.5,dur):.3f}","-movflags","+faststart",str(out)]
     r=subprocess.run(cmd,capture_output=True,text=True,timeout=900)
+    if r.returncode!=0 and not is_vid:
+        # Deterministic emergency fallback: never lose a scene because of an expression parser issue.
+        log.warning("⚠️ Zoompan فشل؛ إعادة الرندر بحركة ثابتة آمنة.")
+        safe_vf=f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=increase,crop={TARGET_W}:{TARGET_H}{fx},fps={TARGET_FPS},format=yuv420p"
+        if subtitle_filter:
+            safe_complex=f"[0:v]{safe_vf}[base];[base]{subtitle_filter.lstrip(',')}[v]"
+        else:
+            safe_complex=f"[0:v]{safe_vf}[v]"
+        safe_cmd=["ffmpeg","-y","-loop","1","-i",str(media),"-i",str(aud),"-filter_complex",safe_complex,
+                  "-map","[v]","-map","1:a:0","-c:v","libx264","-preset","medium","-crf","18",
+                  "-r",str(TARGET_FPS),"-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-ar",str(TARGET_AR),"-ac","2",
+                  "-af","loudnorm=I=-16:TP=-1.5:LRA=11","-t",f"{max(.5,dur):.3f}","-movflags","+faststart",str(out)]
+        r=subprocess.run(safe_cmd,capture_output=True,text=True,timeout=900)
     if r.returncode!=0: raise RuntimeError(r.stderr[-3000:])
     actual=probe_duration(out)
     if actual<.5 or not is_valid_media(out,50000): raise RuntimeError(f"Rendered scene invalid: duration={actual}")
@@ -1143,27 +1195,25 @@ def main():
         except Exception as e:
             log.error(f"⚠️ فشل رندر المشهد {i+1}: {e}")
 
-    final_vid = CONFIG.paths.base / f"MasterDoc_{int(time.time())}.mp4"
-    if not clips:
-        log.error("❌ لا توجد مشاهد جاهزة للدمج."); return
+    final_vid = CONFIG.paths.base / "final_documentary.mp4"
+    if len(clips) != TEST_SCENE_COUNT:
+        raise RuntimeError(f"❌ الاختبار غير مكتمل: تم رندر {len(clips)}/{TEST_SCENE_COUNT} مشاهد فقط.")
 
     try:
         final_duration = concat_final(clips, final_vid)
         log.info(f"📐 مجموع مدد المشاهد: {total_expected/60:.2f} دقيقة")
         log.info(f"📐 مدة الفيلم بعد الدمج: {final_duration/60:.2f} دقيقة")
+        if final_duration < 240:
+            raise RuntimeError(f"❌ مدة اختبار 7 مشاهد قصيرة جداً: {final_duration:.1f}s؛ المطلوب 4 دقائق على الأقل.")
+        if not final_vid.exists() or final_vid.stat().st_size < 100000:
+            raise RuntimeError("❌ final_documentary.mp4 غير صالح أو غير موجود.")
         if final_duration > total_expected * 1.15 and total_expected > 10:
             log.error("🚨 تحذير: مدة الفيلم أكبر بكثير من مجموع مدد المشاهد؛ تم اكتشاف مشكلة زمنية.")
         write_otio_timeline(clips, CONFIG.paths.timeline, script)
         thumbnail = generate_thumbnail(final_vid)
         if thumbnail: log.info(f"🖼️ Thumbnail: {thumbnail}")
-
-        # الاختبار يرفع النسخة النهائية فقط إلى Google Drive.
-        # لا يتم رفع أي شيء إلى YouTube.
-        if CONFIG.yt_id and CONFIG.yt_secret and CONFIG.drive_token:
-            upload_drive(final_vid)
-        else:
-            log.warning("⚠️ Google Drive upload skipped: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / DRIVE_REFRESH_TOKEN غير مكتملة.")
-        log.info("🧪 7-SCENE TEST: YouTube upload remains disabled.")
+        # اختبار محلي/GitHub فقط: لا رفع إلى Drive أو YouTube.
+        log.info("🧪 TEST MODE: تم تعطيل Google Drive وYouTube upload.")
     except Exception as e:
         log.error(f"❌ فشل إخراج الفيلم النهائي: {e}")
 

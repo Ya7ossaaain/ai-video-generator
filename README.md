@@ -1,57 +1,67 @@
-# UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE — V24.2 / 7-SCENE PILOT
+# V24.2 — 7 Scene Pilot FIXED
 
-هذا اختبار مصغر للحلقة الكاملة: **خطة واحدة + Edit Bible واحدة + أول 7 مشاهد مترابطة**.
+هذا الإصدار يعالج مشاكل اختبار الـ7 مشاهد السابقة.
 
-## ما الذي يختبره؟
-- Gemini 3.1 Pro عبر **agy الموجود أصلًا في بيئة GitHub/Antigravity**.
-- Episode Edit Bible موحدة للحلقة.
-- Scene Directives وBeat Plan.
-- Media Scout + Vision Scout.
-- Gemini TTS.
-- Groq Whisper word timing للترجمة.
-- FFmpeg 1080p/30fps/H.264/AAC.
-- دمج المشاهد السبعة في Master MP4.
-- OpenTimelineIO أو JSON fallback.
-- Thumbnail.
+## الإصلاحات الرئيسية
 
-## مهم جدًا: agy
-الاختبار **لا يثبت agy ولا يحدثه ولا يعيد تهيئته ولا يعدل PATH**.
+1. **FFmpeg / zoompan**
+   - أزيلت تعبيرات `t` الهشة التي سببت:
+     `Undefined constant or missing '(' in 't,1.10)'`
+   - الحركة الآن تعتمد على متغيرات `zoompan` المدعومة (`zoom` / `on`) مع `d=1`.
+   - يوجد fallback ثابت آمن إذا فشل filter لأي سبب، حتى لا يسقط المشهد بالكامل.
 
-يفترض أن `agy` متاح أصلًا في بيئة GitHub/Antigravity التي تستخدمها. الـworkflow يكتفي بالتحقق من وجود الأمر ثم يستخدمه كما هو.
+2. **الترجمة العربية / ASS**
+   - تطبيع Unicode باستخدام NFC.
+   - معالجة المسافات غير المرئية وبعض علامات الاقتباس والشرطات والرموز الخاصة.
+   - الحفاظ على العربية في ترتيبها المنطقي وترك FriBidi/libass يتوليان RTL والشكل العربي.
+   - حماية `{}` و `\\` من التحول إلى ASS override tags.
+   - تثبيت Noto Sans Arabic على GitHub runner.
 
-الأوامر التي **لا توجد** في هذا الاختبار:
-- `npm install agy`
-- أي `curl | sh` لتثبيت Antigravity
-- أي تحديث تلقائي لـ agy
-- أي تعديل لـ PATH
-- أي إعادة تسجيل دخول أو إعادة تهيئة لـ agy
+3. **مدة الاختبار**
+   - الـSHOWRUNNER مطالب بـ95–125 كلمة عربية تقريباً لكل مشهد.
+   - 7 مشاهد مترابطة، وليس 7 prompts منفصلة.
+   - الاختبار يستهدف تقريباً 4–6 دقائق، مع حد فشل عند أقل من 4 دقائق.
 
-## Secrets
-أضف في Repository Secrets:
+4. **Gemini TTS**
+   - تدوير مفاتيح API.
+   - backoff مختلف لـ429 و503.
+   - عدم إعادة إرسال الطلبات بسرعة عند RESOURCE_EXHAUSTED / UNAVAILABLE.
+
+5. **الكاش**
+   - لا يعاد استخدام manifest قديم بدون `beat_plan` صالح.
+   - بصمة المشهد مرتبطة بالنص والاستعلام ونوع الوسيط.
+
+6. **Final verification**
+   - الملف النهائي اسمه ثابت:
+     `output_build/final_documentary.mp4`
+   - GitHub لا يعتبر وجود أي MP4 آخر نجاحاً؛ يجب أن يوجد الملف النهائي نفسه ويكون قابلاً للقراءة بـffprobe.
+   - الاختبار يفشل إذا لم يتم رندر المشاهد السبعة كلها.
+
+7. **Thumbnail**
+   - معطل افتراضياً في هذا الـpilot حتى لا تستهلك طلبات Gemini في شيء لا نحتاجه للحكم على جودة المونتاج.
+
+## Antigravity / AGY_CREDENTIALS
+
+الـworkflow يستخدم نفس نمط العمل الصحيح:
+
+- تثبيت `agy` داخل GitHub runner المؤقت فقط.
+- قراءة `AGY_CREDENTIALS` من GitHub Secrets.
+- إنشاء `~/.gemini/antigravity-cli/antigravity-oauth-token` داخل runner.
+- لا يتم تعديل `agy` الموجود عند المستخدم في Termux أو Ubuntu.
+
+Secrets المطلوبة:
+
+- `AGY_CREDENTIALS`
 - `GEMINI_API_KEY`
 - `GROQ_API_KEY`
 - `PEXELS_API_KEY`
 - `PIXABAY_API_KEY`
 - `FREESOUND_API_KEY`
 
-لا تضع المفاتيح داخل الكود.
+## تشغيل الاختبار
 
-## التشغيل
-1. ارفع محتويات هذا المجلد إلى المستودع.
-2. افتح GitHub → Actions.
-3. اختر `V24.2 — 7 Scene Pilot Test`.
-4. اختر `Run workflow`.
-5. اكتب موضوع الاختبار.
-6. بعد انتهاء الـworkflow حمّل Artifact باسم `V24.2-7scene-pilot`.
+شغّل:
 
-## النتيجة
-سيتم تنفيذ أول 7 مشاهد من **خطة واحدة**، وليس 7 prompts منفصلة. الهدف هو تقييم:
-- الاستمرارية البصرية
-- الإيقاع
-- كثافة المعلومات والمرئيات
-- الترجمة والتوقيت
-- الصوت وFoley
-- جودة الـFFmpeg render
-- تماسك المخرج بين المشاهد
+`.github/workflows/v24-2-7scene-test.yml`
 
-هذا اختبار إنتاجي مصغر فقط؛ لا يرفع إلى YouTube أو Google Drive.
+ثم اختر `topic` وشغّل workflow.
