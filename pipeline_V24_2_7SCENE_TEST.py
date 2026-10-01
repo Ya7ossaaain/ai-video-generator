@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V22.39 - Groq Word-Timed Arabic Subtitles / RTL Fix
+HYBRID V22.41 - Original Script Subtitles / Whisper Timing / RTL Fix
 
 أهم الإصلاحات:
 - توحيد كل المشاهد على 1920x1080 / 30fps / H.264 / AAC 48kHz.
@@ -21,6 +21,8 @@ import sys
 import json
 import time
 import re
+import difflib
+import unicodedata
 import logging
 import subprocess
 import base64
@@ -45,7 +47,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 
-ENGINE_VERSION = "V24.2-7SCENE-FIXED"
+ENGINE_VERSION = "V24.2-7SCENE-ORIGINAL-SCRIPT-SUBTITLES"
 TARGET_W = 1920
 TARGET_H = 1080
 TARGET_FPS = 30
@@ -205,6 +207,34 @@ class HybridConfig:
     drive_token = os.environ.get("DRIVE_REFRESH_TOKEN", "")
     yt_refresh = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
     tts_model = os.environ.get("GEMINI_TTS_MODEL", "gemini-3.8-flash-tts")
+
+
+# Groq transcription API currently limits the optional context prompt to 468 characters.
+# Keep this guard in one place so a long Arabic narration can NEVER generate an HTTP 400
+# merely because it was copied into the optional prompt field.
+GROQ_PROMPT_MAX_CHARS = 468
+
+
+def _safe_groq_prompt(narration: str) -> str:
+    """Return a Groq-safe optional context prompt, or an empty string if it is too long.
+
+    The narration itself is still sent as audio; dropping the optional prompt does not
+    remove any spoken content. We intentionally prefer omitting the prompt over blindly
+    truncating Arabic text, which could leave a name or phrase half-written.
+    """
+    if not narration:
+        return ""
+    prompt = " ".join(str(narration).split())
+    prompt_len = len(prompt)
+    if prompt_len <= GROQ_PROMPT_MAX_CHARS:
+        log.info(f"🛡️ Groq prompt check: {prompt_len}/{GROQ_PROMPT_MAX_CHARS} chars — OK")
+        return prompt
+
+    log.warning(
+        f"🛡️ Groq prompt check: {prompt_len}/{GROQ_PROMPT_MAX_CHARS} chars — "
+        "prompt too long; sending NO optional prompt. Audio transcription continues normally."
+    )
+    return ""
 
 
 CONFIG = HybridConfig()
@@ -710,12 +740,138 @@ def _ass_escape(text: str) -> str:
     return t.replace("\\", "\\\\").replace("{", "\\{" ).replace("}", "\\}")
 
 
-def _write_ass_subtitles(words, out_ass: Path, audio_duration: float):
-    """Create short RTL subtitle groups from Groq word timestamps.
+def _normalize_alignment_token(text: str) -> str:
+    """Normalize a token only for script↔Whisper matching; never alter display text."""
+    t = unicodedata.normalize("NFKC", str(text or ""))
+    t = t.replace("ـ", "")
+    # Arabic diacritics / Quranic marks: matching-only removal.
+    t = "".join(ch for ch in t if not unicodedata.category(ch).startswith("M"))
+    t = t.translate(str.maketrans({
+        "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا",
+        "ؤ": "و", "ئ": "ي", "ى": "ي",
+        "ة": "ه",
+        "٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4",
+        "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9",
+    }))
+    # Keep letters/numbers from Arabic, Latin and other scripts; discard punctuation.
+    t = "".join(ch.lower() if (ch.isalnum() or '\u0600' <= ch <= '\u06ff') else " " for ch in t)
+    return " ".join(t.split())
 
-    We deliberately keep Arabic in logical order and let libass/HarfBuzz perform
-    Arabic shaping + bidi. Do NOT use python-bidi/get_display here; that was the
-    source of the visually reversed Arabic seen in the old subtitles.
+
+def _tokenize_script(narration: str) -> List[str]:
+    """Whitespace-tokenize the original script so its exact wording remains the display source."""
+    return [x for x in re.split(r"\s+", str(narration or "").strip()) if x]
+
+
+def _align_original_script_to_whisper(narration: str, whisper_words, audio_duration: float):
+    """Attach Whisper timing to the ORIGINAL script without replacing or shortening its text.
+
+    Whisper is used only as a timing reference. Matching is fuzzy/sequence-based because
+    Whisper may normalize punctuation, Arabic orthography, numbers, or occasionally omit a word.
+    The subtitle text always comes from the original Gemini narration.
+    """
+    script_tokens = _tokenize_script(narration)
+    clean_whisper = []
+    for w in whisper_words or []:
+        if not isinstance(w, dict):
+            continue
+        raw = str(w.get("word", "")).strip()
+        if not raw:
+            continue
+        try:
+            st = max(0.0, float(w.get("start", 0)))
+            en = max(st + 0.04, float(w.get("end", st)))
+        except Exception:
+            continue
+        norm = _normalize_alignment_token(raw)
+        if not norm:
+            continue
+        clean_whisper.append({"word": raw, "norm": norm, "start": st, "end": en})
+
+    if not script_tokens:
+        return []
+
+    # Build one normalized token per script token. SequenceMatcher gives robust matching
+    # when Whisper changes punctuation or a few words while preserving the spoken order.
+    script_norm = [_normalize_alignment_token(x) for x in script_tokens]
+    whisper_norm = [x["norm"] for x in clean_whisper]
+    matcher = difflib.SequenceMatcher(a=script_norm, b=whisper_norm, autojunk=False)
+    mapped = [None] * len(script_tokens)
+
+    for i1, j1, size in matcher.get_matching_blocks():
+        if size <= 0:
+            continue
+        for k in range(size):
+            mapped[i1 + k] = clean_whisper[j1 + k]
+
+    # Interpolate timestamps for unmatched script tokens between neighboring matches.
+    matched_indices = [i for i, v in enumerate(mapped) if v is not None]
+    if matched_indices:
+        # Prefix
+        first = matched_indices[0]
+        if first > 0:
+            right = mapped[first]["start"]
+            step = max(0.05, right / first)
+            for i in range(first):
+                st = max(0.0, i * step)
+                en = min(right, max(st + 0.05, (i + 1) * step))
+                mapped[i] = {"start": st, "end": en}
+
+        # Gaps
+        for left_i, right_i in zip(matched_indices, matched_indices[1:]):
+            if right_i - left_i <= 1:
+                continue
+            left_end = mapped[left_i]["end"]
+            right_start = mapped[right_i]["start"]
+            span = max(0.05, right_start - left_end)
+            count = right_i - left_i - 1
+            step = span / (count + 1)
+            for n, idx in enumerate(range(left_i + 1, right_i), start=1):
+                st = left_end + step * (n - 1)
+                en = left_end + step * n
+                mapped[idx] = {"start": st, "end": max(st + 0.05, en)}
+
+        # Suffix
+        last = matched_indices[-1]
+        if last < len(script_tokens) - 1:
+            left = mapped[last]["end"]
+            right = max(left + 0.05, audio_duration)
+            count = len(script_tokens) - last - 1
+            step = (right - left) / count
+            for n, idx in enumerate(range(last + 1, len(script_tokens)), start=0):
+                st = left + step * n
+                en = left + step * (n + 1)
+                mapped[idx] = {"start": st, "end": max(st + 0.05, en)}
+    else:
+        # Extremely unusual fallback: distribute the exact script across the full audio
+        # duration proportionally to visible token length.
+        weights = [max(1, len(_normalize_alignment_token(x))) for x in script_tokens]
+        total = float(sum(weights)) or 1.0
+        cursor = 0.0
+        duration = max(0.1, audio_duration)
+        for i, weight in enumerate(weights):
+            st = cursor
+            cursor += duration * weight / total
+            mapped[i] = {"start": st, "end": max(st + 0.05, cursor)}
+
+    result = []
+    for token, timing in zip(script_tokens, mapped):
+        if timing is None:
+            continue
+        st = max(0.0, float(timing["start"]))
+        en = max(st + 0.05, float(timing["end"]))
+        if audio_duration > 0:
+            st = min(st, max(0.0, audio_duration - 0.05))
+            en = min(max(en, st + 0.05), audio_duration)
+        result.append({"word": token, "start": st, "end": en})
+    return result
+
+
+def _write_ass_subtitles(words, out_ass: Path, audio_duration: float):
+    """Create RTL subtitles whose DISPLAY TEXT is the original narration.
+
+    The `words` argument is already aligned to the original script. Whisper supplies only
+    timing; it is never allowed to replace the script wording.
     """
     valid = []
     for w in words or []:
@@ -731,10 +887,9 @@ def _write_ass_subtitles(words, out_ass: Path, audio_duration: float):
             continue
         valid.append({"word": text, "start": max(0.0, start), "end": max(0.0, end)})
 
-    # Groq can occasionally return a timestamp a few milliseconds beyond the audio.
     if audio_duration > 0:
         for w in valid:
-            w["start"] = min(w["start"], max(0.0, audio_duration - 0.02))
+            w["start"] = min(w["start"], max(0.0, audio_duration - 0.05))
             w["end"] = min(max(w["end"], w["start"] + 0.05), audio_duration)
 
     groups=[]; current=[]
@@ -742,15 +897,20 @@ def _write_ass_subtitles(words, out_ass: Path, audio_duration: float):
     hard_punct=re.compile(r"[.!؟?!؛:]$")
     soft_punct=re.compile(r"[,،]$")
     for w in valid:
-        if not current: current=[w]; continue
+        if not current:
+            current=[w]; continue
         gap=w["start"]-current[-1]["end"]
         prospective=" ".join(x["word"] for x in current+[w])
         sentence_end=bool(hard_punct.search(current[-1]["word"]))
         soft_end=bool(soft_punct.search(current[-1]["word"]))
-        should_break=(sentence_end or gap>=0.42 or len(current)>=MAX_WORDS or (w["end"]-current[0]["start"]>MAX_DURATION) or (len(prospective)>MAX_CHARS and len(current)>=3) or (soft_end and len(current)>=4 and gap>=0.18))
+        should_break=(sentence_end or gap>=0.42 or len(current)>=MAX_WORDS or
+                      (w["end"]-current[0]["start"]>MAX_DURATION) or
+                      (len(prospective)>MAX_CHARS and len(current)>=3) or
+                      (soft_end and len(current)>=4 and gap>=0.18))
         if should_break:
             groups.append(current); current=[w]
-        else: current.append(w)
+        else:
+            current.append(w)
     if current: groups.append(current)
 
     lines = [
@@ -776,18 +936,14 @@ def _write_ass_subtitles(words, out_ass: Path, audio_duration: float):
         if end <= start:
             continue
         text = " ".join(w["word"] for w in group).strip()
-        # Keep the subtitle comfortably inside the actual audio duration.
         if audio_duration > 0:
             end = min(end, audio_duration)
         if end <= start:
             continue
-        lines.append(
-            f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Arabic,,0,0,0,,{_ass_escape(text)}"
-        )
+        lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Arabic,,0,0,0,,{_ass_escape(text)}")
 
     out_ass.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
     return bool(groups)
-
 
 def generate_word_timed_subtitles(audio_path: Path, narration: str, out_ass: Path, out_json: Path) -> bool:
     """Transcribe the generated Arabic narration with Groq Whisper word timestamps."""
@@ -809,9 +965,12 @@ def generate_word_timed_subtitles(audio_path: Path, narration: str, out_ass: Pat
                 "timestamp_granularities[]": "word",
                 "temperature": "0",
             }
-            if narration:
-                # Context prompt helps Whisper preserve unusual names/terms from the script.
-                data["prompt"] = narration[:900]
+            # IMPORTANT: the full narration is NEVER placed in Groq's optional `prompt`.
+            # Groq uses that field only as a small contextual hint and limits it to 468 chars.
+            # The complete narration remains the source-of-truth subtitle text below.
+            # Whisper receives the FULL AUDIO and returns timing; it does not need the script.
+            log.info("🛡️ Groq subtitle mode: full narration kept intact; optional prompt omitted. "
+                     "Whisper supplies timing only.")
             r = requests.post(
                 "https://api.groq.com/openai/v1/audio/transcriptions",
                 headers={"Authorization": f"Bearer {CONFIG.groq_api_key}"},
@@ -822,16 +981,25 @@ def generate_word_timed_subtitles(audio_path: Path, narration: str, out_ass: Pat
         if r.status_code >= 400:
             raise RuntimeError(f"HTTP {r.status_code}: {r.text[:1000]}")
         payload = r.json()
-        words = payload.get("words") or []
-        if not words:
+        whisper_words = payload.get("words") or []
+        if not whisper_words:
             raise RuntimeError("Groq لم يُرجع word timestamps")
 
         audio_duration = probe_duration(audio_path)
+        aligned_words = _align_original_script_to_whisper(narration, whisper_words, audio_duration)
+        if not aligned_words:
+            raise RuntimeError("تعذر ربط النص الأصلي بتوقيتات Whisper")
+
+        # Keep Groq's raw response for debugging, plus the exact original script and
+        # the timing map actually used to render subtitles.
+        payload["subtitle_source_text"] = narration
+        payload["subtitle_mode"] = "ORIGINAL_SCRIPT_WITH_WHISPER_TIMING"
+        payload["aligned_script_words"] = aligned_words
         out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        ok = _write_ass_subtitles(words, out_ass, audio_duration)
+        ok = _write_ass_subtitles(aligned_words, out_ass, audio_duration)
         if not ok:
             raise RuntimeError("تعذر إنشاء ملف ASS من timestamps")
-        log.info(f"📝 Groq subtitles OK | {len(words)} كلمة | {out_ass.name}")
+        log.info(f"📝 Subtitles OK | النص الأصلي كاملًا | {len(aligned_words)} كلمة | توقيتات Whisper | {out_ass.name}")
         return True
     except Exception as e:
         log.error(f"⚠️ فشل Groq subtitles: {e}")

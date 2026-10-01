@@ -65,3 +65,10 @@ Secrets المطلوبة:
 `.github/workflows/v24-2-7scene-test.yml`
 
 ثم اختر `topic` وشغّل workflow.
+
+
+## Original-script subtitle architecture
+
+This build does **not** send the full narration into Groq's optional `prompt` field. The complete narration remains untouched as the subtitle source of truth. Groq Whisper receives the complete processed audio and returns word timestamps only. The engine then aligns those timestamps to the original Gemini narration using normalized sequence matching and writes the original wording/punctuation into ASS subtitles.
+
+This means a long narration is never shortened to satisfy Groq's 468-character optional-prompt limit. If Whisper changes punctuation, Arabic spelling, or a word, that transcription is used only for timing; the subtitle text remains the original narration.
