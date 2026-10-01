@@ -23,13 +23,13 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Restore Production Cache
-        uses: actions/cache@v4
-        with:
-          path: output_build
-          key: prod-vault-${{ github.run_id }}
-          restore-keys: |
-            prod-vault-
+      # مهم: لا نستعيد output_build من أي تشغيل سابق.
+      # كل تشغيل يبدأ بمجلد إنتاج نظيف لمنع اختلاط القصص والأصوات والمشاهد.
+      - name: Prepare Clean Production Workspace
+        run: |
+          rm -rf output_build
+          mkdir -p output_build/cache
+          rm -f production_logs.txt
 
       - name: Install System Dependencies
         run: |
@@ -48,11 +48,9 @@ jobs:
 
       - name: Configure Antigravity Full OAuth2
         env:
-          # سحب الـ JSON من السر الذي أنشأته أنت مسبقاً
           OAUTH_JSON: ${{ secrets.AGY_CREDENTIALS }}
         run: |
           mkdir -p ~/.gemini/antigravity-cli/
-          # استخدام printf لكتابة الـ JSON في المسار الرسمي لـ Antigravity
           printf "%s" "$OAUTH_JSON" > ~/.gemini/antigravity-cli/antigravity-oauth-token
           chmod 600 ~/.gemini/antigravity-cli/antigravity-oauth-token
 
@@ -79,22 +77,21 @@ jobs:
           git pull --rebase origin main || true
           git push || true
 
-      - name: Save Production Cache
-        uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: output_build
-          key: prod-vault-${{ github.run_id }}-${{ github.run_attempt }}
-
+      # نحفظ ناتج التشغيل الحالي فقط كـ Artifact.
+      # لا نستخدم Actions Cache للإنتاج حتى لا تختلط القصص بين التشغيلات.
       - name: Upload Master Vault Artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Master-Documentary-Vault
+          name: Master-Documentary-Vault-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             output_build/*.mp4
-            output_build/cache/*.mp4
-            output_build/master_manifest.json
+            output_build/**/*.mp4
+            output_build/**/*.wav
+            output_build/**/*.m4a
+            output_build/**/*.jpg
+            output_build/**/*.json
             production_logs.txt
             director_memory.md
           retention-days: 3
+          if-no-files-found: warn
