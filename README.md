@@ -1,74 +1,28 @@
-# V24.2 — 7 Scene Pilot FIXED
+# V24.2 — 7 Scene Pilot (PRO MOTION GRAPHICS EDITION)
 
-هذا الإصدار يعالج مشاكل اختبار الـ7 مشاهد السابقة.
+هذا الإصدار ينقل السكربت من مجرد "أداة دمج فيديوهات" إلى محرك مؤثرات بصرية (Node-Based VFX Engine) يحاكي أساليب قنوات الوثائقيات الكبرى.
 
-## الإصلاحات الرئيسية
+## التحديثات البصرية الجديدة (Pro VFX)
 
-1. **FFmpeg / zoompan**
-   - أزيلت تعبيرات `t` الهشة التي سببت:
-     `Undefined constant or missing '(' in 't,1.10)'`
-   - الحركة الآن تعتمد على متغيرات `zoompan` المدعومة (`zoom` / `on`) مع `d=1`.
-   - يوجد fallback ثابت آمن إذا فشل filter لأي سبب، حتى لا يسقط المشهد بالكامل.
+1. **التركيز البؤري السينمائي (Rack Focus)**
+   - تبدأ اللقطات بضبابية عالية (`boxblur`) وتتضح الرؤية تدريجياً لتعطي شعوراً بالكشف الدرامي.
 
-2. **الترجمة العربية / ASS**
-   - تطبيع Unicode باستخدام NFC.
-   - معالجة المسافات غير المرئية وبعض علامات الاقتباس والشرطات والرموز الخاصة.
-   - الحفاظ على العربية في ترتيبها المنطقي وترك FriBidi/libass يتوليان RTL والشكل العربي.
-   - حماية `{}` و `\\` من التحول إلى ASS override tags.
-   - تثبيت Noto Sans Arabic على GitHub runner.
+2. **الضغط السينمائي (Cinematic Squeeze)**
+   - في لحظات التوتر العالي (High Attention)، تنزل أشرطة سوداء ببطء من الأعلى والأسفل لتحول أبعاد الشاشة إلى 2.35:1، مما يرفع الإحساس بالخطر.
 
-3. **مدة الاختبار**
-   - الـSHOWRUNNER مطالب بـ95–125 كلمة عربية تقريباً لكل مشهد.
-   - 7 مشاهد مترابطة، وليس 7 prompts منفصلة.
-   - الاختبار يستهدف تقريباً 4–6 دقائق، مع حد فشل عند أقل من 4 دقائق.
+3. **واجهة التحقيق (Investigative HUD)**
+   - مشاهد الأدلة تكتسب طابع كاميرات المراقبة أو الشاشات الأمنية، مع ظهور كلمة `REC` تومض كل نصف ثانية، وخطوط تصويب، وتوقيت (Timecode) حقيقي يتحرك مع الفيديو.
 
-4. **Gemini TTS**
-   - تدوير مفاتيح API.
-   - backoff مختلف لـ429 و503.
-   - عدم إعادة إرسال الطلبات بسرعة عند RESOURCE_EXHAUSTED / UNAVAILABLE.
+4. **الانتقال الساطع (Flashbang Reveal)**
+   - استخدام فلتر `colorlevels` لصنع ومضة فلاش ساطعة في أول ربع ثانية من المشاهد القوية للانتقال بشكل يخطف العين.
 
-5. **الكاش**
-   - لا يعاد استخدام manifest قديم بدون `beat_plan` صالح.
-   - بصمة المشهد مرتبطة بالنص والاستعلام ونوع الوسيط.
+5. **هندسة الحركة والتلوين (Easing & Grading)**
+   - الكاميرا لم تعد تتحرك بشكل خطي (Linear)، بل تعتمد على معادلات رياضية (cos wave) لتنعيم البداية والنهاية (Ease-in/out).
+   - توحيد لوني ديناميكي يضيف (Vignette) و (Film Grain) لدمج اللقطات المختلفة بصرياً.
 
-6. **Final verification**
-   - الملف النهائي اسمه ثابت:
-     `output_build/final_documentary.mp4`
-   - GitHub لا يعتبر وجود أي MP4 آخر نجاحاً؛ يجب أن يوجد الملف النهائي نفسه ويكون قابلاً للقراءة بـffprobe.
-   - الاختبار يفشل إذا لم يتم رندر المشاهد السبعة كلها.
+## الترجمة (Subtitles)
+- تم استبدال الكود بظهور ناعم للترجمة (Fade-in `\fad(150,150)`) لتجنب الظهور القاسي للنصوص، مع تكبير الخط وإضافة حواف قوية (`Outline=2`) لضمان المقروئية فوق المؤثرات.
 
-7. **Thumbnail**
-   - معطل افتراضياً في هذا الـpilot حتى لا تستهلك طلبات Gemini في شيء لا نحتاجه للحكم على جودة المونتاج.
-
-## Antigravity / AGY_CREDENTIALS
-
-الـworkflow يستخدم نفس نمط العمل الصحيح:
-
-- تثبيت `agy` داخل GitHub runner المؤقت فقط.
-- قراءة `AGY_CREDENTIALS` من GitHub Secrets.
-- إنشاء `~/.gemini/antigravity-cli/antigravity-oauth-token` داخل runner.
-- لا يتم تعديل `agy` الموجود عند المستخدم في Termux أو Ubuntu.
-
-Secrets المطلوبة:
-
-- `AGY_CREDENTIALS`
-- `GEMINI_API_KEY`
-- `GROQ_API_KEY`
-- `PEXELS_API_KEY`
-- `PIXABAY_API_KEY`
-- `FREESOUND_API_KEY`
-
-## تشغيل الاختبار
-
-شغّل:
-
-`.github/workflows/v24-2-7scene-test.yml`
-
-ثم اختر `topic` وشغّل workflow.
-
-
-## Original-script subtitle architecture
-
-This build does **not** send the full narration into Groq's optional `prompt` field. The complete narration remains untouched as the subtitle source of truth. Groq Whisper receives the complete processed audio and returns word timestamps only. The engine then aligns those timestamps to the original Gemini narration using normalized sequence matching and writes the original wording/punctuation into ASS subtitles.
-
-This means a long narration is never shortened to satisfy Groq's 468-character optional-prompt limit. If Whisper changes punctuation, Arabic spelling, or a word, that transcription is used only for timing; the subtitle text remains the original narration.
+## التشغيل
+- تأكد من وجود الـ Secrets المطلوبة في GitHub.
+- شغّل الـ Workflow المسمى `V24.2 — 7 Scene Pilot (PRO MOTION EDITION)`.
