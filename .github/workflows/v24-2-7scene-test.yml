@@ -1,59 +1,90 @@
-name: 🎬 V25 Documentary Engine
+name: 🎬 V25 Documentary Engine (Audio-First)
 
 on:
   workflow_dispatch:
     inputs:
-      video_topic:
-        description: 'موضوع الفيلم الوثائقي (مثال: لغز اختفاء روزيل)'
+      topic:
+        description: 'موضوع الوثائقي (مثال: كارثة تشيرنوبل)'
         required: true
         default: 'لغز اختفاء غامض'
 
 jobs:
-  build-documentary:
-    name: Generate & Render Video
+  production:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      VIDEO_TOPIC: ${{ inputs.topic }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+      GIPHY_API_KEY: ${{ secrets.GIPHY_API_KEY }}
+      EUROPEANA_API_KEY: ${{ secrets.EUROPEANA_API_KEY }}
+      FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
+      OPENVERSE_CLIENT_ID: ${{ secrets.OPENVERSE_CLIENT_ID }}
+      OPENVERSE_CLIENT_SECRET: ${{ secrets.OPENVERSE_CLIENT_SECRET }}
+      PYTHONUNBUFFERED: '1'
 
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🐍 Set up Python 3.10
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
+          cache: 'pip'
 
       - name: 🎞️ Install FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+
+      - name: 🔤 Install Arabic subtitle fonts and ASS dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y fonts-noto-core fonts-noto-extra fontconfig
+          fc-match 'Noto Sans Arabic' || true
+          fc-cache -f -v >/dev/null 2>&1 || true
 
-      - name: 📦 Install Python Dependencies
+      - name: 📦 Install Python dependencies
+        run: pip install requests google-genai
+
+      - name: ⚡ Install Antigravity CLI
         run: |
-          python -m pip install --upgrade pip
-          pip install requests google-genai
-          
-          # ملاحظة: إذا كانت أداة agy تحتاج لتثبيت عبر npm أو pip، ضع أمر تثبيتها هنا
-          # npm install -g [اسم_الحزمة]
+          set -euo pipefail
+          curl -fsSL --compressed https://antigravity.google/cli/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: 🚀 Run Documentary Pipeline
+      - name: 🔐 Configure Antigravity OAuth2
         env:
-          VIDEO_TOPIC: ${{ github.event.inputs.video_topic }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
-          GIPHY_API_KEY: ${{ secrets.GIPHY_API_KEY }}
-          EUROPEANA_API_KEY: ${{ secrets.EUROPEANA_API_KEY }}
-          FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
-          OPENVERSE_CLIENT_ID: ${{ secrets.OPENVERSE_CLIENT_ID }}
-          OPENVERSE_CLIENT_SECRET: ${{ secrets.OPENVERSE_CLIENT_SECRET }}
+          OAUTH_JSON: ${{ secrets.AGY_CREDENTIALS }}
         run: |
-          # تأكد أن اسم ملف البايثون في مستودعك يطابق هذا الاسم
-          python pipeline_V25.py
+          set -euo pipefail
+          test -n "$OAUTH_JSON"
+          mkdir -p ~/.gemini/antigravity-cli/
+          printf "%s" "$OAUTH_JSON" > ~/.gemini/antigravity-cli/antigravity-oauth-token
+          chmod 600 ~/.gemini/antigravity-cli/antigravity-oauth-token
 
-      - name: 📤 Upload Final Documentary
+      - name: 🕵️ Verify Antigravity CLI authentication
+        run: |
+          set -euo pipefail
+          command -v agy
+          agy --help >/dev/null 2>&1
+          echo "✅ Antigravity CLI is ready and authenticated from AGY_CREDENTIALS."
+
+      - name: 🚀 Run V25 Audio-First Pipeline
+        run: python pipeline_V25.py
+
+      - name: 🔍 Verify Final Documentary
+        run: |
+          set -euo pipefail
+          test -s output_build/final_documentary.mp4
+          ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 output_build/final_documentary.mp4
+          echo "✅ final_documentary.mp4 exists and is probeable."
+
+      - name: 📤 Upload Final Artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Final-Documentary-${{ github.run_id }}
+          name: V25-Documentary-Master
           path: output_build/final_documentary.mp4
-          retention-days: 5
+          if-no-files-found: warn
