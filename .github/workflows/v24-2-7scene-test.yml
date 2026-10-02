@@ -1,65 +1,59 @@
-name: V26 — Elite VFX Engine (OpenCV + ImageMagick)
+name: 🎬 V25 Documentary Engine
 
 on:
   workflow_dispatch:
     inputs:
-      topic:
-        description: 'موضوع الاختبار الوثائقي'
+      video_topic:
+        description: 'موضوع الفيلم الوثائقي (مثال: لغز اختفاء روزيل)'
         required: true
         default: 'لغز اختفاء غامض'
 
 jobs:
-  studio_pilot:
+  build-documentary:
+    name: Generate & Render Video
     runs-on: ubuntu-latest
-    timeout-minutes: 180
-    env:
-      VIDEO_TOPIC: ${{ inputs.topic }}
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-      PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
-      PYTHONUNBUFFERED: '1'
 
     steps:
-      - name: Checkout repository
+      - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: 🐍 Set up Python 3.10
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          cache: 'pip'
+          python-version: '3.10'
 
-      - name: Install FFmpeg, Fonts & ImageMagick
+      - name: 🎞️ Install FFmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra fontconfig imagemagick
-          fc-cache -f -v >/dev/null 2>&1 || true
+          sudo apt-get install -y ffmpeg
 
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
-
-      - name: Install Antigravity CLI
+      - name: 📦 Install Python Dependencies
         run: |
-          set -euo pipefail
-          curl -fsSL --compressed https://antigravity.google/cli/install.sh | bash
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          python -m pip install --upgrade pip
+          pip install requests google-genai
+          
+          # ملاحظة: إذا كانت أداة agy تحتاج لتثبيت عبر npm أو pip، ضع أمر تثبيتها هنا
+          # npm install -g [اسم_الحزمة]
 
-      - name: Configure Antigravity OAuth2
+      - name: 🚀 Run Documentary Pipeline
         env:
-          OAUTH_JSON: ${{ secrets.AGY_CREDENTIALS }}
+          VIDEO_TOPIC: ${{ github.event.inputs.video_topic }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          GIPHY_API_KEY: ${{ secrets.GIPHY_API_KEY }}
+          EUROPEANA_API_KEY: ${{ secrets.EUROPEANA_API_KEY }}
+          FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
+          OPENVERSE_CLIENT_ID: ${{ secrets.OPENVERSE_CLIENT_ID }}
+          OPENVERSE_CLIENT_SECRET: ${{ secrets.OPENVERSE_CLIENT_SECRET }}
         run: |
-          set -euo pipefail
-          mkdir -p ~/.gemini/antigravity-cli/
-          printf "%s" "$OAUTH_JSON" > ~/.gemini/antigravity-cli/antigravity-oauth-token
-          chmod 600 ~/.gemini/antigravity-cli/antigravity-oauth-token
+          # تأكد أن اسم ملف البايثون في مستودعك يطابق هذا الاسم
+          python pipeline_V25.py
 
-      - name: Run Elite VFX Engine
-        run: python pipeline_V24_2_7SCENE_TEST.py
-
-      - name: Upload Artifact
-        if: always()
+      - name: 📤 Upload Final Documentary
         uses: actions/upload-artifact@v4
         with:
-          name: V26-Elite-Documentary
+          name: Final-Documentary-${{ github.run_id }}
           path: output_build/final_documentary.mp4
+          retention-days: 5
