@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+
 """
-UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE (V25 - AUDIO-FIRST TRANSPARENT PIPELINE)
-Features:
-- Visible Production Logs: Scenario text and TTS step durations are explicitly logged.
-- Master Narration Generation (Split-safe to prevent TTS drift).
-- Single-Pass Groq Word-Level Timestamps.
-- Semantic Shot Slicer (30-50 dynamic cuts per episode).
-- 5 Concurrent Async Workers for Media Scouting (Yarn, Giphy, FBI, Pexels, Pixabay, Wikipedia).
-- Extended OSINT/Creative Commons Sources: Openverse, Europeana, NASA, Chronicling America.
-- Restored AGY Vision Scout from V24.2 for media evaluation.
-- Bulletproof Fallback System (Zero Crashes Guarantee).
-- Broadcast-grade ASS Subtitles & FFmpeg Ease-in Motion.
+UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
+V26 - FRESH WORKSPACE + 10-KEY GEMINI TTS ROTATION
+
+- NO CACHE
+- NO REUSE OF PREVIOUS FILES
+- output_build is deleted completely at startup
+- Part 1 + Part 2 TTS run in parallel
+- Gemini keys rotate automatically
+- Every key switch is printed in the logs
 """
 
 import os
@@ -19,638 +18,1849 @@ import sys
 import json
 import time
 import re
-import difflib
-import unicodedata
 import logging
 import subprocess
 import base64
-import hashlib
 import asyncio
 import urllib.parse
 import shutil
+import threading
+
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Tuple, Optional
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 from google import genai
 from google.genai import types
 
-ENGINE_VERSION = "V25-AUDIO-FIRST-TRANSPARENT"
+
+ENGINE_VERSION = "V26-FRESH-NO-CACHE-10KEY-TTS"
+
 TARGET_W = 1920
 TARGET_H = 1080
 TARGET_FPS = 30
 TARGET_AR = 48000
+
 CONCURRENT_WORKERS = 5
+TTS_WORKERS = 2
+
+TTS_MODEL = "gemini-3.8-flash-tts"
+TTS_VOICE = "Charon"
+
+AGY_SCRIPT_MODEL = "gemini-3.1-pro"
+AGY_VISION_MODEL = "gemini-3.8-flash"
+GROQ_MODEL = "whisper-large-v3"
+
+MAX_MEDIA_SIZE_MB = 120
+
 
 class ProTelemetryFormatter(logging.Formatter):
-    COLORS = {"INFO": "\x1b[38;5;39m", "WARNING": "\x1b[38;5;214m", "ERROR": "\x1b[38;5;196m"}
-    RESET = "\x1b[0m"
     def format(self, record):
-        color = self.COLORS.get(record.levelname, self.RESET)
-        return logging.Formatter(f"{color}%(asctime)s | [%(levelname)s] | %(message)s{self.RESET}", datefmt="%H:%M:%S").format(record)
+        now = datetime.now().strftime("%H:%M:%S")
+        icons = {"INFO": "INFO", "WARNING": "WARN", "ERROR": "ERROR", "DEBUG": "DEBUG"}
+        return f"{now} | [{icons.get(record.levelname, record.levelname)}] | {record.getMessage()}"
+
 
 def setup_logger():
-    logger = logging.getLogger("AudioFirstStudio")
+    logger = logging.getLogger("DOCUMENTARY_ENGINE")
     logger.setLevel(logging.INFO)
-    logger.handlers.clear()
-    ch = logging.StreamHandler(sys.stdout)
-    ch.setFormatter(ProTelemetryFormatter())
-    logger.addHandler(ch)
+    if logger.handlers:
+        logger.handlers.clear()
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(ProTelemetryFormatter())
+    logger.addHandler(handler)
     return logger
 
-log = setup_logger()
 
-def probe_duration(path: Path) -> float:
-    try:
-        r = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-            capture_output=True, text=True, timeout=20
+LOGGER = setup_logger()
+
+
+def log(msg, level="info"):
+    if level == "warning":
+        LOGGER.warning(msg)
+    elif level == "error":
+        LOGGER.error(msg)
+    elif level == "debug":
+        LOGGER.debug(msg)
+    else:
+        LOGGER.info(msg)
+
+
+class EngineConfig:
+    def __init__(self):
+        self.topic = os.environ.get("VIDEO_TOPIC", "لغز اختفاء غامض")
+        self.topic_clean = re.sub(r"[^a-zA-Z0-9_\-]+", "_", self.topic).strip("_")
+        self.topic_key = self.topic_clean[:80] or "documentary"
+
+        self.base_dir = Path("./output_build")
+        self.work_dir = self.base_dir / "workspace"
+        self.final_video = self.base_dir / "final_documentary.mp4"
+        self.master_audio = self.work_dir / "master_audio.wav"
+
+        raw_keys = (
+            os.environ.get("GEMINI_API_KEYS")
+            or os.environ.get("GEMINI_API_KEY")
+            or ""
         )
-        return float(r.stdout.strip()) if r.returncode == 0 else 0.0
+
+        self.gemini_keys = list(dict.fromkeys([
+            k.strip()
+            for k in re.split(r"[,;\n]+", raw_keys)
+            if k.strip()
+        ]))
+
+        self.groq_api_key = os.environ.get("GROQ_API_KEY", "")
+        self.pexels_key = os.environ.get("PEXELS_API_KEY", "")
+        self.pixabay_key = os.environ.get("PIXABAY_API_KEY", "")
+        self.giphy_key = os.environ.get("GIPHY_API_KEY", "")
+        self.openverse_client_id = os.environ.get("OPENVERSE_CLIENT_ID", "")
+        self.openverse_client_secret = os.environ.get("OPENVERSE_CLIENT_SECRET", "")
+        self.europeana_key = os.environ.get("EUROPEANA_API_KEY", "")
+        self.openverse_token = os.environ.get("OPENVERSE_TOKEN", "")
+
+
+CONFIG = EngineConfig()
+
+
+def prepare_fresh_workspace():
+    log("🧹 تنظيف بيئة التشغيل بالكامل...")
+
+    if CONFIG.base_dir.exists():
+        try:
+            shutil.rmtree(CONFIG.base_dir)
+            log("🗑️ تم حذف output_build بالكامل — لا توجد ملفات سابقة.")
+        except Exception as e:
+            log(f"تعذر حذف output_build: {e}", "error")
+            raise
+
+    CONFIG.base_dir.mkdir(parents=True, exist_ok=True)
+    CONFIG.work_dir.mkdir(parents=True, exist_ok=True)
+
+    log("🆕 تم إنشاء Workspace جديد من الصفر.")
+    log("🚫 لا يوجد Cache ولا إعادة استخدام لأي ملف سابق.")
+
+
+class GeminiKeyPool:
+    def __init__(self, keys):
+        self.keys = keys
+        self.lock = threading.Lock()
+        self.active = set()
+        self.cursor = 0
+
+    def acquire(self, excluded=None):
+        excluded = excluded or set()
+
+        while True:
+            with self.lock:
+                for offset in range(len(self.keys)):
+                    idx = (self.cursor + offset) % len(self.keys)
+                    if idx in self.active or idx in excluded:
+                        continue
+
+                    self.active.add(idx)
+                    self.cursor = (idx + 1) % len(self.keys)
+                    return idx, self.keys[idx]
+
+            time.sleep(0.05)
+
+    def release(self, index):
+        with self.lock:
+            self.active.discard(index)
+
+
+if not CONFIG.gemini_keys:
+    log("لم يتم العثور على GEMINI_API_KEY أو GEMINI_API_KEYS.", "error")
+    raise RuntimeError("No Gemini API keys configured.")
+
+GEMINI_POOL = GeminiKeyPool(CONFIG.gemini_keys)
+
+log(f"🔑 تم تحميل {len(CONFIG.gemini_keys)} مفتاح Gemini.")
+
+if len(CONFIG.gemini_keys) < 10:
+    log(f"⚠️ تم العثور على {len(CONFIG.gemini_keys)} مفاتيح فقط، وليس 10.", "warning")
+else:
+    log("🔑 تم تجهيز المفاتيح العشرة للتدوير.")
+
+
+def probe_duration(path):
+    if not path or not os.path.exists(path):
+        return 0.0
+
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(path)
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30
+        )
+        return float(result.stdout.strip())
     except Exception:
         return 0.0
 
-def is_valid_media(path: Path, min_size: int = 1000) -> bool:
-    return path.exists() and path.is_file() and path.stat().st_size >= min_size and probe_duration(path) > 0.1
 
-def is_valid_visual(path: Path, min_size: int = 5000) -> bool:
-    if not path.exists() or not path.is_file() or path.stat().st_size < min_size:
+def is_valid_media(path, min_duration=0.05):
+    if not path:
         return False
+
+    path = Path(path)
+    if not path.exists() or path.stat().st_size < 1024:
+        return False
+
+    return probe_duration(path) >= min_duration
+
+
+def is_valid_visual(path):
+    if not path:
+        return False
+
+    path = Path(path)
+    if not path.exists() or path.stat().st_size < 1024:
+        return False
+
     try:
-        r = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(path)],
-            capture_output=True, text=True, timeout=20
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height",
+                "-of", "csv=s=x:p=0",
+                str(path)
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=20
         )
-        m = re.search(r"(\d+)x(\d+)", r.stdout.strip())
-        return bool(m and int(m.group(1)) > 0 and int(m.group(2)) > 0)
+
+        dimensions = result.stdout.strip()
+        if "x" not in dimensions:
+            return False
+
+        w, h = dimensions.split("x")
+        return int(w) > 100 and int(h) > 100
     except Exception:
         return False
 
-def clean_query(text: str, max_words: int = 4) -> str:
-    safe = re.sub(r"[\u0600-\u06FF]", "", str(text or ""))
-    safe = re.sub(r"[^A-Za-z0-9 ]", " ", safe)
-    words = [w for w in safe.split() if len(w) > 2]
-    return " ".join(words[:max_words]) if words else "investigation scene"
 
-class EngineConfig:
-    topic = os.environ.get("VIDEO_TOPIC", "لغز اختفاء غامض")
-    topic_clean = re.sub(r"\s+", " ", str(topic).strip().lower())
-    topic_key = hashlib.sha256(topic_clean.encode("utf-8")).hexdigest()[:12]
+def clean_query(text):
+    if not text:
+        return ""
 
-    base_dir = Path("./output_build")
-    cache_dir = base_dir / f"cache_{topic_key}"
+    text = re.sub(r"[^\x00-\x7F]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:180]
 
-    gemini_keys = [k.strip() for k in os.environ.get("GEMINI_API_KEY", "").split(",") if k.strip()]
-    groq_api_key = os.environ.get("GROQ_API_KEY", "").strip()
-    pexels_key = os.environ.get("PEXELS_API_KEY", "").strip()
-    pixabay_key = os.environ.get("PIXABAY_API_KEY", "").strip()
-    giphy_key = os.environ.get("GIPHY_API_KEY", "").strip()
-    
-    openverse_client_id = os.environ.get("OPENVERSE_CLIENT_ID", "").strip()
-    openverse_client_secret = os.environ.get("OPENVERSE_CLIENT_SECRET", "").strip()
-    europeana_key = os.environ.get("EUROPEANA_API_KEY", "").strip()
-    openverse_token = None
 
-CONFIG = EngineConfig()
-CONFIG.cache_dir.mkdir(parents=True, exist_ok=True)
+def safe_filename(text):
+    return re.sub(r"[^a-zA-Z0-9_\-]+", "_", text)[:100]
 
-# ==============================================================================
-# 1. STORY & ASSET INTELLIGENCE (مع إظهار النص في السجلات)
-# ==============================================================================
+
+def run_cmd(cmd, timeout=300):
+    return subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=timeout
+    )
+
+
+def extract_json(text):
+    if not text:
+        return None
+
+    text = text.strip()
+    text = re.sub(r"```json\s*", "", text, flags=re.I)
+    text = re.sub(r"```\s*$", "", text)
+
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    match = re.search(r"\{[\s\S]*\}", text)
+    if not match:
+        return None
+
+    try:
+        return json.loads(match.group(0))
+    except Exception:
+        return None
+
+
 class StoryScoutEngine:
-    @staticmethod
-    def inspect_and_plan():
-        log.info(f"🕵️ تمشيط القضية وتحديد طبيعة المصادر: {CONFIG.topic}")
-        prompt = f'''أنت رئيس تحرير ومخرج وثائقيات استقصائية كبرى. القضية: "{CONFIG.topic}"
+    def __init__(self):
+        self.script = None
 
-الخطوة 1: فحص طبيعة القضية:
-- هل لها فيلم شهير أو مسلسل (Cinema relevance)؟
-- هل تحتوي على سجلات وتحقيقات حقيقية من الـ FBI أو الشرطة (Forensic evidence)؟
-- هل تعتمد بقوة على الوثائق التاريخية أو أخبار الصحف القديمة (Historical/OSINT)?
-- هل ترتبط باكتشافات علمية أو استكشاف فضائي (Space/Science)?
+    def inspect_and_plan(self):
+        log("🧠 بدء تحليل الموضوع وصناعة السيناريو عبر AGY...")
 
-الخطوة 2: اكتب النص السردي الكامل للفيلم (Master Narration) باللغة العربية الفصحى.
-- النص يجب أن يكون مشوقاً، عميقاً، بنبرة استقصائية باردة ومرعبة.
-- الطول المطلوب: ما بين 350 إلى 450 كلمة متصلة تشكل 7 إلى 10 فصول سردية واضحة.
-- قسّم النص إلى نصفين متوازنين: part_1 و part_2 (لمنع تشتت الصوت).
+        prompt = f"""
+You are an elite investigative documentary producer.
 
-أخرج JSON فقط:
+TOPIC:
+{CONFIG.topic}
+
+Create a production-ready investigative documentary plan.
+
+Return ONLY valid JSON.
+
+Required structure:
+
 {{
-  "story_type": "FORENSIC_OR_CINEMA_OR_HISTORICAL_OR_SPACE",
-  "has_major_movie": true,
-  "movie_title": "...",
-  "primary_query": "English keyword",
-  "part_1": "النصف الأول من النص...",
-  "part_2": "النصف الثاني من النص..."
+  "story_type": "investigation",
+  "major_movie": false,
+  "movie_title": "",
+  "primary_english_query": "",
+  "part_1": "",
+  "part_2": ""
 }}
-'''
-        for attempt in range(3):
-            try:
-                res = subprocess.run(
-                    ["agy", "--model", "gemini-3.1-pro", "--effort", "high", "--dangerously-skip-permissions", "-p", prompt],
-                    capture_output=True, text=True, timeout=300
-                )
-                match = re.search(r"\{[\s\S]*\}", res.stdout)
-                if match:
-                    data = json.loads(match.group(0))
-                    if data.get("part_1") and data.get("part_2"):
-                        log.info(f"\n{'='*60}\n📜 تم توليد السيناريو بنجاح:\n[الجزء الأول]:\n{data['part_1']}\n\n[الجزء الثاني]:\n{data['part_2']}\n{'='*60}\n")
-                        return data
-            except Exception as e:
-                log.warning(f"⚠️ إعادة محاولة كتابة السيناريو: {e}")
-                time.sleep(4)
 
-        fallback = {
-            "story_type": "FORENSIC", "has_major_movie": False, "movie_title": "",
-            "primary_query": "crime mystery evidence",
-            "part_1": f"تبدأ القصة في ليلة غامضة عندما اختفت كل الآثار المتعلقة بقضية {CONFIG.topic}. عثرت الشرطة على أدلة مبعثرة تشير إلى أن الجريمة لم تكن وليدة اللحظة، بل تم التخطيط لها بدقة متناهية.",
-            "part_2": "توالت الشهادات والتقارير الفيدرالية التي كشفت عن خيوط متداخلة. ورغم كل المحاولات لفك لغز هذا الملف، بقيت الحقيقة مدفونة خلف جدار الصمت."
-        }
-        log.info(f"\n{'='*60}\n⚠️ استخدام السيناريو الاحتياطي:\n{fallback['part_1']}\n{fallback['part_2']}\n{'='*60}\n")
-        return fallback
+Requirements:
+1. Arabic narration.
+2. Total narration approximately 350-450 Arabic words.
+3. Divide naturally into part_1 and part_2.
+4. Do NOT summarize.
+5. Do NOT shorten.
+6. Serious investigative documentary tone.
+7. Factual where facts are known.
+8. Clearly distinguish uncertain claims.
+9. Avoid fabricated sources.
+10. Make the narration suitable for cinematic documentary voice-over.
+"""
 
-# ==============================================================================
-# 2. MASTER AUDIO STUDIO (مع إظهار خطوات التقدم بالثواني)
-# ==============================================================================
-class MasterAudioStudio:
-    @staticmethod
-    def _generate_chunk(text: str, out_wav: Path, label: str) -> bool:
-        if not CONFIG.gemini_keys:
-            log.error("❌ لا توجد GEMINI_API_KEY.")
-            return False
-        
-        log.info(f"⏳ جاري توليد صوت {label} عبر Gemini TTS...")
-        t_start = time.time()
-        
-        cfg = types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Charon"))
-            )
-        )
-        for key in CONFIG.gemini_keys * 2:
-            try:
-                client = genai.Client(api_key=key)
-                res = client.models.generate_content(
-                    model="gemini-3.8-flash-tts",
-                    contents="[INSTRUCTION: Chilling authoritative Arabic documentary narrator. Do not shorten narration.]\n" + text,
-                    config=cfg
-                )
-                raw = base64.b64decode(res.candidates[0].content.parts[0].inline_data.data)
-                if raw[:4] == b"RIFF":
-                    out_wav.write_bytes(raw)
-                else:
-                    tmp = out_wav.with_suffix(".pcm")
-                    tmp.write_bytes(raw)
-                    subprocess.run(["ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", str(tmp), "-c:a", "pcm_s16le", str(out_wav)], capture_output=True)
-                    if tmp.exists(): tmp.unlink()
-                if is_valid_media(out_wav, 1000):
-                    dur = probe_duration(out_wav)
-                    log.info(f"✅ تم إنتاج {label} بنجاح في {time.time() - t_start:.1f} ثانية. (المدة الصوتية: {dur:.1f}s)")
-                    return True
-            except Exception as e:
-                log.warning(f"⏳ انتظار وتبريد بسبب طلب زائد/خطأ في TTS: {str(e)[:100]}...")
-                time.sleep(12)
-        return False
-
-    @classmethod
-    def produce_master_track(cls, part1_text: str, part2_text: str, master_audio: Path) -> str:
-        log.info("🎙️ بدء تجهيز مسار الصوت الماستر...")
-        w1, w2 = CONFIG.cache_dir / "part1.wav", CONFIG.cache_dir / "part2.wav"
-        
-        if not is_valid_media(w1): cls._generate_chunk(part1_text, w1, "الجزء الأول (Part 1)")
-        if not is_valid_media(w2): cls._generate_chunk(part2_text, w2, "الجزء الثاني (Part 2)")
-
-        txt_concat = CONFIG.cache_dir / "audio_list.txt"
-        txt_concat.write_text(f"file '{w1.resolve().as_posix()}'\nfile '{w2.resolve().as_posix()}'\n", encoding="utf-8")
-
-        log.info("🎛️ جاري دمج الجزأين وتطبيق هندسة الصوت الاحترافية (FFmpeg loudnorm) - قد يستغرق دقيقة...")
-        t_mix = time.time()
-        cmd = [
-            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(txt_concat),
-            "-filter_complex", "[0:a]loudnorm=I=-16:TP=-1.5:LRA=11[aout]",
-            "-map", "[aout]", "-c:a", "aac", "-b:a", "192k", "-ar", str(TARGET_AR), str(master_audio)
-        ]
-        subprocess.run(cmd, capture_output=True, check=True)
-        log.info(f"🔊 انتهت الهندسة الصوتية في {time.time() - t_mix:.1f} ثانية. ملف الماستر جاهز!")
-        return f"{part1_text} {part2_text}".strip()
-
-# ==============================================================================
-# 3. WORD-SYNC & SHOT SLICER
-# ==============================================================================
-class WordSyncSlicer:
-    @staticmethod
-    def align_and_slice(audio_path: Path, full_script: str) -> List[Dict]:
-        log.info("⚡ إرسال الصوت لـ Groq Whisper لاستخراج توقيت الكلمات...")
         try:
-            with open(audio_path, "rb") as fh:
-                r = requests.post(
-                    "https://api.groq.com/openai/v1/audio/transcriptions",
-                    headers={"Authorization": f"Bearer {CONFIG.groq_api_key}"},
-                    files={"file": (audio_path.name, fh, "audio/mp4")},
-                    data={"model": "whisper-large-v3", "language": "ar", "response_format": "verbose_json", "timestamp_granularities[]": "word"},
-                    timeout=180
-                ).json()
-            words = r.get("words", [])
+            result = subprocess.run(
+                [
+                    "agy",
+                    "--model", AGY_SCRIPT_MODEL,
+                    "--effort", "high",
+                    "--dangerously-skip-permissions",
+                    "-p", prompt
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=300
+            )
+
+            data = extract_json(result.stdout.strip())
+            if not data:
+                raise RuntimeError("AGY returned invalid JSON.")
+
+            part1 = str(data.get("part_1", "")).strip()
+            part2 = str(data.get("part_2", "")).strip()
+
+            if not part1 or not part2:
+                raise RuntimeError("AGY returned empty narration parts.")
+
+            self.script = data
+
+            total_words = len(part1.split()) + len(part2.split())
+            log(f"📝 تم توليد السيناريو: {total_words} كلمة.")
+            log("━━━━━━━━━━ النص الكامل ━━━━━━━━━━")
+            log(part1 + "\n\n" + part2)
+            log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+            return data
+
         except Exception as e:
-            log.warning(f"⚠️ فشل استخراج توقيتات Groq: {e}. اللجوء للتقطيع المتساوي.")
-            words = []
+            log(f"⚠️ فشل AGY في إنشاء السيناريو: {e}", "warning")
 
-        total_dur = probe_duration(audio_path)
-        shots = []
+            fallback = {
+                "story_type": "investigation",
+                "major_movie": False,
+                "movie_title": "",
+                "primary_english_query": clean_query(CONFIG.topic),
+                "part_1": (
+                    f"في هذه القصة الغامضة نقترب من تفاصيل {CONFIG.topic}. "
+                    f"تبدأ الحكاية بتفاصيل تبدو عادية، لكن مجموعة من الأحداث "
+                    f"والوثائق والشهادات تفتح أسئلة أكثر مما تقدم إجابات. "
+                    f"ومع إعادة ترتيب الوقائع زمنياً تظهر تناقضات يصعب تجاهلها. "
+                    f"ما الذي حدث فعلاً، ومن كان يعرف ما يجري في ذلك الوقت؟"
+                ),
+                "part_2": (
+                    "تظل بعض التفاصيل غير محسومة، ولهذا يجب فصل المعلومات "
+                    "الموثقة عن الروايات المتداولة. عند مقارنة الشهادات "
+                    "والوثائق والتوقيتات تظهر صورة أكثر تعقيداً للقضية. "
+                    "وفي النهاية لا تقدم هذه القصة إجابة سهلة، بل تتركنا "
+                    "أمام مجموعة من الحقائق والأسئلة التي ما زالت تنتظر تفسيراً."
+                )
+            }
 
-        if words:
-            cur_words, shot_start = [], 0.0
-            for w in words:
-                cur_words.append(w.get("word", ""))
-                dur = float(w.get("end", 0)) - shot_start
-                is_punct = any(w.get("word", "").endswith(p) for p in [".", "،", "!", "؟", ":"])
-                if dur >= 3.0 or (dur >= 2.0 and is_punct):
-                    shots.append({"shot_id": len(shots) + 1, "start": round(shot_start, 2), "duration": round(dur, 2), "phrase": " ".join(cur_words)})
-                    shot_start = float(w.get("end", 0))
-                    cur_words = []
-            if cur_words:
-                shots.append({"shot_id": len(shots) + 1, "start": round(shot_start, 2), "duration": round(total_dur - shot_start, 2), "phrase": " ".join(cur_words)})
+            self.script = fallback
+            return fallback
+
+
+def is_rate_limit_error(error):
+    text = str(error).lower()
+
+    indicators = [
+        "429",
+        "resource_exhausted",
+        "rate limit",
+        "rate_limit",
+        "quota",
+        "too many requests",
+        "exhausted"
+    ]
+
+    return any(item in text for item in indicators)
+
+
+class MasterAudioStudio:
+    def __init__(self):
+        self.model = TTS_MODEL
+
+    def _generate_chunk(self, text, out_wav, label):
+        out_wav = Path(out_wav)
+
+        if out_wav.exists():
+            try:
+                out_wav.unlink()
+            except Exception:
+                pass
+
+        attempted = set()
+        total_keys = len(CONFIG.gemini_keys)
+
+        for attempt in range(total_keys):
+            key_index, api_key = GEMINI_POOL.acquire(excluded=attempted)
+            attempted.add(key_index)
+            display_key = key_index + 1
+
+            try:
+                log(
+                    f"🔑 Gemini Key #{display_key} → بدء TTS لـ {label} "
+                    f"(محاولة {attempt + 1}/{total_keys})"
+                )
+
+                started = time.time()
+
+                client = genai.Client(api_key=api_key)
+
+                config = types.GenerateContentConfig(
+                    response_modalities=["AUDIO"],
+                    speech_config=types.SpeechConfig(
+                        voice_config=types.VoiceConfig(
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                voice_name=TTS_VOICE
+                            )
+                        )
+                    )
+                )
+
+                instruction = (
+                    "[INSTRUCTION: "
+                    "Chilling authoritative Arabic documentary narrator. "
+                    "Read the ENTIRE narration exactly. "
+                    "Do not summarize. "
+                    "Do not omit words. "
+                    "Do not add explanations. "
+                    "Preserve Arabic punctuation and wording.]"
+                )
+
+                response = client.models.generate_content(
+                    model=self.model,
+                    contents=instruction + "\n\n" + text,
+                    config=config
+                )
+
+                if not response.candidates:
+                    raise RuntimeError("Gemini returned no candidates.")
+
+                candidate = response.candidates[0]
+
+                if not candidate.content or not candidate.content.parts:
+                    raise RuntimeError("Gemini returned empty content.")
+
+                inline_data = None
+
+                for part in candidate.content.parts:
+                    if getattr(part, "inline_data", None):
+                        inline_data = part.inline_data
+                        break
+
+                if not inline_data:
+                    raise RuntimeError("No inline audio data returned.")
+
+                data = inline_data.data
+
+                if isinstance(data, str):
+                    raw_audio = base64.b64decode(data)
+                else:
+                    raw_audio = bytes(data)
+
+                if not raw_audio:
+                    raise RuntimeError("Empty audio payload.")
+
+                if raw_audio[:4] == b"RIFF":
+                    with open(out_wav, "wb") as f:
+                        f.write(raw_audio)
+                else:
+                    temp_pcm = (
+                        CONFIG.work_dir
+                        / f"{safe_filename(label)}_key{display_key}.pcm"
+                    )
+
+                    with open(temp_pcm, "wb") as f:
+                        f.write(raw_audio)
+
+                    ffmpeg_result = run_cmd(
+                        [
+                            "ffmpeg", "-y",
+                            "-f", "s16le",
+                            "-ar", "24000",
+                            "-ac", "1",
+                            "-i", str(temp_pcm),
+                            "-c:a", "pcm_s16le",
+                            "-ar", "24000",
+                            "-ac", "1",
+                            str(out_wav)
+                        ],
+                        timeout=120
+                    )
+
+                    try:
+                        temp_pcm.unlink()
+                    except Exception:
+                        pass
+
+                    if ffmpeg_result.returncode != 0:
+                        raise RuntimeError(ffmpeg_result.stderr[-2000:])
+
+                duration = probe_duration(out_wav)
+
+                if not is_valid_media(out_wav):
+                    raise RuntimeError("Generated WAV failed validation.")
+
+                elapsed = time.time() - started
+
+                log(f"✅ {label} نجح باستخدام Gemini Key #{display_key}")
+                log(
+                    f"🎙️ {label}: {duration:.2f}s audio | "
+                    f"{elapsed:.1f}s generation time"
+                )
+
+                return True
+
+            except Exception as e:
+                error_text = str(e)
+
+                if is_rate_limit_error(e):
+                    log(
+                        f"⚠️ Gemini Key #{display_key} تعرض لـ Rate Limit / Quota.",
+                        "warning"
+                    )
+                else:
+                    log(
+                        f"❌ Gemini Key #{display_key} فشل في {label}: "
+                        f"{error_text[:500]}",
+                        "warning"
+                    )
+
+                GEMINI_POOL.release(key_index)
+
+                if attempt + 1 < total_keys:
+                    next_candidates = [
+                        i for i in range(total_keys)
+                        if i not in attempted
+                    ]
+
+                    if next_candidates:
+                        next_display = next_candidates[0] + 1
+                        log(
+                            f"🔄 تبديل المفتاح: "
+                            f"#{display_key} → #{next_display}"
+                        )
+
+                    time.sleep(
+                        0.7 if is_rate_limit_error(e) else 0.2
+                    )
+
+                continue
+
+            finally:
+                GEMINI_POOL.release(key_index)
+
+        raise RuntimeError(
+            f"❌ انتهت جميع مفاتيح Gemini بدون نجاح لـ {label}."
+        )
+
+    def produce_master_track(self, script):
+        part1 = str(script["part_1"]).strip()
+        part2 = str(script["part_2"]).strip()
+
+        w1 = CONFIG.work_dir / "part1.wav"
+        w2 = CONFIG.work_dir / "part2.wav"
+
+        for path in [w1, w2]:
+            if path.exists():
+                try:
+                    path.unlink()
+                except Exception:
+                    pass
+
+        log("🎙️ بدء إنتاج الصوت.")
+        log("⚡ سيتم توليد Part 1 و Part 2 بالتوازي.")
+
+        workers = 2 if len(CONFIG.gemini_keys) >= 2 else 1
+
+        if workers == 1:
+            log(
+                "⚠️ يوجد مفتاح Gemini واحد فقط، "
+                "لذلك لن يكون هناك TTS متوازٍ.",
+                "warning"
+            )
+
+        started = time.time()
+
+        if workers == 2:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                future1 = executor.submit(
+                    self._generate_chunk, part1, w1, "Part 1"
+                )
+                future2 = executor.submit(
+                    self._generate_chunk, part2, w2, "Part 2"
+                )
+
+                ok1 = future1.result()
+                ok2 = future2.result()
         else:
-            cur, idx = 0.0, 1
-            while cur < total_dur:
-                nxt = min(cur + 3.5, total_dur)
-                shots.append({"shot_id": idx, "start": round(cur, 2), "duration": round(nxt - cur, 2), "phrase": CONFIG.topic})
-                cur = nxt; idx += 1
-                
-        log.info(f"✂️ تم تقطيع المشاهد إلى {len(shots)} مشهد متزامن.")
+            ok1 = self._generate_chunk(part1, w1, "Part 1")
+            ok2 = self._generate_chunk(part2, w2, "Part 2")
+
+        elapsed = time.time() - started
+
+        if not ok1 or not ok2:
+            raise RuntimeError("فشل إنتاج أحد أجزاء الصوت.")
+
+        log(f"🎙️ اكتمل TTS المتوازي في {elapsed:.1f} ثانية.")
+
+        concat_file = CONFIG.work_dir / "audio_concat.txt"
+
+        with open(concat_file, "w", encoding="utf-8") as f:
+            f.write(f"file '{w1.resolve()}'\n")
+            f.write(f"file '{w2.resolve()}'\n")
+
+        if CONFIG.master_audio.exists():
+            CONFIG.master_audio.unlink()
+
+        log("🎚️ دمج الجزأين + Loudness normalization...")
+
+        result = run_cmd(
+            [
+                "ffmpeg", "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(concat_file),
+                "-filter_complex",
+                "[0:a]loudnorm=I=-16:TP=-1.5:LRA=11[aout]",
+                "-map", "[aout]",
+                "-c:a", "pcm_s16le",
+                "-ar", "48000",
+                "-ac", "1",
+                str(CONFIG.master_audio)
+            ],
+            timeout=300
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                "FFmpeg master audio failed:\n" + result.stderr[-3000:]
+            )
+
+        duration = probe_duration(CONFIG.master_audio)
+
+        if not is_valid_media(CONFIG.master_audio):
+            raise RuntimeError("Master audio validation failed.")
+
+        log(f"✅ Master Audio جاهز: {duration:.2f} ثانية.")
+
+        return CONFIG.master_audio
+
+
+class WordSyncSlicer:
+    def __init__(self):
+        self.url = "https://api.groq.com/openai/v1/audio/transcriptions"
+
+    def align_and_slice(self, audio_path, full_script):
+        if not CONFIG.groq_api_key:
+            raise RuntimeError("GROQ_API_KEY غير موجود.")
+
+        log("🧠 إرسال الصوت إلى Groq Whisper للتوقيتات...")
+
+        headers = {
+            "Authorization": f"Bearer {CONFIG.groq_api_key}"
+        }
+
+        with open(audio_path, "rb") as audio_file:
+            files = {
+                "file": (
+                    "master_audio.wav",
+                    audio_file,
+                    "audio/wav"
+                )
+            }
+
+            data = {
+                "model": GROQ_MODEL,
+                "language": "ar",
+                "response_format": "verbose_json",
+                "timestamp_granularities[]": "word"
+            }
+
+            response = requests.post(
+                self.url,
+                headers=headers,
+                files=files,
+                data=data,
+                timeout=180
+            )
+
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Groq error {response.status_code}: {response.text[:2000]}"
+            )
+
+        payload = response.json()
+        words = []
+
+        for item in payload.get("words", []):
+            word = str(item.get("word", "")).strip()
+            start = item.get("start")
+            end = item.get("end")
+
+            if word and start is not None and end is not None:
+                words.append({
+                    "word": word,
+                    "start": float(start),
+                    "end": float(end)
+                })
+
+        if not words:
+            raise RuntimeError("Groq returned no word timestamps.")
+
+        log(f"📝 تم الحصول على {len(words)} توقيت كلمة.")
+
+        shots = []
+        current_words = []
+        shot_start = 0.0
+        last_end = 0.0
+        punctuation = (".", "!", "?", "،", "؛", ":", "؟")
+
+        for item in words:
+            current_words.append(item)
+            last_end = item["end"]
+
+            elapsed = last_end - shot_start
+            should_cut = False
+
+            if elapsed >= 3.5:
+                should_cut = True
+            elif elapsed >= 2.0 and item["word"].endswith(punctuation):
+                should_cut = True
+
+            if should_cut:
+                text = " ".join(
+                    x["word"] for x in current_words
+                ).strip()
+
+                if text:
+                    shots.append({
+                        "index": len(shots) + 1,
+                        "start": shot_start,
+                        "end": last_end,
+                        "duration": max(0.5, last_end - shot_start),
+                        "text": text
+                    })
+
+                current_words = []
+                shot_start = last_end
+
+        if current_words:
+            text = " ".join(
+                x["word"] for x in current_words
+            ).strip()
+
+            if text:
+                shots.append({
+                    "index": len(shots) + 1,
+                    "start": shot_start,
+                    "end": last_end,
+                    "duration": max(0.5, last_end - shot_start),
+                    "text": text
+                })
+
+        log(f"✂️ تم تقسيم التعليق الصوتي إلى {len(shots)} لقطة.")
         return shots
 
-    @staticmethod
-    def write_subtitles_ass(shots: List[Dict], out_ass: Path):
-        lines = [
-            "[Script Info]", "ScriptType: v4.00+", "PlayResX: 1920", "PlayResY: 1080", "WrapStyle: 2", "",
-            "[V4+ Styles]",
-            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-            "Style: Arabic,Noto Sans Arabic,64,&H00FFFFFF,&H00FFFFFF,&H00101010,&H00000000,-1,0,0,0,100,100,0,0,1,2,2,2,80,80,68,1",
-            "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
-        ]
-        def to_ass_t(s):
-            cs = int(round(s * 100))
-            return f"{cs // 360000}:{(cs % 360000) // 6000:02d}:{(cs % 6000) // 100:02d}.{cs % 100:02d}"
 
-        for s in shots:
-            if s["duration"] < 0.2: continue
-            txt = s["phrase"].replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
-            lines.append(f"Dialogue: 0,{to_ass_t(s['start'])},{to_ass_t(s['start']+s['duration'])},Arabic,,0,0,0,,{{\\fad(120,120)}}{txt}")
-        out_ass.write_text("\n".join(lines), encoding="utf-8-sig")
+def ass_time(seconds):
+    seconds = max(0, float(seconds))
 
-# ==============================================================================
-# 4. RESTORED AGY VISION SCOUT (من V24.2)
-# ==============================================================================
-async def agy_evaluate_scout(media_path: Path, narration: str, source: str) -> Tuple[bool, float]:
-    """المراجع البصري الخاص بـ V24.2 المستعاد لتقييم الوسيط عبر Agy CLI"""
-    prompt = f'''أنت المراجع البصري الفوري لفيلم وثائقي بعنوان "{CONFIG.topic}".
-نوع المصدر: {source}
-التعليق الصوتي: "{narration}"
-الوسيط المراد فحصه موجود في المسار المحلي التالي:
-{media_path.resolve()}
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = seconds - h * 3600 - m * 60
 
-مهم: إذا كان إصدار agy الحالي لا يدعم إرفاق الملف تلقائياً عبر النص، فلا تدّع أنك شاهدت الصورة.
-إذا كنت قادراً فعلياً على رؤية الوسيط، قيّم ملاءمته للجو الوثائقي.
-وأضف نقطة البداية المثالية للمشهد إذا كان فيديو، وإلا ضعها 0.0.
-أخرج JSON فقط:
-{{"decision":"ACCEPT","score":0.85,"best_start_second":0.0,"reason":"..."}}
-'''
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "agy", "--model", "gemini-3.8-flash", "--effort", "high",
-            "--dangerously-skip-permissions", "-p", prompt,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    return f"{h}:{m:02d}:{s:05.2f}"
+
+
+def escape_ass(text):
+    text = text.replace("\\", r"\\")
+    text = text.replace("{", r"\{")
+    text = text.replace("}", r"\}")
+    return text
+
+
+def write_subtitles_ass(shots, output_path):
+    log("📝 إنشاء Broadcast ASS subtitles...")
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("[Script Info]\n")
+        f.write("ScriptType: v4.00+\n")
+        f.write("PlayResX: 1920\n")
+        f.write("PlayResY: 1080\n")
+        f.write("ScaledBorderAndShadow: yes\n\n")
+
+        f.write("[V4+ Styles]\n")
+        f.write(
+            "Format: Name, Fontname, Fontsize, PrimaryColour, "
+            "SecondaryColour, OutlineColour, BackColour, Bold, "
+            "Italic, Underline, StrikeOut, ScaleX, ScaleY, "
+            "Spacing, Angle, BorderStyle, Outline, Shadow, "
+            "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
-        if proc.returncode != 0: return True, 0.0
-        result_text = stdout.decode("utf-8", "ignore").strip()
-        match = re.search(r"\{[\s\S]*\}", result_text)
-        if match:
-            data = json.loads(match.group(0))
-            accepted = str(data.get("decision", "ACCEPT")).upper() == "ACCEPT" and float(data.get("score", 1.0)) >= 0.60
-            start_s = float(data.get("best_start_second", 0.0))
-            return accepted, start_s
-    except Exception as e:
-        log.error(f"⚠️ انهيار المراجع الفوري (Agy Scout): {e}")
-    return True, 0.0
 
-# ==============================================================================
-# 5. MULTI-SOURCE CONCURRENT MEDIA SCOUT
-# ==============================================================================
+        f.write(
+            "Style: Default,Noto Sans Arabic,58,"
+            "&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,"
+            "-1,0,0,0,100,100,0,0,1,3,1,2,80,80,70,1\n\n"
+        )
+
+        f.write("[Events]\n")
+        f.write(
+            "Format: Layer, Start, End, Style, Name, "
+            "MarginL, MarginR, MarginV, Effect, Text\n"
+        )
+
+        for shot in shots:
+            start = ass_time(shot["start"])
+            end = ass_time(shot["end"])
+            text = escape_ass(shot["text"])
+
+            f.write(
+                f"Dialogue: 0,{start},{end},Default,,"
+                f"0,0,0,,{{\\fad(120,120)}}{text}\n"
+            )
+
+    log(f"✅ ASS subtitles: {output_path}")
+
+
 class MediaSources:
-    headers = {"User-Agent": "Mozilla/5.0"}
-    
-    @classmethod
-    def get_openverse_token(cls):
-        if CONFIG.openverse_token: return CONFIG.openverse_token
-        if not (CONFIG.openverse_client_id and CONFIG.openverse_client_secret): return None
-        try:
-            res = requests.post("https://api.openverse.engineering/v1/auth_tokens/token/", 
-                                data={"client_id": CONFIG.openverse_client_id, "client_secret": CONFIG.openverse_client_secret, "grant_type": "client_credentials"},
-                                timeout=10).json()
-            CONFIG.openverse_token = res.get("access_token")
-            return CONFIG.openverse_token
-        except: return None
 
-    @classmethod
-    def fetch_openverse_image(cls, query: str, out_jpg: Path) -> bool:
-        token = cls.get_openverse_token()
-        h = {"Authorization": f"Bearer {token}"} if token else {}
-        try:
-            r = requests.get("https://api.openverse.engineering/v1/images/", params={"q": query, "page_size": 3}, headers=h, timeout=12).json()
-            results = r.get("results", [])
-            if results:
-                url = results[0].get("url")
-                if url:
-                    out_jpg.write_bytes(requests.get(url, timeout=15).content)
-                    return True
-        except: pass
-        return False
-        
-    @classmethod
-    def fetch_europeana_image(cls, query: str, out_jpg: Path) -> bool:
-        if not CONFIG.europeana_key: return False
-        try:
-            url = "https://api.europeana.eu/record/v2/search.json"
-            params = {"wskey": CONFIG.europeana_key, "query": query, "media": True, "thumbnail": True, "rows": 3}
-            res = requests.get(url, params=params, timeout=12).json()
-            items = res.get("items", [])
-            for item in items:
-                img_url = item.get("edmPreview", [None])[0]
-                if img_url:
-                    out_jpg.write_bytes(requests.get(img_url, timeout=15).content)
-                    return True
-        except: pass
-        return False
-        
-    @classmethod
-    def fetch_nasa_media(cls, query: str, out_path: Path) -> bool:
-        try:
-            url = f"https://images-api.nasa.gov/search?q={urllib.parse.quote(query)}&media_type=image,video"
-            res = requests.get(url, timeout=12).json()
-            items = res.get("collection", {}).get("items", [])
-            if not items: return False
-            href = items[0].get("href")
-            if href:
-                media_res = requests.get(href, timeout=12).json()
-                for link in media_res:
-                    if link.endswith(".mp4"):
-                        out_path.with_suffix(".mp4").write_bytes(requests.get(link, timeout=20).content)
-                        return True
-                    elif link.endswith("orig.jpg") or link.endswith("large.jpg"):
-                        out_path.with_suffix(".jpg").write_bytes(requests.get(link, timeout=15).content)
-                        return True
-        except: pass
-        return False
-        
-    @classmethod
-    def fetch_chronicling_america(cls, query: str, out_jpg: Path) -> bool:
-        try:
-            url = f"https://chroniclingamerica.loc.gov/search/pages/results/?andtext={urllib.parse.quote(query)}&format=json"
-            res = requests.get(url, timeout=12).json()
-            items = res.get("items", [])
-            if items:
-                thumb = items[0].get("url", "")
-                if thumb and thumb.endswith(".json"):
-                    img_data = requests.get(thumb, timeout=12).json()
-                    jp2 = img_data.get("jp2")
-                    if jp2:
-                        out_jpg.write_bytes(requests.get(jp2.replace(".jp2", "/thumbnail.jpg"), timeout=15).content)
-                        return True
-        except: pass
-        return False
-
-    @classmethod
-    def fetch_yarn_clip(cls, query: str, out_mp4: Path) -> bool:
-        try:
-            url = f"https://yarn.co/yarn-find?text={urllib.parse.quote(query)}"
-            r = requests.get(url, headers=cls.headers, timeout=12)
-            match = re.search(r'/yarn-clip/([a-f0-9\-]+)', r.text)
-            if match:
-                direct_url = f"https://y.yarn.co/{match.group(1)}.mp4"
-                v_res = requests.get(direct_url, headers=cls.headers, timeout=15)
-                if v_res.status_code == 200 and len(v_res.content) > 30000:
-                    out_mp4.write_bytes(v_res.content)
-                    return True
-        except Exception: pass
-        return False
-
-    @classmethod
-    def fetch_giphy_clip(cls, query: str, out_mp4: Path) -> bool:
-        if not CONFIG.giphy_key: return False
-        try:
-            url = "https://api.giphy.com/v1/gifs/search"
-            params = {"api_key": CONFIG.giphy_key, "q": query, "limit": 3, "rating": "pg-13"}
-            res = requests.get(url, params=params, timeout=12).json()
-            data = res.get("data", [])
-            if data:
-                mp4_url = data[0].get("images", {}).get("original", {}).get("mp4")
-                if mp4_url:
-                    out_mp4.write_bytes(requests.get(mp4_url, timeout=15).content)
-                    return True
-        except Exception: pass
-        return False
-
-    @classmethod
-    def fetch_fbi_archive(cls, query: str, out_mp4: Path) -> bool:
-        try:
-            safe_q = urllib.parse.quote(f"({query} OR fbi OR police) AND mediatype:movies")
-            s_url = f"https://archive.org/advancedsearch.php?q={safe_q}&fl[]=identifier&sort[]=downloads+desc&rows=3&output=json"
-            res = requests.get(s_url, timeout=12).json()
-            docs = res.get("response", {}).get("docs", [])
-            if docs:
-                ident = docs[0].get("identifier")
-                m_url = f"https://archive.org/metadata/{ident}/files"
-                files = requests.get(m_url, timeout=12).json().get("result", [])
-                for f in files:
-                    name = f.get("name", "")
-                    if name.endswith(".mp4") and "thumb" not in name.lower():
-                        d_url = f"https://archive.org/download/{ident}/{urllib.parse.quote(name)}"
-                        r = requests.get(d_url, stream=True, timeout=20)
-                        chunk = r.raw.read(4 * 1024 * 1024)
-                        if len(chunk) > 100000:
-                            out_mp4.write_bytes(chunk)
-                            return True
-        except Exception: pass
-        return False
-
-    @classmethod
-    def fetch_pexels_video(cls, query: str, out_mp4: Path) -> bool:
-        if not CONFIG.pexels_key: return False
-        try:
-            r = requests.get("https://api.pexels.com/videos/search", params={"query": query, "per_page": 3, "orientation": "landscape"}, headers={"Authorization": CONFIG.pexels_key}, timeout=12).json()
-            vids = r.get("videos", [])
-            if vids:
-                files = sorted(vids[0].get("video_files", []), key=lambda x: x.get("width", 0), reverse=True)
-                if files:
-                    out_mp4.write_bytes(requests.get(files[0]["link"], timeout=20).content)
-                    return True
-        except Exception: pass
-        return False
-
-    @classmethod
-    def fetch_wikipedia_image(cls, query: str, out_jpg: Path) -> bool:
-        try:
-            r = requests.get("https://en.wikipedia.org/w/api.php", params={"action": "query", "generator": "search", "gsrsearch": query, "gsrlimit": 3, "prop": "pageimages", "piprop": "thumbnail", "pithumbsize": 1920, "format": "json"}, timeout=12).json()
-            pages = list(r.get("query", {}).get("pages", {}).values())
-            for p in pages:
-                src = p.get("thumbnail", {}).get("source")
-                if src:
-                    out_jpg.write_bytes(requests.get(src, timeout=15).content)
-                    return True
-        except Exception: pass
-        return False
-
-    @classmethod
-    def create_fallback_visual(cls, shot_num: int, out_jpg: Path):
-        cmd = [
-            "ffmpeg", "-y", "-f", "lavfi",
-            f"-i", f"color=c=0x11161B:s={TARGET_W}x{TARGET_H}:d=1",
-            "-vf", "noise=alls=15:allf=t,vignette=PI/3", "-frames:v", "1", str(out_jpg)
-        ]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-async def scout_shot_worker(shot: Dict, story_info: Dict, semaphore: asyncio.Semaphore) -> Tuple[Path, float]:
-    async with semaphore:
-        sid = shot["shot_id"]
-        pfx = CONFIG.cache_dir / f"shot_{sid:03d}"
-        c_vid = pfx.with_suffix(".mp4")
-        c_img = pfx.with_suffix(".jpg")
-
-        q = clean_query(shot["phrase"] + " " + story_info.get("primary_query", ""))
-        movie_title = story_info.get("movie_title", "")
-        story_type = story_info.get("story_type", "FORENSIC")
-        
-        loop = asyncio.get_event_loop()
-
-        async def check(vid: Path, source_name: str):
-            if is_valid_media(vid, 1000) or is_valid_visual(vid, 5000):
-                acc, st = await agy_evaluate_scout(vid, shot["phrase"], source_name)
-                return acc, st
-            return False, 0.0
-
-        if story_type == "SPACE" and sid % 2 == 0:
-            if await loop.run_in_executor(None, MediaSources.fetch_nasa_media, q, c_img):
-                target = c_img.with_suffix(".mp4") if c_img.with_suffix(".mp4").exists() else c_img
-                acc, st = await check(target, "NASA Archive")
-                if acc: return target, st
-
-        if story_info.get("has_major_movie") and sid % 4 == 0 and movie_title:
-            if await loop.run_in_executor(None, MediaSources.fetch_yarn_clip, f"{movie_title} {q}", c_vid):
-                acc, st = await check(c_vid, "Cinema Movie")
-                if acc: return c_vid, st
-
-        if sid % 3 == 0:
-            if await loop.run_in_executor(None, MediaSources.fetch_fbi_archive, q, c_vid):
-                acc, st = await check(c_vid, "FBI Archive")
-                if acc: return c_vid, st
-
-        if await loop.run_in_executor(None, MediaSources.fetch_pexels_video, q, c_vid):
-            acc, st = await check(c_vid, "Pexels B-Roll")
-            if acc: return c_vid, st
-
-        if story_type == "HISTORICAL_OR_OSINT" and sid % 2 != 0:
-            if await loop.run_in_executor(None, MediaSources.fetch_europeana_image, q, c_img):
-                acc, st = await check(c_img, "Europeana Archive")
-                if acc: return c_img, 0.0
-            if await loop.run_in_executor(None, MediaSources.fetch_chronicling_america, q, c_img):
-                acc, st = await check(c_img, "Chronicling America")
-                if acc: return c_img, 0.0
-            if await loop.run_in_executor(None, MediaSources.fetch_openverse_image, q, c_img):
-                acc, st = await check(c_img, "Openverse")
-                if acc: return c_img, 0.0
-
-        if await loop.run_in_executor(None, MediaSources.fetch_wikipedia_image, q, c_img):
-            return c_img, 0.0
-
-        await loop.run_in_executor(None, MediaSources.create_fallback_visual, sid, c_img)
-        return c_img, 0.0
-
-# ==============================================================================
-# 6. RENDER & ASSEMBLY ENGINE
-# ==============================================================================
-class AssemblyEngine:
     @staticmethod
-    def render_sub_clip(media_path: Path, dur: float, start_sec: float, out_path: Path):
-        is_video = media_path.suffix.lower() == ".mp4"
-        if is_video:
-            vf = (
-                f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=increase,"
-                f"crop={TARGET_W}:{TARGET_H},eq=contrast=1.08:saturation=0.92,vignette=PI/4.5,"
-                f"noise=alls=1:allf=t,fps={TARGET_FPS},tpad=stop_mode=clone:stop_duration={dur:.3f}"
+    def fetch_openverse_image(query, output):
+        try:
+            response = requests.get(
+                "https://api.openverse.org/v1/images/",
+                params={"q": query, "page_size": 5},
+                timeout=30
             )
-            cmd = ["ffmpeg", "-y", "-ss", f"{start_sec:.3f}", "-i", str(media_path), "-vf", vf, "-an", "-t", f"{dur:.3f}", "-c:v", "libx264", "-preset", "fast", "-crf", "20", str(out_path)]
-        else:
-            z = "min(zoom+0.0009*(1.1-cos(on/45)),1.12)"
-            vf = (
-                f"scale={int(TARGET_W*1.15)}:{int(TARGET_H*1.15)}:force_original_aspect_ratio=increase,"
-                f"crop={int(TARGET_W*1.15)}:{int(TARGET_H*1.15)},"
-                f"zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s={TARGET_W}x{TARGET_H}:fps={TARGET_FPS},"
-                f"eq=contrast=1.08:saturation=0.92,vignette=PI/4.5,noise=alls=1:allf=t,format=yuv420p"
+
+            if response.status_code != 200:
+                return None
+
+            for item in response.json().get("results", []):
+                url = item.get("thumbnail") or item.get("url")
+                if not url:
+                    continue
+
+                r = requests.get(url, timeout=40)
+                if r.status_code != 200:
+                    continue
+
+                with open(output, "wb") as f:
+                    f.write(r.content)
+
+                if is_valid_visual(output):
+                    return output
+
+        except Exception as e:
+            log(f"Openverse: {e}", "debug")
+
+        return None
+
+    @staticmethod
+    def fetch_europeana_image(query, output):
+        if not CONFIG.europeana_key:
+            return None
+
+        try:
+            response = requests.get(
+                "https://api.europeana.eu/record/v2/search.json",
+                params={
+                    "wskey": CONFIG.europeana_key,
+                    "query": query,
+                    "rows": 5,
+                    "profile": "rich"
+                },
+                timeout=30
             )
-            cmd = ["ffmpeg", "-y", "-loop", "1", "-i", str(media_path), "-vf", vf, "-an", "-t", f"{dur:.3f}", "-c:v", "libx264", "-preset", "fast", "-crf", "20", str(out_path)]
-            
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
-    @classmethod
-    def assemble_final_cut(cls, shot_clips: List[Path], master_audio: Path, sub_ass: Path, final_output: Path):
-        concat_txt = CONFIG.cache_dir / "shots_list.txt"
-        concat_txt.write_text("\n".join(f"file '{c.resolve().as_posix()}'" for c in shot_clips), encoding="utf-8")
+            if response.status_code != 200:
+                return None
 
-        temp_video = CONFIG.cache_dir / "temp_video_track.mp4"
-        subprocess.run([
-            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_txt),
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-r", str(TARGET_FPS), str(temp_video)
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for item in response.json().get("items", []):
+                previews = item.get("edmPreview", [])
+                if not previews:
+                    continue
 
-        sp = str(sub_ass.resolve()).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-        vf = f"subtitles=filename='{sp}'"
-        
-        cmd = [
-            "ffmpeg", "-y", "-i", str(temp_video), "-i", str(master_audio),
-            "-vf", vf, "-map", "0:v:0", "-map", "1:a:0",
-            "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
-            "-c:a", "copy", "-shortest", "-movflags", "+faststart", str(final_output)
-        ]
-        subprocess.run(cmd, check=True)
-        log.info(f"🏆 اكتمل إنتاج الفيلم بنجاح تام! الملف: {final_output}")
+                r = requests.get(previews[0], timeout=40)
+                if r.status_code != 200:
+                    continue
 
-# ==============================================================================
-# MAIN ASYNC ORCHESTRATION PIPELINE
-# ==============================================================================
-async def main_pipeline():
-    story_info = StoryScoutEngine.inspect_and_plan()
-    
-    master_wav = CONFIG.cache_dir / "master_audio.wav"
-    full_script = MasterAudioStudio.produce_master_track(story_info["part_1"], story_info["part_2"], master_wav)
-    
-    shots = WordSyncSlicer.align_and_slice(master_wav, full_script)
-    sub_ass = CONFIG.cache_dir / "subtitles.ass"
-    WordSyncSlicer.write_subtitles_ass(shots, sub_ass)
+                with open(output, "wb") as f:
+                    f.write(r.content)
+
+                if is_valid_visual(output):
+                    return output
+
+        except Exception as e:
+            log(f"Europeana: {e}", "debug")
+
+        return None
+
+    @staticmethod
+    def fetch_nasa_media(query, output):
+        try:
+            response = requests.get(
+                "https://images-api.nasa.gov/search",
+                params={"q": query, "media_type": "image"},
+                timeout=30
+            )
+
+            if response.status_code != 200:
+                return None
+
+            items = response.json().get("collection", {}).get("items", [])
+
+            for item in items:
+                links = item.get("links", [])
+                if not links:
+                    continue
+
+                href = links[0].get("href")
+                if not href:
+                    continue
+
+                r = requests.get(href, timeout=40)
+                if r.status_code != 200:
+                    continue
+
+                with open(output, "wb") as f:
+                    f.write(r.content)
+
+                if is_valid_visual(output):
+                    return output
+
+        except Exception as e:
+            log(f"NASA: {e}", "debug")
+
+        return None
+
+    @staticmethod
+    def fetch_chronicling_america(query, output):
+        try:
+            url = (
+                "https://www.loc.gov/"
+                "?fo=json&c=100&q="
+                + urllib.parse.quote(query)
+            )
+
+            response = requests.get(url, timeout=40)
+
+            if response.status_code != 200:
+                return None
+
+            for item in response.json().get("results", []):
+                for resource in item.get("resources", []):
+                    image_url = resource.get("image_url")
+
+                    if isinstance(image_url, list):
+                        image_url = image_url[0] if image_url else None
+
+                    if not image_url:
+                        continue
+
+                    r = requests.get(image_url, timeout=40)
+                    if r.status_code != 200:
+                        continue
+
+                    with open(output, "wb") as f:
+                        f.write(r.content)
+
+                    if is_valid_visual(output):
+                        return output
+
+        except Exception as e:
+            log(f"LOC: {e}", "debug")
+
+        return None
+
+    @staticmethod
+    def fetch_pixabay_video(query, output):
+        if not CONFIG.pixabay_key:
+            return None
+
+        try:
+            response = requests.get(
+                "https://pixabay.com/api/videos/",
+                params={
+                    "key": CONFIG.pixabay_key,
+                    "q": query,
+                    "per_page": 10,
+                    "safesearch": "true"
+                },
+                timeout=30
+            )
+
+            if response.status_code != 200:
+                return None
+
+            for hit in response.json().get("hits", []):
+                videos = hit.get("videos", {})
+
+                for name in ("large", "medium", "small"):
+                    item = videos.get(name)
+                    if not item or not item.get("url"):
+                        continue
+
+                    r = requests.get(
+                        item["url"],
+                        stream=True,
+                        timeout=60
+                    )
+
+                    if r.status_code != 200:
+                        continue
+
+                    with open(output, "wb") as f:
+                        for chunk in r.iter_content(1024 * 256):
+                            if chunk:
+                                f.write(chunk)
+
+                    if is_valid_media(output, 0.5):
+                        return output
+
+        except Exception as e:
+            log(f"Pixabay: {e}", "debug")
+
+        return None
+
+    @staticmethod
+    def fetch_pexels_video(query, output):
+        if not CONFIG.pexels_key:
+            return None
+
+        try:
+            response = requests.get(
+                "https://api.pexels.com/videos/search",
+                headers={"Authorization": CONFIG.pexels_key},
+                params={"query": query, "per_page": 8},
+                timeout=30
+            )
+
+            if response.status_code != 200:
+                return None
+
+            for video in response.json().get("videos", []):
+                files = video.get("video_files", [])
+
+                files = sorted(
+                    files,
+                    key=lambda x: abs((x.get("width") or 0) - TARGET_W)
+                )
+
+                for item in files:
+                    url = item.get("link")
+                    if not url:
+                        continue
+
+                    r = requests.get(
+                        url,
+                        stream=True,
+                        timeout=60
+                    )
+
+                    if r.status_code != 200:
+                        continue
+
+                    with open(output, "wb") as f:
+                        for chunk in r.iter_content(1024 * 256):
+                            if chunk:
+                                f.write(chunk)
+
+                    if is_valid_media(output):
+                        return output
+
+        except Exception as e:
+            log(f"Pexels: {e}", "debug")
+
+        return None
+
+    @staticmethod
+    def fetch_giphy(query, output):
+        if not CONFIG.giphy_key:
+            return None
+
+        try:
+            response = requests.get(
+                "https://api.giphy.com/v1/gifs/search",
+                params={
+                    "api_key": CONFIG.giphy_key,
+                    "q": query,
+                    "limit": 8,
+                    "rating": "pg-13"
+                },
+                timeout=30
+            )
+
+            if response.status_code != 200:
+                return None
+
+            for item in response.json().get("data", []):
+                mp4 = (
+                    item.get("images", {})
+                    .get("original_mp4", {})
+                    .get("mp4")
+                )
+
+                if not mp4:
+                    continue
+
+                r = requests.get(
+                    mp4,
+                    stream=True,
+                    timeout=60
+                )
+
+                if r.status_code != 200:
+                    continue
+
+                with open(output, "wb") as f:
+                    for chunk in r.iter_content(1024 * 256):
+                        if chunk:
+                            f.write(chunk)
+
+                if is_valid_media(output):
+                    return output
+
+        except Exception as e:
+            log(f"Giphy: {e}", "debug")
+
+        return None
+
+    @staticmethod
+    def fetch_wikipedia_image(query, output):
+        try:
+            response = requests.get(
+                "https://en.wikipedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "generator": "search",
+                    "gsrsearch": query,
+                    "gsrnamespace": 6,
+                    "gsrlimit": 5,
+                    "prop": "imageinfo",
+                    "iiprop": "url",
+                    "iiurlwidth": 1600,
+                    "format": "json"
+                },
+                timeout=30
+            )
+
+            if response.status_code != 200:
+                return None
+
+            pages = response.json().get("query", {}).get("pages", {})
+
+            for page in pages.values():
+                info = page.get("imageinfo", [])
+                if not info:
+                    continue
+
+                url = info[0].get("thumburl") or info[0].get("url")
+                if not url:
+                    continue
+
+                r = requests.get(url, timeout=40)
+                if r.status_code != 200:
+                    continue
+
+                with open(output, "wb") as f:
+                    f.write(r.content)
+
+                if is_valid_visual(output):
+                    return output
+
+        except Exception as e:
+            log(f"Wikipedia: {e}", "debug")
+
+        return None
+
+    @staticmethod
+    def fetch_fbi_archive(query, output):
+        try:
+            response = requests.get(
+                "https://archive.org/advancedsearch.php",
+                params={
+                    "q": f"title:({query})",
+                    "fl[]": ["identifier", "title"],
+                    "rows": 10,
+                    "output": "json"
+                },
+                timeout=40
+            )
+
+            if response.status_code != 200:
+                return None
+
+            docs = response.json().get("response", {}).get("docs", [])
+
+            for doc in docs:
+                identifier = doc.get("identifier")
+                if not identifier:
+                    continue
+
+                metadata_url = f"https://archive.org/metadata/{identifier}"
+
+                meta = requests.get(metadata_url, timeout=40)
+                if meta.status_code != 200:
+                    continue
+
+                files = meta.json().get("files", [])
+                candidates = []
+
+                for item in files:
+                    name = str(item.get("name", ""))
+
+                    if not name.lower().endswith((".mp4", ".webm", ".mov")):
+                        continue
+
+                    size = int(item.get("size", 0) or 0)
+
+                    if size > MAX_MEDIA_SIZE_MB * 1024 * 1024:
+                        continue
+
+                    candidates.append((size, name))
+
+                candidates.sort(key=lambda x: x[0])
+
+                for _, filename in candidates[:3]:
+                    url = (
+                        f"https://archive.org/download/"
+                        f"{identifier}/"
+                        f"{urllib.parse.quote(filename)}"
+                    )
+
+                    r = requests.get(
+                        url,
+                        stream=True,
+                        timeout=90
+                    )
+
+                    if r.status_code != 200:
+                        continue
+
+                    with open(output, "wb") as f:
+                        for chunk in r.iter_content(1024 * 256):
+                            if chunk:
+                                f.write(chunk)
+
+                    if is_valid_media(output):
+                        return output
+
+        except Exception as e:
+            log(f"Archive/FBI: {e}", "debug")
+
+        return None
+
+
+def create_fallback_visual(text, output):
+    log(f"🖼️ إنشاء Fallback visual لـ: {text[:60]}")
+
+    result = run_cmd(
+        [
+            "ffmpeg", "-y",
+            "-f", "lavfi",
+            "-i", "color=c=0x111111:s=1920x1080:r=30",
+            "-t", "5",
+            "-vf",
+            "noise=alls=18:allf=t+u,vignette,eq=contrast=1.12:saturation=0.75",
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-crf", "24",
+            "-pix_fmt", "yuv420p",
+            str(output)
+        ],
+        timeout=60
+    )
+
+    if result.returncode == 0 and is_valid_media(output):
+        return output
+
+    return None
+
+
+async def agy_evaluate_scout(media_path, shot):
+    if not media_path:
+        return False, 0.0, 0.0
+
+    prompt = f"""
+You are evaluating a media asset for an investigative documentary.
+
+SHOT TEXT:
+{shot["text"]}
+
+LOCAL MEDIA PATH:
+{media_path}
+
+IMPORTANT:
+Do NOT claim that you visually inspected the media unless the
+CLI actually provided visual access to it.
+
+Return ONLY JSON:
+
+{{
+  "decision": "accept",
+  "score": 0.0,
+  "best_start_second": 0.0
+}}
+
+score must be between 0 and 1.
+
+If visual inspection is unavailable, use a conservative
+decision based only on available metadata/context.
+"""
+
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run,
+            [
+                "agy",
+                "--model", AGY_VISION_MODEL,
+                "--effort", "high",
+                "--dangerously-skip-permissions",
+                "-p", prompt
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=180
+        )
+
+        data = extract_json(result.stdout)
+
+        if not data:
+            return True, 0.5, 0.0
+
+        decision = str(data.get("decision", "accept")).lower()
+        score = float(data.get("score", 0.5))
+        start = float(data.get("best_start_second", 0))
+
+        accepted = (
+            decision not in ("reject", "rejected", "bad")
+            and score >= 0.35
+        )
+
+        return accepted, score, start
+
+    except Exception as e:
+        log(f"AGY Vision: {e}", "debug")
+        return True, 0.0, 0.0
+
+
+async def scout_shot_worker(shot, semaphore, story):
+    async with semaphore:
+        index = shot["index"]
+
+        base = CONFIG.work_dir / f"shot_{index:03d}"
+        video_path = Path(str(base) + ".mp4")
+        image_path = Path(str(base) + ".jpg")
+
+        for p in (video_path, image_path):
+            if p.exists():
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
+
+        primary_query = story.get("primary_english_query", "")
+        query = clean_query(shot["text"] + " " + primary_query)
+
+        log(f"🔎 Shot {index}: {query[:120]}")
+
+        source_candidates = []
+
+        if CONFIG.pexels_key:
+            source_candidates.append(
+                ("PEXELS", MediaSources.fetch_pexels_video, video_path)
+            )
+
+        if CONFIG.pixabay_key:
+            source_candidates.append(
+                ("PIXABAY", MediaSources.fetch_pixabay_video, video_path)
+            )
+
+        source_candidates.append(
+            ("WIKIPEDIA", MediaSources.fetch_wikipedia_image, image_path)
+        )
+
+        source_candidates.append(
+            ("OPENVERSE", MediaSources.fetch_openverse_image, image_path)
+        )
+
+        if CONFIG.europeana_key:
+            source_candidates.append(
+                ("EUROPEANA", MediaSources.fetch_europeana_image, image_path)
+            )
+
+        source_candidates.append(
+            ("NASA", MediaSources.fetch_nasa_media, image_path)
+        )
+
+        source_candidates.append(
+            ("LOC", MediaSources.fetch_chronicling_america, image_path)
+        )
+
+        if CONFIG.giphy_key:
+            source_candidates.append(
+                ("GIPHY", MediaSources.fetch_giphy, video_path)
+            )
+
+        story_type = str(story.get("story_type", "")).lower()
+
+        if (
+            "invest" in story_type
+            or "crime" in story_type
+            or "mystery" in story_type
+        ):
+            source_candidates.append(
+                ("FBI_ARCHIVE", MediaSources.fetch_fbi_archive, video_path)
+            )
+
+        for source_name, fetcher, output in source_candidates:
+            try:
+                if output.exists():
+                    output.unlink()
+
+                found = await asyncio.to_thread(
+                    fetcher,
+                    query,
+                    output
+                )
+
+                if not found:
+                    continue
+
+                if output.suffix.lower() in (
+                    ".jpg", ".jpeg", ".png", ".webp"
+                ):
+                    valid = is_valid_visual(output)
+                else:
+                    valid = is_valid_media(output)
+
+                if not valid:
+                    continue
+
+                accepted, score, start = await agy_evaluate_scout(
+                    output,
+                    shot
+                )
+
+                if accepted:
+                    duration = probe_duration(output)
+
+                    log(
+                        f"✅ Shot {index}: {source_name} "
+                        f"| score={score:.2f} "
+                        f"| start={start:.2f}s"
+                    )
+
+                    return {
+                        "shot": shot,
+                        "path": str(output),
+                        "source": source_name,
+                        "score": score,
+                        "start": start,
+                        "duration": duration
+                    }
+
+                log(
+                    f"↩️ Shot {index}: {source_name} "
+                    f"رفضه AGY (score={score:.2f})",
+                    "debug"
+                )
+
+            except Exception as e:
+                log(f"{source_name} Shot {index}: {e}", "debug")
+
+        fallback = CONFIG.work_dir / f"shot_{index:03d}_fallback.mp4"
+
+        result = await asyncio.to_thread(
+            create_fallback_visual,
+            shot["text"],
+            fallback
+        )
+
+        if result:
+            log(f"🛟 Shot {index}: Fallback visual")
+
+            return {
+                "shot": shot,
+                "path": str(fallback),
+                "source": "FALLBACK",
+                "score": 0.0,
+                "start": 0.0,
+                "duration": probe_duration(fallback)
+            }
+
+        raise RuntimeError(f"Unable to obtain media for shot {index}")
+
+
+async def scout_all_media(shots, story):
+    log(
+        f"🔍 بدء Media Scouting لـ {len(shots)} لقطة "
+        f"بـ {CONCURRENT_WORKERS} عمال..."
+    )
 
     semaphore = asyncio.Semaphore(CONCURRENT_WORKERS)
-    log.info(f"⚡ جلب {len(shots)} لقطة بصرية متزامنة مع المراجع الفوري (Agy Scout)...")
-    tasks = [scout_shot_worker(shot, story_info, semaphore) for shot in shots]
-    downloaded_results = await asyncio.gather(*tasks)
 
-    log.info("✂️ بدء الرندر ومعالجة المشاهد البصرية...")
-    rendered_shot_clips = []
-    for shot, (asset, start_s) in zip(shots, downloaded_results):
-        shot_out = CONFIG.cache_dir / f"rendered_{shot['shot_id']:03d}.mp4"
-        try:
-            AssemblyEngine.render_sub_clip(asset, shot["duration"], start_s, shot_out)
-            rendered_shot_clips.append(shot_out)
-        except Exception:
-            fb_jpg = CONFIG.cache_dir / f"fb_{shot['shot_id']}.jpg"
-            MediaSources.create_fallback_visual(shot['shot_id'], fb_jpg)
-            AssemblyEngine.render_sub_clip(fb_jpg, shot["duration"], 0.0, shot_out)
-            rendered_shot_clips.append(shot_out)
+    tasks = [
+        scout_shot_worker(shot, semaphore, story)
+        for shot in shots
+    ]
 
-    final_mp4 = CONFIG.base_dir / "final_documentary.mp4"
-    AssemblyEngine.assemble_final_cut(rendered_shot_clips, master_wav, sub_ass, final_mp4)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    successful = []
+
+    for result in results:
+        if isinstance(result, Exception):
+            log(f"⚠️ Shot failed: {result}", "warning")
+        else:
+            successful.append(result)
+
+    successful.sort(key=lambda x: x["shot"]["index"])
+
+    log(
+        f"📦 Media Scouting مكتمل: "
+        f"{len(successful)}/{len(shots)}"
+    )
+
+    if not successful:
+        raise RuntimeError("لم يتم العثور على أي Media.")
+
+    return successful
+
+
+class AssemblyEngine:
+
+    def render_sub_clip(self, item):
+        shot = item["shot"]
+        media_path = Path(item["path"])
+        index = shot["index"]
+
+        output = CONFIG.work_dir / f"rendered_{index:03d}.mp4"
+
+        if output.exists():
+            output.unlink()
+
+        start = float(item.get("start", 0))
+        duration = float(shot.get("duration", 3))
+
+        media_duration = probe_duration(media_path)
+
+        if media_duration > 0:
+            start = min(start, max(0, media_duration - 0.1))
+
+        is_video = media_path.suffix.lower() in (
+            ".mp4", ".webm", ".mov", ".mkv", ".avi"
+        )
+
+        if is_video:
+            vf = (
+                "scale=1920:1080:"
+                "force_original_aspect_ratio=increase,"
+                "crop=1920:1080,"
+                "eq=contrast=1.06:saturation=0.92,"
+                "vignette,noise=alls=3:allf=t,fps=30"
+            )
+
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(start),
+                "-i", str(media_path),
+                "-t", str(duration),
+                "-vf", vf,
+                "-an",
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-crf", "20",
+                "-pix_fmt", "yuv420p",
+                "-r", "30",
+                str(output)
+            ]
+
+        else:
+            vf = (
+                "scale=2208:1248:"
+                "force_original_aspect_ratio=increase,"
+                "crop=2208:1248,"
+                "zoompan="
+                "z='min(zoom+0.0008,1.15)':"
+                "x='iw/2-(iw/zoom/2)':"
+                "y='ih/2-(ih/zoom/2)':"
+                "d=1:s=1920x1080:fps=30,"
+                "eq=contrast=1.06:saturation=0.92,"
+                "vignette,noise=alls=3:allf=t"
+            )
+
+            cmd = [
+                "ffmpeg", "-y",
+                "-loop", "1",
+                "-i", str(media_path),
+                "-t", str(duration),
+                "-vf", vf,
+                "-an",
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-crf", "20",
+                "-pix_fmt", "yuv420p",
+                "-r", "30",
+                str(output)
+            ]
+
+        result = run_cmd(cmd, timeout=300)
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Render shot {index} failed:\n"
+                + result.stderr[-2000:]
+            )
+
+        if not is_valid_media(output):
+            raise RuntimeError(f"Rendered shot {index} is invalid.")
+
+        log(f"🎬 Rendered Shot {index}")
+        return output
+
+    def assemble_final_cut(self, rendered, subtitle_path):
+        if not rendered:
+            raise RuntimeError("No rendered clips.")
+
+        concat_file = CONFIG.work_dir / "video_concat.txt"
+
+        with open(concat_file, "w", encoding="utf-8") as f:
+            for path in rendered:
+                f.write(f"file '{Path(path).resolve()}'\n")
+
+        temp_video = CONFIG.work_dir / "temp_video_track.mp4"
+
+        if temp_video.exists():
+            temp_video.unlink()
+
+        result = run_cmd(
+            [
+                "ffmpeg", "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(concat_file),
+                "-c", "copy",
+                str(temp_video)
+            ],
+            timeout=300
+        )
+
+        if result.returncode != 0:
+            log(
+                "⚠️ concat copy فشل، سيتم إعادة الترميز.",
+                "warning"
+            )
+
+            result = run_cmd(
+                [
+                    "ffmpeg", "-y",
+                    "-f", "concat",
+                    "-safe", "0",
+                    "-i", str(concat_file),
+                    "-c:v", "libx264",
+                    "-preset", "fast",
+                    "-crf", "20",
+                    "-pix_fmt", "yuv420p",
+                    "-r", "30",
+                    str(temp_video)
+                ],
+                timeout=600
+            )
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                "Video concat failed:\n" + result.stderr[-3000:]
+            )
+
+        subtitle_abs = str(Path(subtitle_path).resolve())
+
+        subtitle_filter = (
+            "subtitles="
+            + subtitle_abs
+            .replace("\\", "\\\\")
+            .replace(":", "\\:")
+            .replace("'", "\\'")
+        )
+
+        log("🎞️ بدء Final FFmpeg Assembly...")
+
+        if CONFIG.final_video.exists():
+            CONFIG.final_video.unlink()
+
+        result = run_cmd(
+            [
+                "ffmpeg", "-y",
+                "-i", str(temp_video),
+                "-i", str(CONFIG.master_audio),
+                "-vf", subtitle_filter,
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                "-c:v", "libx264",
+                "-preset", "medium",
+                "-crf", "18",
+                "-pix_fmt", "yuv420p",
+                "-r", "30",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-ar", "48000",
+                "-ac", "1",
+                "-shortest",
+                "-movflags", "+faststart",
+                str(CONFIG.final_video)
+            ],
+            timeout=1200
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                "Final FFmpeg assembly failed:\n"
+                + result.stderr[-5000:]
+            )
+
+        if not is_valid_media(CONFIG.final_video, 1):
+            raise RuntimeError("Final video failed validation.")
+
+        final_duration = probe_duration(CONFIG.final_video)
+
+        size_mb = (
+            CONFIG.final_video.stat().st_size
+            / 1024
+            / 1024
+        )
+
+        log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        log("🎉 FINAL DOCUMENTARY READY")
+        log(f"⏱️ Duration: {final_duration / 60:.2f} minutes")
+        log(f"💾 Size: {size_mb:.1f} MB")
+        log(f"📁 {CONFIG.final_video}")
+        log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+        return CONFIG.final_video
+
+
+def cleanup_workspace():
+    if not CONFIG.work_dir.exists():
+        return
+
+    try:
+        shutil.rmtree(CONFIG.work_dir)
+        log("🧹 تم حذف Workspace بالكامل.")
+        log("🚫 لا توجد ملفات Cache أو ملفات وسيطة متبقية.")
+    except Exception as e:
+        log(f"⚠️ تعذر تنظيف Workspace: {e}", "warning")
+
+
+async def main_pipeline():
+    started_total = time.time()
+
+    prepare_fresh_workspace()
+
+    log(
+        f"🚀 Universal Investigative Documentary Engine "
+        f"{ENGINE_VERSION}"
+    )
+    log(f"🎯 Topic: {CONFIG.topic}")
+
+    story_engine = StoryScoutEngine()
+    story = story_engine.inspect_and_plan()
+
+    audio_engine = MasterAudioStudio()
+    master_audio = audio_engine.produce_master_track(story)
+
+    slicer = WordSyncSlicer()
+
+    shots = slicer.align_and_slice(
+        master_audio,
+        story["part_1"] + "\n" + story["part_2"]
+    )
+
+    subtitle_path = CONFIG.work_dir / "subtitles.ass"
+    write_subtitles_ass(shots, subtitle_path)
+
+    media_results = await scout_all_media(shots, story)
+
+    assembly = AssemblyEngine()
+    rendered = []
+
+    log(f"🎬 بدء Render لـ {len(media_results)} لقطة...")
+
+    for item in media_results:
+        rendered_clip = assembly.render_sub_clip(item)
+        rendered.append(rendered_clip)
+
+    final_video = assembly.assemble_final_cut(
+        rendered,
+        subtitle_path
+    )
+
+    cleanup_workspace()
+
+    elapsed_total = time.time() - started_total
+
+    log(
+        f"🏁 اكتملت العملية بالكامل في "
+        f"{elapsed_total / 60:.2f} دقيقة."
+    )
+    log(f"📌 الفيديو النهائي: {final_video}")
+
+    return final_video
+
 
 if __name__ == "__main__":
-    asyncio.run(main_pipeline())
+    try:
+        asyncio.run(main_pipeline())
+
+    except KeyboardInterrupt:
+        log("🛑 تم إيقاف العملية بواسطة المستخدم.", "warning")
+        cleanup_workspace()
+        sys.exit(130)
+
+    except Exception as e:
+        log(f"💥 PIPELINE FAILED: {e}", "error")
+        cleanup_workspace()
+        sys.exit(1)
