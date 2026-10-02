@@ -1,4 +1,4 @@
-name: 🔐 Google OAuth → GitHub Secret
+name: 🔐 Google OAuth → GitHub Secret (Debug)
 
 on:
   workflow_dispatch:
@@ -15,6 +15,9 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   google-oauth:
     runs-on: ubuntu-latest
@@ -26,40 +29,39 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          set -e
+          set -euo pipefail
+          [ -n "$GOOGLE_CLIENT_ID" ] || { echo "❌ Secret GOOGLE_CLIENT_ID غير موجود."; exit 1; }
+          [ -n "$GOOGLE_CLIENT_SECRET" ] || { echo "❌ Secret GOOGLE_CLIENT_SECRET غير موجود."; exit 1; }
+          [ -n "$GH_PAT" ] || { echo "❌ Secret GH_PAT غير موجود."; exit 1; }
 
-          [ -n "$GOOGLE_CLIENT_ID" ] || {
-            echo "❌ Secret GOOGLE_CLIENT_ID غير موجود."
-            exit 1
-          }
-
-          [ -n "$GOOGLE_CLIENT_SECRET" ] || {
-            echo "❌ Secret GOOGLE_CLIENT_SECRET غير موجود."
-            exit 1
-          }
-
-          [ -n "$GH_PAT" ] || {
-            echo "❌ Secret GH_PAT غير موجود."
-            exit 1
-          }
-
-          echo "✅ GitHub/Google configuration موجود."
+          python3 - <<'PY'
+          import os, re
+          cid = os.environ["GOOGLE_CLIENT_ID"].strip()
+          print("✅ Secrets موجودة.")
+          print(f"🔎 GOOGLE_CLIENT_ID length: {len(cid)}")
+          print(f"🔎 GOOGLE_CLIENT_ID start: {cid[:20]!r}")
+          print(f"🔎 GOOGLE_CLIENT_ID end:   {cid[-30:]!r}")
+          print(f"🔎 Contains whitespace: {bool(re.search(r'\\s', cid))}")
+          print(f"🔎 Looks like Web OAuth client: {bool(re.fullmatch(r'\\d+-[A-Za-z0-9_-]+\\.apps\\.googleusercontent\\.com', cid))}")
+          PY
 
       - name: 🔗 Generate Google OAuth URL
         if: inputs.action == 'get_authorization_url'
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
         run: |
+          set -euo pipefail
           python3 - <<'PY'
-          import os
-          import urllib.parse
-          import secrets
+          import os, urllib.parse, re, secrets
 
-          client_id = os.environ["GOOGLE_CLIENT_ID"]
-
-          # هذا الرابط يجب أن يكون مضافًا حرفيًا إلى
-          # Authorized redirect URIs في Web application OAuth Client.
+          client_id = os.environ["GOOGLE_CLIENT_ID"].strip()
           redirect_uri = "https://developers.google.com/oauthplayground"
+
+          if not re.fullmatch(r"\d+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com", client_id):
+              raise SystemExit(
+                  "❌ GOOGLE_CLIENT_ID لا يطابق صيغة Web OAuth Client. "
+                  f"length={len(client_id)}, start={client_id[:20]!r}, end={client_id[-30:]!r}"
+              )
 
           scopes = [
               "https://www.googleapis.com/auth/youtube.upload",
@@ -67,7 +69,6 @@ jobs:
           ]
 
           state = secrets.token_urlsafe(32)
-
           params = {
               "client_id": client_id,
               "redirect_uri": redirect_uri,
@@ -79,27 +80,24 @@ jobs:
               "state": state,
           }
 
-          url = (
-              "https://accounts.google.com/o/oauth2/v2/auth?"
-              + urllib.parse.urlencode(params)
-          )
+          url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
 
-          print("")
-          print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-          print("🔐 GOOGLE OAUTH URL")
-          print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+          print("=" * 80)
+          print("✅ GOOGLE_CLIENT_ID passed validation")
+          print(f"Client ID length: {len(client_id)}")
+          print(f"Client ID start:  {client_id[:20]}")
+          print(f"Client ID end:    {client_id[-30:]}")
+          print("=" * 80)
+          print("🔗 GOOGLE OAUTH URL:")
           print(url)
-          print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-          print("")
-          print("1) افتح الرابط في المتصفح.")
-          print("2) سجل الدخول بحساب YouTube/Drive.")
-          print("3) وافق على الصلاحيات.")
-          print("4) سيعيدك Google إلى OAuth Playground.")
-          print("5) انسخ قيمة code من عنوان الصفحة.")
-          print("6) شغّل Workflow مرة ثانية واختر exchange_code.")
-          print("7) ضع الـcode في authorization_code.")
-          print("")
-          print("⚠️ لا تشارك Authorization Code مع أي شخص.")
+          print("=" * 80)
+          print("1) افتح الرابط أعلاه")
+          print("2) سجّل الدخول بحساب Google المطلوب")
+          print("3) وافق على الصلاحيات")
+          print("4) سيعيدك Google إلى OAuth Playground")
+          print("5) انسخ قيمة code من عنوان الصفحة")
+          print("6) شغّل workflow مرة ثانية واختر exchange_code")
+          print("7) الصق Authorization Code في authorization_code")
           PY
 
       - name: 🧪 Validate Authorization Code
@@ -107,14 +105,11 @@ jobs:
         env:
           AUTH_CODE: ${{ inputs.authorization_code }}
         run: |
-          set -e
-
-          [ -n "$AUTH_CODE" ] || {
-            echo "❌ لم تضع Authorization Code."
-            exit 1
-          }
-
+          set -euo pipefail
+          [ -n "$AUTH_CODE" ] || { echo "❌ لم تضع Authorization Code."; exit 1; }
           echo "✅ Authorization Code موجود."
+          echo "🔎 Code length: ${#AUTH_CODE}"
+          echo "🔒 Code value لن يتم طباعته."
 
       - name: 🔄 Exchange Authorization Code → Refresh Token
         if: inputs.action == 'exchange_code'
@@ -124,46 +119,46 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           AUTH_CODE: ${{ inputs.authorization_code }}
         run: |
-          set -e
+          set -euo pipefail
+
+          CLIENT_ID="$(printf '%s' "$GOOGLE_CLIENT_ID" | tr -d '\r\n' | sed 's/[[:space:]]*$//')"
+          CLIENT_SECRET="$(printf '%s' "$GOOGLE_CLIENT_SECRET" | tr -d '\r\n' | sed 's/[[:space:]]*$//')"
+          AUTH_CODE_CLEAN="$(printf '%s' "$AUTH_CODE" | tr -d '\r\n' | sed 's/[[:space:]]*$//')"
+          REDIRECT_URI="https://developers.google.com/oauthplayground"
+
+          echo "🔎 Token exchange client ID length: ${#CLIENT_ID}"
+          echo "🔎 Token exchange client ID start: ${CLIENT_ID:0:20}"
+          echo "🔎 Token exchange client ID end: ${CLIENT_ID: -30}"
 
           RESPONSE=$(curl -sS -X POST \
             "https://oauth2.googleapis.com/token" \
             -H "Content-Type: application/x-www-form-urlencoded" \
-            --data-urlencode "code=${AUTH_CODE}" \
-            --data-urlencode "client_id=${GOOGLE_CLIENT_ID}" \
-            --data-urlencode "client_secret=${GOOGLE_CLIENT_SECRET}" \
+            --data-urlencode "code=${AUTH_CODE_CLEAN}" \
+            --data-urlencode "client_id=${CLIENT_ID}" \
+            --data-urlencode "client_secret=${CLIENT_SECRET}" \
             --data-urlencode "grant_type=authorization_code" \
-            --data-urlencode \
-              "redirect_uri=https://developers.google.com/oauthplayground")
+            --data-urlencode "redirect_uri=${REDIRECT_URI}")
 
           python3 - "$RESPONSE" <<'PY'
-          import json
-          import sys
-
+          import json, sys
           data = json.loads(sys.argv[1])
-
           if "error" in data:
-              print("❌ Google OAuth failed:")
-              print(data.get("error"))
-              print(data.get("error_description", ""))
+              print("❌ Google OAuth token exchange failed:")
+              print("error:", data.get("error"))
+              print("description:", data.get("error_description", ""))
               raise SystemExit(1)
 
           refresh_token = data.get("refresh_token")
-
           if not refresh_token:
               print("❌ Google لم تُرجع Refresh Token.")
-              print("")
-              print("الأسباب الشائعة:")
-              print("- Authorization Code استُخدم سابقًا.")
-              print("- لم تتم إعادة الموافقة.")
-              print("- OAuth Client أو redirect_uri غير مطابق.")
+              print("قد يكون Authorization Code مستخدمًا سابقًا أو لم تتم إعادة الموافقة.")
               raise SystemExit(1)
 
-          with open("/tmp/google_refresh_token", "w") as f:
+          with open("/tmp/google_refresh_token", "w", encoding="utf-8") as f:
               f.write(refresh_token)
 
           print("✅ تم الحصول على Refresh Token بنجاح.")
-          print("🚫 لن يتم طباعة قيمة التوكن.")
+          print("🚫 قيمة Refresh Token لن يتم طباعتها.")
           PY
 
       - name: 🔐 Get GitHub repository public key
@@ -171,8 +166,7 @@ jobs:
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          set -e
-
+          set -euo pipefail
           curl -fsSL \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GH_PAT}" \
@@ -182,51 +176,36 @@ jobs:
 
           python3 - <<'PY'
           import json
-
-          with open("/tmp/github_public_key.json") as f:
+          with open("/tmp/github_public_key.json", encoding="utf-8") as f:
               data = json.load(f)
-
           if "key" not in data or "key_id" not in data:
-              print(json.dumps(data, indent=2))
+              print(json.dumps(data, indent=2, ensure_ascii=False))
               raise SystemExit("❌ لم أستطع الحصول على GitHub public key.")
-
           print("✅ GitHub public key obtained.")
           PY
 
       - name: 🔒 Encrypt Refresh Token
         if: inputs.action == 'exchange_code'
         run: |
-          set -e
-
+          set -euo pipefail
           python3 -m pip install --quiet pynacl
-
           python3 - <<'PY'
-          import base64
-          import json
+          import base64, json
           from nacl import encoding, public
 
-          with open("/tmp/github_public_key.json") as f:
+          with open("/tmp/github_public_key.json", encoding="utf-8") as f:
               github_key = json.load(f)
-
-          with open("/tmp/google_refresh_token") as f:
+          with open("/tmp/google_refresh_token", encoding="utf-8") as f:
               refresh_token = f.read().strip()
 
           public_key = public.PublicKey(
               github_key["key"].encode("utf-8"),
               encoding.Base64Encoder()
           )
+          encrypted = public.SealedBox(public_key).encrypt(refresh_token.encode("utf-8"))
+          encrypted_b64 = base64.b64encode(encrypted).decode("utf-8")
 
-          sealed_box = public.SealedBox(public_key)
-
-          encrypted = sealed_box.encrypt(
-              refresh_token.encode("utf-8")
-          )
-
-          encrypted_b64 = base64.b64encode(
-              encrypted
-          ).decode("utf-8")
-
-          with open("/tmp/encrypted_refresh_token", "w") as f:
+          with open("/tmp/encrypted_refresh_token", "w", encoding="utf-8") as f:
               f.write(encrypted_b64)
 
           print("✅ Refresh Token encrypted.")
@@ -237,11 +216,11 @@ jobs:
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          set -e
+          set -euo pipefail
 
           KEY_ID=$(python3 - <<'PY'
           import json
-          with open("/tmp/github_public_key.json") as f:
+          with open("/tmp/github_public_key.json", encoding="utf-8") as f:
               print(json.load(f)["key_id"])
           PY
           )
@@ -249,9 +228,7 @@ jobs:
           ENCRYPTED_VALUE=$(cat /tmp/encrypted_refresh_token)
 
           python3 - "$KEY_ID" "$ENCRYPTED_VALUE" > /tmp/secret_payload.json <<'PY'
-          import json
-          import sys
-
+          import json, sys
           print(json.dumps({
               "encrypted_value": sys.argv[2],
               "key_id": sys.argv[1]
@@ -275,14 +252,10 @@ jobs:
             exit 1
           fi
 
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "🎉 تم تحديث GOOGLE_REFRESH_TOKEN"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "✅ YouTube + Google Drive"
-          echo "🔐 التوكن مشفّر قبل إرساله إلى GitHub."
-          echo "🚫 لم يتم طباعة التوكن."
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🎉 تم تحديث GOOGLE_REFRESH_TOKEN بنجاح."
+          echo "✅ YouTube + Google Drive OAuth جاهزان."
+          echo "🔐 التوكن شُفّر قبل إرساله إلى GitHub."
+          echo "🚫 لم يتم طباعة أي Token."
 
       - name: 🧹 Cleanup
         if: always()
