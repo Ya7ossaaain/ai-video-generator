@@ -1,4 +1,4 @@
-name: V24.2 — 7 Scene Pilot (FIXED)
+name: V24.2 — 7 Scene Pilot (PRO MOTION EDITION)
 
 on:
   workflow_dispatch:
@@ -19,7 +19,6 @@ jobs:
       PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
       PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
       FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
-      # Thumbnail is intentionally off for this pilot: it saves Gemini requests and isolates video-pipeline testing.
       GENERATE_THUMBNAIL: '0'
       PYTHONUNBUFFERED: '1'
 
@@ -46,8 +45,6 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      # This installs agy ONLY on the ephemeral GitHub runner.
-      # It does not touch the user's Termux/Ubuntu installation.
       - name: Install Antigravity CLI
         run: |
           set -euo pipefail
@@ -71,7 +68,7 @@ jobs:
           agy --help >/dev/null 2>&1
           echo "✅ Antigravity CLI is ready and authenticated from AGY_CREDENTIALS."
 
-      - name: Run 7-scene fixed pilot
+      - name: Run PRO MOTION pilot
         run: python pipeline_V24_2_7SCENE_TEST.py
 
       - name: Verify FINAL master strictly
@@ -93,6 +90,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: V24.2-7scene-pilot-FIXED
+          name: V24.2-7scene-PRO-MOTION
           path: artifact/
           if-no-files-found: warn
