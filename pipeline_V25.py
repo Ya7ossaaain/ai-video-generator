@@ -3,7 +3,7 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V26 - FRESH WORKSPACE + 10-KEY GEMINI TTS ROTATION
+V26 - FRESH WORKSPACE + 10-KEY GEMINI TTS ROTATION + GOOGLE DRIVE & YOUTUBE UPLOAD
 
 - NO CACHE
 - NO REUSE OF PREVIOUS FILES
@@ -11,6 +11,7 @@ V26 - FRESH WORKSPACE + 10-KEY GEMINI TTS ROTATION
 - FULL narration TTS is generated in ONE request
 - Gemini keys rotate automatically
 - Every key switch is printed in the logs
+- Auto-uploads final render to Google Drive and YouTube via Refresh Token
 """
 
 import os
@@ -34,8 +35,13 @@ import requests
 from google import genai
 from google.genai import types
 
+# مكتبات الرفع إلى Google Drive و YouTube
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V26-FRESH-NO-CACHE-FULL-TTS-10KEY"
+
+ENGINE_VERSION = "V26-FRESH-NO-CACHE-FULL-TTS-10KEY-UPLOAD"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -118,6 +124,11 @@ class EngineConfig:
         self.openverse_client_secret = os.environ.get("OPENVERSE_CLIENT_SECRET", "")
         self.europeana_key = os.environ.get("EUROPEANA_API_KEY", "")
         self.openverse_token = os.environ.get("OPENVERSE_TOKEN", "")
+
+        # إعدادات جوجل للرفع
+        self.google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+        self.google_client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+        self.google_refresh_token = os.environ.get("GOOGLE_REFRESH_TOKEN", "")
 
 
 CONFIG = EngineConfig()
@@ -416,16 +427,6 @@ def is_rate_limit_error(error):
 
 
 class MasterAudioStudio:
-    """
-    TTS للنص الكامل دفعة واحدة.
-
-    - لا يقسم التعليق الصوتي إلى Part 1 / Part 2.
-    - لا ينشئ part1.wav أو part2.wav.
-    - يرسل النص الكامل إلى Gemini TTS في طلب واحد.
-    - عند فشل المفتاح أو وصوله إلى quota/rate-limit ينتقل للمفتاح التالي.
-    - لا يستخدم أي ملف صوتي سابق.
-    """
-
     def __init__(self):
         self.model = TTS_MODEL
 
@@ -618,13 +619,11 @@ class MasterAudioStudio:
         part1 = str(script["part_1"]).strip()
         part2 = str(script["part_2"]).strip()
 
-        # النص الكامل: لا يوجد تقسيم للصوت.
         full_narration = f"{part1}\n\n{part2}".strip()
 
         if not full_narration:
             raise RuntimeError("النص الكامل للتعليق الصوتي فارغ.")
 
-        # منع إعادة استخدام أي ملف صوتي قديم.
         if CONFIG.master_audio.exists():
             try:
                 CONFIG.master_audio.unlink()
@@ -1761,6 +1760,63 @@ class AssemblyEngine:
         return CONFIG.final_video
 
 
+class GoogleUploader:
+    """كلاس لرفع الفيديو تلقائياً إلى Google Drive و YouTube"""
+    def __init__(self, client_id, client_secret, refresh_token):
+        self.creds = None
+        if client_id and client_secret and refresh_token:
+            self.creds = Credentials(
+                token=None,
+                refresh_token=refresh_token,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=client_id,
+                client_secret=client_secret
+            )
+
+    def upload_to_drive(self, file_path, title):
+        if not self.creds:
+            log("⚠️️ بيانات اعتماد Google مفقودة، سيتم تخطي الرفع إلى Drive.", "warning")
+            return
+        try:
+            log(f"☁️ بدء الرفع إلى Google Drive: {title}")
+            service = build('drive', 'v3', credentials=self.creds, cache_discovery=False)
+            file_metadata = {'name': f"{title}.mp4"}
+            media = MediaFileUpload(str(file_path), mimetype='video/mp4', resumable=True)
+            file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+            log(f"✅ تم الرفع إلى Drive بنجاح! الرابط: https://drive.google.com/file/d/{file.get('id')}/view")
+        except Exception as e:
+            log(f"❌ فشل الرفع إلى Drive: {e}", "error")
+
+    def upload_to_youtube(self, file_path, title, description):
+        if not self.creds:
+            log("⚠️ بيانات اعتماد Google مفقودة، سيتم تخطي الرفع إلى YouTube.", "warning")
+            return
+        try:
+            log(f"▶️ بدء الرفع إلى YouTube: {title}")
+            service = build('youtube', 'v3', credentials=self.creds, cache_discovery=False)
+            body = {
+                'snippet': {
+                    'title': title,
+                    'description': description,
+                    'tags': ['وثائقي', 'تحقيق', 'تلقائي', 'AI'],
+                    'categoryId': '24' 
+                },
+                'status': {
+                    'privacyStatus': 'private' # يتم الرفع كفيديو خاص (Private) للتحكم فيه لاحقاً
+                }
+            }
+            media = MediaFileUpload(str(file_path), mimetype='video/mp4', resumable=True)
+            request = service.videos().insert(
+                part=','.join(body.keys()),
+                body=body,
+                media_body=media
+            )
+            response = request.execute()
+            log(f"✅ تم الرفع إلى YouTube بنجاح! الرابط: https://youtu.be/{response.get('id')}")
+        except Exception as e:
+            log(f"❌ فشل الرفع إلى YouTube: {e}", "error")
+
+
 def cleanup_workspace():
     if not CONFIG.work_dir.exists():
         return
@@ -1815,6 +1871,21 @@ async def main_pipeline():
         rendered,
         subtitle_path
     )
+
+    # ==========================================
+    # إضافة عملية الرفع إلى جوجل درايف ويوتيوب هنا
+    # ==========================================
+    uploader = GoogleUploader(CONFIG.google_client_id, CONFIG.google_client_secret, CONFIG.google_refresh_token)
+    
+    if uploader.creds:
+        log("🔄 جاري بدء عمليات الرفع إلى Google Services...")
+        
+        # الرفع إلى جوجل درايف
+        await asyncio.to_thread(uploader.upload_to_drive, final_video, CONFIG.topic_clean)
+        
+        # الرفع إلى يوتيوب
+        yt_description = f"وثائقي: {CONFIG.topic}\nتم الإنتاج آلياً بواسطة Universal Documentary Engine."
+        await asyncio.to_thread(uploader.upload_to_youtube, final_video, CONFIG.topic_clean, yt_description)
 
     cleanup_workspace()
 
