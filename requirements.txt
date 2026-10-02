@@ -3,5 +3,8 @@ google-genai>=1.0.0
 google-auth>=2.29.0
 google-api-python-client>=2.120.0
 openai-whisper>=20231117
-# Optional: V24.2 writes OTIO when installed; otherwise it writes a JSON timeline.
 opentimelineio>=0.17.0
+Pillow>=10.0.0
+rembg>=2.0.50
+numpy>=1.24.0
+opencv-python-headless>=4.8.0
