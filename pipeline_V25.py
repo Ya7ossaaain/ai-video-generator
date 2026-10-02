@@ -8,7 +8,7 @@ V26 - FRESH WORKSPACE + 10-KEY GEMINI TTS ROTATION
 - NO CACHE
 - NO REUSE OF PREVIOUS FILES
 - output_build is deleted completely at startup
-- Part 1 + Part 2 TTS run in parallel
+- FULL narration TTS is generated in ONE request
 - Gemini keys rotate automatically
 - Every key switch is printed in the logs
 """
@@ -35,7 +35,7 @@ from google import genai
 from google.genai import types
 
 
-ENGINE_VERSION = "V26-FRESH-NO-CACHE-10KEY-TTS"
+ENGINE_VERSION = "V26-FRESH-NO-CACHE-FULL-TTS-10KEY"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -416,10 +416,20 @@ def is_rate_limit_error(error):
 
 
 class MasterAudioStudio:
+    """
+    TTS للنص الكامل دفعة واحدة.
+
+    - لا يقسم التعليق الصوتي إلى Part 1 / Part 2.
+    - لا ينشئ part1.wav أو part2.wav.
+    - يرسل النص الكامل إلى Gemini TTS في طلب واحد.
+    - عند فشل المفتاح أو وصوله إلى quota/rate-limit ينتقل للمفتاح التالي.
+    - لا يستخدم أي ملف صوتي سابق.
+    """
+
     def __init__(self):
         self.model = TTS_MODEL
 
-    def _generate_chunk(self, text, out_wav, label):
+    def _generate_full_narration(self, full_text, out_wav):
         out_wav = Path(out_wav)
 
         if out_wav.exists():
@@ -438,7 +448,8 @@ class MasterAudioStudio:
 
             try:
                 log(
-                    f"🔑 Gemini Key #{display_key} → بدء TTS لـ {label} "
+                    f"🔑 Gemini Key #{display_key} → "
+                    f"بدء TTS للنص الكامل "
                     f"(محاولة {attempt + 1}/{total_keys})"
                 )
 
@@ -460,16 +471,18 @@ class MasterAudioStudio:
                 instruction = (
                     "[INSTRUCTION: "
                     "Chilling authoritative Arabic documentary narrator. "
-                    "Read the ENTIRE narration exactly. "
+                    "Read the ENTIRE narration exactly from beginning to end. "
                     "Do not summarize. "
-                    "Do not omit words. "
-                    "Do not add explanations. "
-                    "Preserve Arabic punctuation and wording.]"
+                    "Do not omit any words. "
+                    "Do not split the narration into separate sections. "
+                    "Do not add explanations or commentary. "
+                    "Preserve the exact Arabic wording and punctuation. "
+                    "Maintain one continuous cinematic narration.]"
                 )
 
                 response = client.models.generate_content(
                     model=self.model,
-                    contents=instruction + "\n\n" + text,
+                    contents=instruction + "\n\n" + full_text,
                     config=config
                 )
 
@@ -507,7 +520,7 @@ class MasterAudioStudio:
                 else:
                     temp_pcm = (
                         CONFIG.work_dir
-                        / f"{safe_filename(label)}_key{display_key}.pcm"
+                        / f"full_narration_key{display_key}.pcm"
                     )
 
                     with open(temp_pcm, "wb") as f:
@@ -525,7 +538,7 @@ class MasterAudioStudio:
                             "-ac", "1",
                             str(out_wav)
                         ],
-                        timeout=120
+                        timeout=180
                     )
 
                     try:
@@ -539,13 +552,18 @@ class MasterAudioStudio:
                 duration = probe_duration(out_wav)
 
                 if not is_valid_media(out_wav):
-                    raise RuntimeError("Generated WAV failed validation.")
+                    raise RuntimeError(
+                        "Generated full narration WAV failed validation."
+                    )
 
                 elapsed = time.time() - started
 
-                log(f"✅ {label} نجح باستخدام Gemini Key #{display_key}")
                 log(
-                    f"🎙️ {label}: {duration:.2f}s audio | "
+                    f"✅ النص الكامل نجح باستخدام Gemini Key "
+                    f"#{display_key}"
+                )
+                log(
+                    f"🎙️ Full Narration: {duration:.2f}s audio | "
                     f"{elapsed:.1f}s generation time"
                 )
 
@@ -556,12 +574,13 @@ class MasterAudioStudio:
 
                 if is_rate_limit_error(e):
                     log(
-                        f"⚠️ Gemini Key #{display_key} تعرض لـ Rate Limit / Quota.",
+                        f"⚠️ Gemini Key #{display_key} تعرض لـ "
+                        f"Rate Limit / Quota.",
                         "warning"
                     )
                 else:
                     log(
-                        f"❌ Gemini Key #{display_key} فشل في {label}: "
+                        f"❌ Gemini Key #{display_key} فشل في TTS الكامل: "
                         f"{error_text[:500]}",
                         "warning"
                     )
@@ -591,98 +610,57 @@ class MasterAudioStudio:
                 GEMINI_POOL.release(key_index)
 
         raise RuntimeError(
-            f"❌ انتهت جميع مفاتيح Gemini بدون نجاح لـ {label}."
+            "❌ انتهت جميع مفاتيح Gemini بدون نجاح "
+            "في توليد التعليق الصوتي الكامل."
         )
 
     def produce_master_track(self, script):
         part1 = str(script["part_1"]).strip()
         part2 = str(script["part_2"]).strip()
 
-        w1 = CONFIG.work_dir / "part1.wav"
-        w2 = CONFIG.work_dir / "part2.wav"
+        # النص الكامل: لا يوجد تقسيم للصوت.
+        full_narration = f"{part1}\n\n{part2}".strip()
 
-        for path in [w1, w2]:
-            if path.exists():
-                try:
-                    path.unlink()
-                except Exception:
-                    pass
+        if not full_narration:
+            raise RuntimeError("النص الكامل للتعليق الصوتي فارغ.")
 
-        log("🎙️ بدء إنتاج الصوت.")
-        log("⚡ سيتم توليد Part 1 و Part 2 بالتوازي.")
+        # منع إعادة استخدام أي ملف صوتي قديم.
+        if CONFIG.master_audio.exists():
+            try:
+                CONFIG.master_audio.unlink()
+            except Exception:
+                pass
 
-        workers = 2 if len(CONFIG.gemini_keys) >= 2 else 1
+        log("🎙️ بدء إنتاج التعليق الصوتي الكامل.")
+        log("🚫 لا يوجد تقسيم إلى Part 1 / Part 2.")
+        log("⚡ سيتم إرسال النص الكامل إلى Gemini TTS في طلب واحد.")
 
-        if workers == 1:
-            log(
-                "⚠️ يوجد مفتاح Gemini واحد فقط، "
-                "لذلك لن يكون هناك TTS متوازٍ.",
-                "warning"
-            )
+        total_words = len(full_narration.split())
+        log(f"📝 إجمالي النص المرسل إلى TTS: {total_words} كلمة.")
 
         started = time.time()
 
-        if workers == 2:
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                future1 = executor.submit(
-                    self._generate_chunk, part1, w1, "Part 1"
-                )
-                future2 = executor.submit(
-                    self._generate_chunk, part2, w2, "Part 2"
-                )
-
-                ok1 = future1.result()
-                ok2 = future2.result()
-        else:
-            ok1 = self._generate_chunk(part1, w1, "Part 1")
-            ok2 = self._generate_chunk(part2, w2, "Part 2")
+        ok = self._generate_full_narration(
+            full_narration,
+            CONFIG.master_audio
+        )
 
         elapsed = time.time() - started
 
-        if not ok1 or not ok2:
-            raise RuntimeError("فشل إنتاج أحد أجزاء الصوت.")
-
-        log(f"🎙️ اكتمل TTS المتوازي في {elapsed:.1f} ثانية.")
-
-        concat_file = CONFIG.work_dir / "audio_concat.txt"
-
-        with open(concat_file, "w", encoding="utf-8") as f:
-            f.write(f"file '{w1.resolve()}'\n")
-            f.write(f"file '{w2.resolve()}'\n")
-
-        if CONFIG.master_audio.exists():
-            CONFIG.master_audio.unlink()
-
-        log("🎚️ دمج الجزأين + Loudness normalization...")
-
-        result = run_cmd(
-            [
-                "ffmpeg", "-y",
-                "-f", "concat",
-                "-safe", "0",
-                "-i", str(concat_file),
-                "-filter_complex",
-                "[0:a]loudnorm=I=-16:TP=-1.5:LRA=11[aout]",
-                "-map", "[aout]",
-                "-c:a", "pcm_s16le",
-                "-ar", "48000",
-                "-ac", "1",
-                str(CONFIG.master_audio)
-            ],
-            timeout=300
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(
-                "FFmpeg master audio failed:\n" + result.stderr[-3000:]
-            )
+        if not ok:
+            raise RuntimeError("فشل إنتاج التعليق الصوتي الكامل.")
 
         duration = probe_duration(CONFIG.master_audio)
 
         if not is_valid_media(CONFIG.master_audio):
             raise RuntimeError("Master audio validation failed.")
 
-        log(f"✅ Master Audio جاهز: {duration:.2f} ثانية.")
+        log(
+            f"🎙️ اكتمل TTS الكامل في {elapsed:.1f} ثانية."
+        )
+        log(
+            f"🎚️ Master Audio: {duration:.2f} ثانية."
+        )
 
         return CONFIG.master_audio
 
