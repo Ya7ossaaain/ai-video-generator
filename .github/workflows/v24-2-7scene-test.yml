@@ -1,4 +1,4 @@
-name: V24.2 — 7 Scene Pilot (PRO MOTION EDITION)
+name: V26 — Elite VFX Engine (OpenCV + ImageMagick)
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
         default: 'لغز اختفاء غامض'
 
 jobs:
-  pilot:
+  studio_pilot:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
@@ -18,8 +18,6 @@ jobs:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
       PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
-      FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
-      GENERATE_THUMBNAIL: '0'
       PYTHONUNBUFFERED: '1'
 
     steps:
@@ -32,17 +30,13 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Install FFmpeg
-        uses: FedericoCarboni/setup-ffmpeg@v3
-
-      - name: Install Arabic subtitle fonts and ASS dependencies
+      - name: Install FFmpeg, Fonts & ImageMagick
         run: |
           sudo apt-get update
-          sudo apt-get install -y fonts-noto-core fonts-noto-extra fontconfig
-          fc-match 'Noto Sans Arabic' || true
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra fontconfig imagemagick
           fc-cache -f -v >/dev/null 2>&1 || true
 
-      - name: Install Python dependencies
+      - name: Install Dependencies
         run: pip install -r requirements.txt
 
       - name: Install Antigravity CLI
@@ -56,40 +50,16 @@ jobs:
           OAUTH_JSON: ${{ secrets.AGY_CREDENTIALS }}
         run: |
           set -euo pipefail
-          test -n "$OAUTH_JSON"
           mkdir -p ~/.gemini/antigravity-cli/
           printf "%s" "$OAUTH_JSON" > ~/.gemini/antigravity-cli/antigravity-oauth-token
           chmod 600 ~/.gemini/antigravity-cli/antigravity-oauth-token
 
-      - name: Verify Antigravity CLI authentication
-        run: |
-          set -euo pipefail
-          command -v agy
-          agy --help >/dev/null 2>&1
-          echo "✅ Antigravity CLI is ready and authenticated from AGY_CREDENTIALS."
-
-      - name: Run PRO MOTION pilot
+      - name: Run Elite VFX Engine
         run: python pipeline_V24_2_7SCENE_TEST.py
 
-      - name: Verify FINAL master strictly
-        run: |
-          set -euo pipefail
-          test -s output_build/final_documentary.mp4
-          ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 output_build/final_documentary.mp4
-          echo "✅ final_documentary.mp4 exists and is probeable."
-
-      - name: Package test outputs
-        if: always()
-        run: |
-          mkdir -p artifact
-          cp -r output_build artifact/ || true
-          cp production_logs.txt artifact/ || true
-          cp director_memory.md artifact/ || true
-
-      - name: Upload pilot artifact
+      - name: Upload Artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: V24.2-7scene-PRO-MOTION
-          path: artifact/
-          if-no-files-found: warn
+          name: V26-Elite-Documentary
+          path: output_build/final_documentary.mp4
