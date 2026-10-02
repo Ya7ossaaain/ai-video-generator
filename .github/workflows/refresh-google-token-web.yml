@@ -1,0 +1,296 @@
+name: 🔐 Google OAuth → GitHub Secret
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "اختر العملية"
+        required: true
+        type: choice
+        options:
+          - get_authorization_url
+          - exchange_code
+      authorization_code:
+        description: "ضع Authorization Code هنا فقط عند اختيار exchange_code"
+        required: false
+        type: string
+
+jobs:
+  google-oauth:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🔧 Check configuration
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          set -e
+
+          [ -n "$GOOGLE_CLIENT_ID" ] || {
+            echo "❌ Secret GOOGLE_CLIENT_ID غير موجود."
+            exit 1
+          }
+
+          [ -n "$GOOGLE_CLIENT_SECRET" ] || {
+            echo "❌ Secret GOOGLE_CLIENT_SECRET غير موجود."
+            exit 1
+          }
+
+          [ -n "$GH_PAT" ] || {
+            echo "❌ Secret GH_PAT غير موجود."
+            exit 1
+          }
+
+          echo "✅ GitHub/Google configuration موجود."
+
+      - name: 🔗 Generate Google OAuth URL
+        if: inputs.action == 'get_authorization_url'
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import urllib.parse
+          import secrets
+
+          client_id = os.environ["GOOGLE_CLIENT_ID"]
+
+          # هذا الرابط يجب أن يكون مضافًا حرفيًا إلى
+          # Authorized redirect URIs في Web application OAuth Client.
+          redirect_uri = "https://developers.google.com/oauthplayground"
+
+          scopes = [
+              "https://www.googleapis.com/auth/youtube.upload",
+              "https://www.googleapis.com/auth/drive",
+          ]
+
+          state = secrets.token_urlsafe(32)
+
+          params = {
+              "client_id": client_id,
+              "redirect_uri": redirect_uri,
+              "response_type": "code",
+              "scope": " ".join(scopes),
+              "access_type": "offline",
+              "prompt": "consent",
+              "include_granted_scopes": "true",
+              "state": state,
+          }
+
+          url = (
+              "https://accounts.google.com/o/oauth2/v2/auth?"
+              + urllib.parse.urlencode(params)
+          )
+
+          print("")
+          print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+          print("🔐 GOOGLE OAUTH URL")
+          print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+          print(url)
+          print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+          print("")
+          print("1) افتح الرابط في المتصفح.")
+          print("2) سجل الدخول بحساب YouTube/Drive.")
+          print("3) وافق على الصلاحيات.")
+          print("4) سيعيدك Google إلى OAuth Playground.")
+          print("5) انسخ قيمة code من عنوان الصفحة.")
+          print("6) شغّل Workflow مرة ثانية واختر exchange_code.")
+          print("7) ضع الـcode في authorization_code.")
+          print("")
+          print("⚠️ لا تشارك Authorization Code مع أي شخص.")
+          PY
+
+      - name: 🧪 Validate Authorization Code
+        if: inputs.action == 'exchange_code'
+        env:
+          AUTH_CODE: ${{ inputs.authorization_code }}
+        run: |
+          set -e
+
+          [ -n "$AUTH_CODE" ] || {
+            echo "❌ لم تضع Authorization Code."
+            exit 1
+          }
+
+          echo "✅ Authorization Code موجود."
+
+      - name: 🔄 Exchange Authorization Code → Refresh Token
+        if: inputs.action == 'exchange_code'
+        id: exchange
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          AUTH_CODE: ${{ inputs.authorization_code }}
+        run: |
+          set -e
+
+          RESPONSE=$(curl -sS -X POST \
+            "https://oauth2.googleapis.com/token" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "code=${AUTH_CODE}" \
+            --data-urlencode "client_id=${GOOGLE_CLIENT_ID}" \
+            --data-urlencode "client_secret=${GOOGLE_CLIENT_SECRET}" \
+            --data-urlencode "grant_type=authorization_code" \
+            --data-urlencode \
+              "redirect_uri=https://developers.google.com/oauthplayground")
+
+          python3 - "$RESPONSE" <<'PY'
+          import json
+          import sys
+
+          data = json.loads(sys.argv[1])
+
+          if "error" in data:
+              print("❌ Google OAuth failed:")
+              print(data.get("error"))
+              print(data.get("error_description", ""))
+              raise SystemExit(1)
+
+          refresh_token = data.get("refresh_token")
+
+          if not refresh_token:
+              print("❌ Google لم تُرجع Refresh Token.")
+              print("")
+              print("الأسباب الشائعة:")
+              print("- Authorization Code استُخدم سابقًا.")
+              print("- لم تتم إعادة الموافقة.")
+              print("- OAuth Client أو redirect_uri غير مطابق.")
+              raise SystemExit(1)
+
+          with open("/tmp/google_refresh_token", "w") as f:
+              f.write(refresh_token)
+
+          print("✅ تم الحصول على Refresh Token بنجاح.")
+          print("🚫 لن يتم طباعة قيمة التوكن.")
+          PY
+
+      - name: 🔐 Get GitHub repository public key
+        if: inputs.action == 'exchange_code'
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          set -e
+
+          curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_PAT}" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/secrets/public-key" \
+            > /tmp/github_public_key.json
+
+          python3 - <<'PY'
+          import json
+
+          with open("/tmp/github_public_key.json") as f:
+              data = json.load(f)
+
+          if "key" not in data or "key_id" not in data:
+              print(json.dumps(data, indent=2))
+              raise SystemExit("❌ لم أستطع الحصول على GitHub public key.")
+
+          print("✅ GitHub public key obtained.")
+          PY
+
+      - name: 🔒 Encrypt Refresh Token
+        if: inputs.action == 'exchange_code'
+        run: |
+          set -e
+
+          python3 -m pip install --quiet pynacl
+
+          python3 - <<'PY'
+          import base64
+          import json
+          from nacl import encoding, public
+
+          with open("/tmp/github_public_key.json") as f:
+              github_key = json.load(f)
+
+          with open("/tmp/google_refresh_token") as f:
+              refresh_token = f.read().strip()
+
+          public_key = public.PublicKey(
+              github_key["key"].encode("utf-8"),
+              encoding.Base64Encoder()
+          )
+
+          sealed_box = public.SealedBox(public_key)
+
+          encrypted = sealed_box.encrypt(
+              refresh_token.encode("utf-8")
+          )
+
+          encrypted_b64 = base64.b64encode(
+              encrypted
+          ).decode("utf-8")
+
+          with open("/tmp/encrypted_refresh_token", "w") as f:
+              f.write(encrypted_b64)
+
+          print("✅ Refresh Token encrypted.")
+          PY
+
+      - name: 📤 Update GOOGLE_REFRESH_TOKEN
+        if: inputs.action == 'exchange_code'
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          set -e
+
+          KEY_ID=$(python3 - <<'PY'
+          import json
+          with open("/tmp/github_public_key.json") as f:
+              print(json.load(f)["key_id"])
+          PY
+          )
+
+          ENCRYPTED_VALUE=$(cat /tmp/encrypted_refresh_token)
+
+          python3 - "$KEY_ID" "$ENCRYPTED_VALUE" > /tmp/secret_payload.json <<'PY'
+          import json
+          import sys
+
+          print(json.dumps({
+              "encrypted_value": sys.argv[2],
+              "key_id": sys.argv[1]
+          }))
+          PY
+
+          HTTP_CODE=$(curl -sS \
+            -o /tmp/github_response.json \
+            -w "%{http_code}" \
+            -X PUT \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_PAT}" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/secrets/GOOGLE_REFRESH_TOKEN" \
+            --data-binary @/tmp/secret_payload.json)
+
+          if [ "$HTTP_CODE" != "201" ] && [ "$HTTP_CODE" != "204" ]; then
+            echo "❌ فشل تحديث GitHub Secret: HTTP ${HTTP_CODE}"
+            cat /tmp/github_response.json
+            exit 1
+          fi
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🎉 تم تحديث GOOGLE_REFRESH_TOKEN"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ YouTube + Google Drive"
+          echo "🔐 التوكن مشفّر قبل إرساله إلى GitHub."
+          echo "🚫 لم يتم طباعة التوكن."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: 🧹 Cleanup
+        if: always()
+        run: |
+          rm -f \
+            /tmp/google_refresh_token \
+            /tmp/github_public_key.json \
+            /tmp/encrypted_refresh_token \
+            /tmp/secret_payload.json \
+            /tmp/github_response.json
+          echo "🧹 تم حذف الملفات المؤقتة."
