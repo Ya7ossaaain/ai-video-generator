@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-HYBRID V24.2 - PRO MOTION GRAPHICS EDITION
+HYBRID V26 - ELITE VFX EDITION (OpenCV + ImageMagick + Rembg + FFmpeg)
 """
 
 import os
@@ -20,144 +20,73 @@ import asyncio
 import urllib.parse
 import shutil
 
-try:
-    import opentimelineio as otio
-except Exception:
-    otio = None
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict
 
 import requests
+from PIL import Image, ImageFilter
+import numpy as np
+import cv2
+
+try:
+    from rembg import remove as remove_bg
+except ImportError:
+    remove_bg = None
+
 from google import genai
 from google.genai import types
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-
-ENGINE_VERSION = "V24.2-7SCENE-PRO-MOTION"
+ENGINE_VERSION = "V26-ELITE-VFX-STUDIO"
 TARGET_W = 1920
 TARGET_H = 1080
 TARGET_FPS = 30
 TARGET_AR = 48000
 TEST_SCENE_COUNT = 7
-TEST_MODE = True
-
 
 class ProTelemetryFormatter(logging.Formatter):
-    COLORS = {
-        "INFO": "\x1b[38;5;39m",
-        "WARNING": "\x1b[38;5;214m",
-        "ERROR": "\x1b[38;5;196m",
-    }
+    COLORS = {"INFO": "\x1b[38;5;39m", "WARNING": "\x1b[38;5;214m", "ERROR": "\x1b[38;5;196m"}
     RESET = "\x1b[0m"
-
     def format(self, record):
         color = self.COLORS.get(record.levelname, self.RESET)
-        fmt = f"{color}%(asctime)s | [%(levelname)s] | %(message)s{self.RESET}"
-        return logging.Formatter(fmt, datefmt="%H:%M:%S").format(record)
-
+        return logging.Formatter(f"{color}%(asctime)s | [%(levelname)s] | %(message)s{self.RESET}", datefmt="%H:%M:%S").format(record)
 
 def setup_logger():
-    logger = logging.getLogger("HybridMaster")
+    logger = logging.getLogger("StudioMaster")
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
     ch = logging.StreamHandler(sys.stdout)
     ch.setFormatter(ProTelemetryFormatter())
     logger.addHandler(ch)
-    fh = logging.FileHandler("production_logs.txt", encoding="utf-8")
-    logger.addHandler(fh)
-    logger.propagate = False
     return logger
 
-
 log = setup_logger()
-MEMORY_FILE = Path("director_memory.md")
-
-
-def append_memory(summary):
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(MEMORY_FILE, "a", encoding="utf-8") as f:
-        f.write(f"\n\n### [{now}]\n{summary}")
-
-
-def run_cmd(cmd, timeout=300, capture=False):
-    return subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
-        stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
-        text=True if capture else False,
-        timeout=timeout,
-    )
-
 
 def probe_duration(path):
     try:
-        r = subprocess.run(
-            [
-                "ffprobe", "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                str(path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if r.returncode != 0:
-            return 0.0
-        return float(r.stdout.strip())
-    except Exception:
-        return 0.0
-
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(path)], capture_output=True, text=True, timeout=30)
+        return float(r.stdout.strip()) if r.returncode == 0 else 0.0
+    except Exception: return 0.0
 
 def is_valid_media(path, minimum=1000):
     return path.exists() and path.is_file() and path.stat().st_size >= minimum and probe_duration(path) > 0.1
 
-
 def is_valid_visual(path, minimum=10000):
-    if not path.exists() or not path.is_file() or path.stat().st_size < minimum:
-        return False
+    if not path.exists() or not path.is_file() or path.stat().st_size < minimum: return False
     try:
-        r = subprocess.run(
-            [
-                "ffprobe", "-v", "error",
-                "-select_streams", "v:0",
-                "-show_entries", "stream=width,height",
-                "-of", "csv=p=0:s=x",
-                str(path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if r.returncode != 0:
-            return False
+        r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(path)], capture_output=True, text=True, timeout=30)
         m = re.search(r"(\d+)x(\d+)", r.stdout.strip())
         return bool(m and int(m.group(1)) > 0 and int(m.group(2)) > 0)
-    except Exception:
-        return False
-
+    except Exception: return False
 
 def enforce_english_query(query, max_chars=90):
-    query = str(query or "")
-    safe_q = re.sub(r"[\u0600-\u06FF]", "", query)
+    safe_q = re.sub(r"[\u0600-\u06FF]", "", str(query or ""))
     safe_q = re.sub(r"[^A-Za-z0-9,._' -]", " ", safe_q)
-    safe_q = re.sub(r"\s+", " ", safe_q).strip()
-    words, seen = [], set()
-    for word in safe_q.split():
-        key = word.lower()
-        if key not in seen:
-            seen.add(key)
-            words.append(word)
-    safe_q = " ".join(words)
-    if len(safe_q) < 2:
-        safe_q = "mystery evidence"
-    if len(safe_q) > max_chars:
-        safe_q = safe_q[:max_chars].rsplit(" ", 1)[0].strip()
-    return safe_q
-
+    safe_q = " ".join(dict.fromkeys(safe_q.split()))
+    return safe_q[:max_chars].rsplit(" ", 1)[0].strip() if len(safe_q) > max_chars else (safe_q if len(safe_q) >= 2 else "investigation evidence")
 
 class HybridConfig:
     topic = os.environ.get("VIDEO_TOPIC", "لغز الجريمة الغامضة")
@@ -167,984 +96,255 @@ class HybridConfig:
     paths = type("Paths", (), {
         "base": Path("./output_build"),
         "cache": Path(f"./output_build/cache/topic_{topic_key}"),
-        "manifest": Path(f"./output_build/manifests/manifest_{topic_key}.json"),
-        "edit_bible": Path(f"./output_build/manifests/edit_bible_{topic_key}.json"),
-        "timeline": Path(f"./output_build/manifests/timeline_{topic_key}.otio"),
+        "manifest": Path(f"./output_build/manifests/manifest_{topic_key}.json")
     })()
     gemini_keys = [k.strip() for k in os.environ.get("GEMINI_API_KEY", "").split(",") if k.strip()]
-    os.environ.pop("GEMINI_API_KEY", None)
     pexels = os.environ.get("PEXELS_API_KEY", "")
     pixabay = os.environ.get("PIXABAY_API_KEY", "")
-    freesound = os.environ.get("FREESOUND_API_KEY", "")
-    unsplash = os.environ.get("UNSPLASH_API_KEY", "")
-    mapbox = os.environ.get("MAPBOX_API_KEY", "")
-    opencage = os.environ.get("OPENCAGE_API_KEY", "")
-    apiflash = os.environ.get("APIFLASH_ACCESS_KEY", "")
-    newsapi = os.environ.get("NEWS_API_KEY", "")
-    nyt = os.environ.get("NYT_API_KEY", "")
-    thumbnail_model = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-3.8-flash")
-    thumbnail_enabled = os.environ.get("GENERATE_THUMBNAIL", "0").strip().lower() not in {"0", "false", "no"}
     groq_api_key = os.environ.get("GROQ_API_KEY", "").strip()
-    groq_model = os.environ.get("GROQ_STT_MODEL", "whisper-large-v3")
-    yt_id = os.environ.get("GOOGLE_CLIENT_ID", "")
-    yt_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
-    drive_token = os.environ.get("DRIVE_REFRESH_TOKEN", "")
-    yt_refresh = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
-    tts_model = os.environ.get("GEMINI_TTS_MODEL", "gemini-3.8-flash-tts")
-
-GROQ_PROMPT_MAX_CHARS = 468
 
 CONFIG = HybridConfig()
 CONFIG.paths.base.mkdir(parents=True, exist_ok=True)
 CONFIG.paths.cache.mkdir(parents=True, exist_ok=True)
 CONFIG.paths.manifest.parent.mkdir(parents=True, exist_ok=True)
 
+# ==============================================================================
+# ELITE VFX COMPOSITOR (محرك المؤثرات البصرية للصور الثابتة)
+# ==============================================================================
+class AdvancedVFXStudio:
+    @staticmethod
+    def create_cyber_scan(img_path: Path, out_path: Path) -> bool:
+        """يستخدم OpenCV لتحويل الصورة إلى ماسح استخباراتي نيون (Wireframe Edge Detection)"""
+        try:
+            img = cv2.imread(str(img_path))
+            if img is None: return False
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            # استخراج الحواف
+            edges = cv2.Canny(gray, 70, 150)
+            
+            # صناعة التوهج النيون (لون سيان استخباراتي)
+            neon_color = (255, 255, 0) # Cyan in BGR
+            neon_img = np.zeros_like(img)
+            neon_img[edges == 255] = neon_color
+            
+            # دمج التوهج (Bloom effect)
+            blur = cv2.GaussianBlur(neon_img, (9, 9), 0)
+            final_hologram = cv2.addWeighted(neon_img, 1.5, blur, 2.0, 0)
+            
+            # دمج الحواف المضيئة مع الصورة الأصلية بعد تعتيمها
+            dark_bg = cv2.convertScaleAbs(img, alpha=0.3, beta=-30)
+            composite = cv2.addWeighted(dark_bg, 0.8, final_hologram, 1.0, 0)
+            
+            cv2.imwrite(str(out_path), composite)
+            log.info(f"🧬 OpenCV Cyber Scan Created: {out_path.name}")
+            return True
+        except Exception as e:
+            log.warning(f"⚠️ فشل تأثير OpenCV: {e}")
+            return False
 
-def _safe_json_get(url, params=None, headers=None, timeout=25):
-    try:
-        r = requests.get(url, params=params or {}, headers=headers or {}, timeout=timeout)
-        if r.status_code >= 400:
-            return None
-        return r.json()
-    except Exception:
-        return None
+    @staticmethod
+    def create_grunge_archive(img_path: Path, out_path: Path) -> bool:
+        """يستخدم ImageMagick لصناعة ملمس حبر الجرائد القديمة (Halftone Dithering)"""
+        try:
+            # نستدعي أمر convert الخاص بـ ImageMagick
+            cmd = [
+                "convert", str(img_path),
+                "-colorspace", "gray",
+                "-contrast-stretch", "2%x98%",
+                "-ordered-dither", "h8x8a",
+                str(out_path)
+            ]
+            subprocess.run(cmd, check=True, capture_output=True, timeout=30)
+            log.info(f"📰 ImageMagick Grunge Archive Created: {out_path.name}")
+            return True
+        except Exception as e:
+            log.warning(f"⚠️ فشل تأثير ImageMagick: {e}")
+            return False
 
-def gather_research_context(topic):
-    blocks = []
-    if CONFIG.newsapi:
-        data = _safe_json_get("https://newsapi.org/v2/everything", {"q": topic, "language": "en", "sortBy": "relevancy", "pageSize": 8, "apiKey": CONFIG.newsapi})
-        if data:
-            arts = data.get("articles", [])[:8]
-            if arts: blocks.append("NEWSAPI:\n" + "\n".join(f"- {a.get('title','')} | {a.get('url','')}" for a in arts if a.get('title')))
-    if CONFIG.nyt:
-        data = _safe_json_get("https://api.nytimes.com/svc/search/v2/articlesearch.json", {"q": topic, "sort": "relevance", "api-key": CONFIG.nyt}, timeout=20)
-        if data:
-            docs = data.get("response", {}).get("docs", [])[:6]
-            if docs: blocks.append("NYT:\n" + "\n".join(f"- {d.get('headline',{}).get('main','')} | {d.get('web_url','')}" for d in docs if d.get('headline')))
-    wd = _safe_json_get("https://www.wikidata.org/w/api.php", {"action":"wbsearchentities", "search":topic, "language":"en", "format":"json", "limit":5})
-    if wd:
-        ents = wd.get("search", [])[:5]
-        if ents: blocks.append("WIKIDATA:\n" + "\n".join(f"- {e.get('id')} | {e.get('label','')} | {e.get('description','')}" for e in ents))
-    return "\n\n".join(blocks)[:12000]
+    @staticmethod
+    def create_paper_cutout(img_path: Path, out_path: Path) -> bool:
+        """يستخدم Rembg و Pillow لصناعة القصاصات الورقية"""
+        try:
+            inp = Image.open(img_path).convert("RGBA")
+            cutout = remove_bg(inp) if remove_bg else inp
+            alpha = cutout.split()[-1]
+            stroke_mask = alpha.filter(ImageFilter.MaxFilter(17)).filter(ImageFilter.SMOOTH)
+            stroke_img = Image.new("RGBA", cutout.size, (245, 245, 240, 255))
+            paper_sticker = Image.composite(stroke_img, Image.new("RGBA", cutout.size, (0, 0, 0, 0)), stroke_mask)
+            paper_sticker.paste(cutout, (0, 0), cutout)
+            
+            canvas = Image.new("RGBA", (TARGET_W, TARGET_H), (20, 22, 24, 255))
+            noise = np.random.randint(25, 38, (TARGET_H, TARGET_W, 3), dtype=np.uint8)
+            canvas = Image.blend(canvas, Image.fromarray(noise).convert("RGBA"), 0.4)
 
-def _default_edit_bible():
-    return {
-        "version": "24.2",
-        "visual_language": "premium investigative documentary; restrained, cinematic, editorial rather than flashy",
-        "pacing": {
-            "default_change_seconds": [1.5, 3.5],
-            "high_tension_seconds": [0.5, 1.6],
-            "explanation_seconds": [2.2, 5.0],
-            "evidence_seconds": [1.4, 3.8],
-            "allow_long_shot_seconds": 6.0
-        },
-        "camera": ["slow_push", "slow_pull", "lateral_drift", "static_with_micro_motion"],
-        "transitions": ["hard_cut", "dip_black", "match_cut", "soft_dissolve"],
-        "graphics": {"style": "minimal evidence graphics", "accent": "single restrained accent", "avoid": ["random_glitch", "overuse_of_hud"]},
-        "subtitles": {"style": "clean_arabic_cinematic", "alignment": 2},
-        "sound": {"duck_music_on_narration": True, "use_silence_for_revelations": True},
-        "continuity": {"avoid_repeated_media": True, "avoid_repeated_transition": True, "preserve_motif": True}
-    }
+            sticker_ratio = min((TARGET_W * 0.7) / paper_sticker.width, (TARGET_H * 0.75) / paper_sticker.height)
+            new_size = (int(paper_sticker.width * sticker_ratio), int(paper_sticker.height * sticker_ratio))
+            paper_sticker = paper_sticker.resize(new_size, Image.Resampling.LANCZOS).rotate(3.5, expand=True)
 
-def normalize_edit_bible(data):
-    base = _default_edit_bible()
-    if not isinstance(data, dict): return base
-    for k,v in data.items():
-        if isinstance(v, dict) and isinstance(base.get(k), dict):
-            base[k].update(v)
-        else:
-            base[k] = v
-    return base
+            pos_x, pos_y = (TARGET_W - paper_sticker.width) // 2, (TARGET_H - paper_sticker.height) // 2
+            canvas.paste(paper_sticker, (pos_x, pos_y), paper_sticker)
+            canvas.convert("RGB").save(out_path, "JPEG", quality=95)
+            log.info(f"✂️ Rembg Paper Cutout Created: {out_path.name}")
+            return True
+        except Exception: return False
 
-def save_edit_bible(bible):
-    CONFIG.paths.edit_bible.write_text(json.dumps(bible, ensure_ascii=False, indent=2), encoding="utf-8")
 
-def write_otio_timeline(clips, final_path, scene_directives=None):
-    if otio is None:
-        payload=[]
-        for i,c in enumerate(clips):
-            payload.append({"index":i,"path":str(Path(c).resolve()),"duration":probe_duration(c),"directive":(scene_directives or [None]*len(clips))[i] if i < len(scene_directives or []) else None})
-        final_path.with_suffix(".json").write_text(json.dumps(payload,ensure_ascii=False,indent=2),encoding="utf-8")
-        return
-    tl=otio.schema.Timeline(name=f"V24.2 | {CONFIG.topic}")
-    track=otio.schema.Track(name="MASTER_VIDEO")
-    for i,c in enumerate(clips):
-        dur=probe_duration(c)
-        rate=TARGET_FPS
-        clip=otio.schema.Clip(name=Path(c).stem, media_reference=otio.schema.ExternalReference(target_url=Path(c).resolve().as_uri()))
-        clip.source_range=otio.opentime.TimeRange(start_time=otio.opentime.RationalTime(0,rate), duration=otio.opentime.RationalTime(max(1,int(round(dur*rate))),rate))
-        track.append(clip)
-    tl.tracks.append(track)
-    otio.adapters.write_to_file(tl, str(final_path), adapter_name="otio_json")
-
+# ==============================================================================
+# PRO DIRECTOR 
+# ==============================================================================
 class Hybrid_Director:
     def plan_documentary(self) -> List[Dict]:
-        if CONFIG.paths.manifest.exists():
-            try:
-                data = json.loads(CONFIG.paths.manifest.read_text(encoding="utf-8"))
-                if isinstance(data, list) and data:
-                    if data and all(isinstance(x, dict) and bool(x.get("beat_plan")) for x in data):
-                        if not CONFIG.paths.edit_bible.exists(): save_edit_bible(_default_edit_bible())
-                        return data
-            except Exception: pass
-
-        research = gather_research_context(CONFIG.topic)
-        prompt = f'''أنت كبير المخرجين ومخطط أفلام وثائقية تحقيقية.
+        prompt = f'''أنت Showrunner ومخرج وثائقيات استقصائية.
 القضية: "{CONFIG.topic}"
-للاختبار الحالي أنشئ 7 مشاهد مترابطة فقط، لكن خطط الإيقاع البصري للحلقة كاملة قبل التنفيذ.
-كل مشهد يجب أن يحتوي على تعليق صوتي عربي أصلي بطول تقريبي 95 إلى 125 كلمة.
-أخرج JSON Object واحداً يحتوي على: edit_bible و scenes.
-edit_bible يجب أن يحدد لغة بصرية واحدة للحلقة، قواعد pacing، camera movement، transition vocabulary.
-لكل مشهد أخرج: scene_num, media_type, search_query, foley_type, narration, attention_level, visual_role, beat_plan, camera_motion, transition_in, transition_out, graphic_intent.
-media_type المسموح: PEXELS, PIXABAY, UNSPLASH, WIKIMEDIA, WIKIPEDIA, ARCHIVE, MAPBOX, APIFLASH.
-search_query إنجليزية فقط، narration عربية.
-{research or "لا توجد نتائج بحث إضافية متاحة."}
-أخرج JSON Object فقط بلا Markdown.
-''' 
-        for round_num in range(3):
-            try:
-                cmd = ["agy", "--model", "gemini-3.1-pro", "--effort", "high", "--dangerously-skip-permissions", "-p", prompt]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=360)
-                if result.returncode != 0:
-                    time.sleep(5)
-                    continue
-                match = re.search(r"\{[\s\S]*\}", result.stdout)
-                if not match:
-                    time.sleep(5)
-                    continue
-                data = json.loads(match.group(0))
-                if isinstance(data, list):
-                    data = {"edit_bible": _default_edit_bible(), "scenes": data}
-                if not isinstance(data, dict) or not data.get("scenes"):
-                    continue
-                bible = normalize_edit_bible(data.get("edit_bible"))
-                save_edit_bible(bible)
-                cleaned = []
-                for n, s in enumerate(data.get("scenes", []), 1):
-                    if not isinstance(s, dict): continue
-                    cleaned.append({
-                        "scene_num": n,
-                        "media_type": str(s.get("media_type", "WIKIPEDIA")).upper() if str(s.get("media_type", "WIKIPEDIA")).upper() in {"PEXELS","PIXABAY","UNSPLASH","WIKIMEDIA","WIKIPEDIA","ARCHIVE","MAPBOX","APIFLASH"} else "WIKIPEDIA",
-                        "search_query": enforce_english_query(s.get("search_query", "mystery evidence")),
-                        "foley_type": str(s.get("foley_type", "none")),
-                        "narration": str(s.get("narration", "")).strip(),
-                        "attention_level": str(s.get("attention_level", "MEDIUM")).upper(),
-                        "visual_role": str(s.get("visual_role", "BROLL")),
-                        "beat_plan": s.get("beat_plan", []) if isinstance(s.get("beat_plan", []), list) else [],
-                        "camera_motion": str(s.get("camera_motion", "slow_push")),
-                        "transition_in": str(s.get("transition_in", "hard_cut")),
-                        "transition_out": str(s.get("transition_out", "hard_cut")),
-                        "graphic_intent": str(s.get("graphic_intent", "none")),
-                    })
-                CONFIG.paths.manifest.write_text(json.dumps(cleaned, ensure_ascii=False, indent=2), encoding="utf-8")
-                return cleaned
-            except Exception:
-                time.sleep(5)
-        raise RuntimeError("🛑 فشل إنشاء السيناريو بعد 3 جولات.")
+المطلوب 7 مشاهد تشكل قصة مشدودة.
+اختر "visual_style" بدقة:
+- "PAPER_COLLAGE": للوثائق والأدلة الجنائية (قص ورق ستوب موشن).
+- "CYBER_SCAN": للأدلة التقنية والخطيرة (تحويل الصورة لمسح شبكي نيون ثلاثي الأبعاد).
+- "GRUNGE_ARCHIVE": للصور التاريخية والمشتبه بهم (ملمس حبر جرائد قديمة ومرعب).
+- "CINEMATIC_PARALLAX": للمشاهد الوثائقية العامة بحركة ناعمة.
 
-    async def _async_evaluate_scout(self, media_path, narration, source):
-        prompt = f'''أنت المراجع البصري الفوري لفيلم وثائقي بعنوان "{CONFIG.topic}".
-نوع المصدر: {source}
-التعليق الصوتي: "{narration}"
-الوسيط المراد فحصه:
-{Path(media_path).resolve()}
-إذا كان الإصدار لا يدعم إرفاق الملف أرجع decision="REJECT".
-أخرج JSON فقط: {{"decision":"ACCEPT","score":0.85,"reason":"...","montage":"NORMAL","new_query":"English query"}}
+لكل مشهد أخرج:
+scene_num, media_type (PEXELS, PIXABAY, WIKIPEDIA, ARCHIVE), search_query (English), narration (Arabic 95-120 words), visual_style, camera_motion (slow_push, slow_pull, lateral_drift).
+أخرج JSON فقط (مصفوفة Scenes).
 '''
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "agy", "--model", "gemini-3.8-flash", "--effort", "high",
-                "--dangerously-skip-permissions", "-p", prompt,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
-            if proc.returncode != 0:
-                raise RuntimeError(stderr.decode("utf-8", "ignore")[-1000:])
-            return stdout.decode("utf-8", "ignore").strip()
-        except Exception:
-            return ""
-
-    def evaluate_scene_with_scout(self, media_path, narration, source):
-        try:
-            result_text = str(asyncio.run(self._async_evaluate_scout(media_path, narration, source))).strip()
-            if not result_text:
-                return {"accepted": False, "montage": "NORMAL", "new_query": "investigation evidence", "score": 0.0, "reason": "Empty"}
-            match = re.search(r"\{[\s\S]*\}", result_text)
-            if not match:
-                return {"accepted": False, "montage": "NORMAL", "new_query": "archival evidence", "score": 0.0, "reason": "Parse error"}
-            data = json.loads(match.group(0))
-            score = max(0.0, min(1.0, float(data.get("score", 0))))
-            decision = str(data.get("decision", "")).upper()
-            return {
-                "accepted": decision == "ACCEPT" and score >= 0.60,
-                "montage": str(data.get("montage", "NORMAL")),
-                "new_query": enforce_english_query(data.get("new_query", "")),
-                "score": score,
-                "reason": str(data.get("reason", "")),
-            }
-        except Exception as e:
-            return {"accepted": False, "montage": "NORMAL", "new_query": "", "score": 0.0, "reason": str(e)}
+        for _ in range(3):
+            try:
+                res = subprocess.run(["agy", "--model", "gemini-3.1-pro", "--effort", "high", "--dangerously-skip-permissions", "-p", prompt], capture_output=True, text=True, timeout=360)
+                match = re.search(r"\[[\s\S]*\]", res.stdout)
+                if match:
+                    scenes = json.loads(match.group(0))[:TEST_SCENE_COUNT]
+                    CONFIG.paths.manifest.write_text(json.dumps(scenes, ensure_ascii=False, indent=2), encoding="utf-8")
+                    return scenes
+            except Exception: time.sleep(4)
+        raise RuntimeError("فشل تخطيط السيناريو")
 
     def generate_voice(self, text, out_wav):
         if not CONFIG.gemini_keys: return False
-        cfg = types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Charon"))
-            ),
-        )
-        total_attempts = max(6, len(CONFIG.gemini_keys) * 4)
-        attempt = 0
-        while attempt < total_attempts:
-            key = CONFIG.gemini_keys[attempt % len(CONFIG.gemini_keys)]
-            attempt += 1
+        cfg = types.GenerateContentConfig(response_modalities=["AUDIO"], speech_config=types.SpeechConfig(voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Charon"))))
+        for key in CONFIG.gemini_keys * 3:
             try:
-                client = genai.Client(api_key=key)
-                res = client.models.generate_content(
-                    model=CONFIG.tts_model,
-                    contents="[INSTRUCTION: Deep chilling narrator. Natural Arabic documentary delivery. Do not shorten the text.]\n" + text,
-                    config=cfg,
-                )
-                part = res.candidates[0].content.parts[0]
-                audio = part.inline_data.data
-                mime = getattr(part.inline_data, "mime_type", "") or ""
-                raw = base64.b64decode(audio) if isinstance(audio, str) else audio
-                if raw[:4] == b"RIFF":
-                    out_wav.write_bytes(raw)
+                res = genai.Client(api_key=key).models.generate_content(model="gemini-3.8-flash-tts", contents="[INSTRUCTION: Chilling authoritative Arabic documentary narrator. Do not shorten narration.]\n" + text, config=cfg)
+                raw = base64.b64decode(res.candidates[0].content.parts[0].inline_data.data)
+                if raw[:4] == b"RIFF": out_wav.write_bytes(raw)
                 else:
-                    tmp_pcm = out_wav.with_suffix(".pcm")
-                    tmp_pcm.write_bytes(raw)
-                    rate_match = re.search(r"rate=(\d+)", mime)
-                    sample_rate = int(rate_match.group(1)) if rate_match else 24000
-                    r = subprocess.run([
-                        "ffmpeg", "-y", "-f", "s16le", "-ar", str(sample_rate), "-ac", "1",
-                        "-i", str(tmp_pcm), "-c:a", "pcm_s16le", str(out_wav)
-                    ], capture_output=True, text=True, timeout=60)
-                    try: tmp_pcm.unlink()
+                    tmp = out_wav.with_suffix(".pcm")
+                    tmp.write_bytes(raw)
+                    subprocess.run(["ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", str(tmp), "-c:a", "pcm_s16le", str(out_wav)], capture_output=True)
+                    try: tmp.unlink()
                     except Exception: pass
-                if is_valid_media(out_wav, 1000):
-                    time.sleep(8)
-                    return True
-            except Exception as e:
-                msg = str(e)
-                if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                    time.sleep(min(60, 12 * (2 ** min(attempt - 1, 2))))
-                elif "503" in msg or "UNAVAILABLE" in msg:
-                    time.sleep(min(45, 8 * (2 ** min(attempt - 1, 2))))
-                else:
-                    time.sleep(3)
+                if is_valid_media(out_wav, 1000): return True
+            except Exception: time.sleep(3)
         return False
-
-
-class MediaFetcher:
-    def __init__(self):
-        self.h = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Referer": "https://en.wikipedia.org/",
-        }
-
-    def _get(self, url, **kwargs):
-        kwargs.setdefault("timeout", 30)
-        kwargs.setdefault("headers", self.h)
-        r = requests.get(url, **kwargs)
-        r.raise_for_status()
-        return r
-
-    def fetch_media(self, source, query, out, index):
-        safe_query = enforce_english_query(query)
-        try:
-            if source == "PEXELS":
-                if not CONFIG.pexels: return False
-                r = self._get("https://api.pexels.com/videos/search", params={"query": safe_query, "orientation": "landscape", "per_page": 10}, headers={"Authorization": CONFIG.pexels, "User-Agent": self.h["User-Agent"]})
-                videos = r.json().get("videos", [])
-                if len(videos) <= index: return False
-                files = sorted(videos[index].get("video_files", []), key=lambda x: x.get("width", 0), reverse=True)
-                if not files or not files[0].get("link"): return False
-                out.write_bytes(self._get(files[0]["link"], timeout=90).content)
-                return is_valid_media(out, 50000)
-            if source == "PIXABAY":
-                if not CONFIG.pixabay: return False
-                r = self._get("https://pixabay.com/api/videos/", params={"key": CONFIG.pixabay, "q": safe_query[:100], "per_page": 10})
-                hits = r.json().get("hits", [])
-                if len(hits) <= index: return False
-                vids = hits[index].get("videos", {})
-                info = vids.get("large") or vids.get("medium") or vids.get("small")
-                if not info or not info.get("url"): return False
-                out.write_bytes(self._get(info["url"], timeout=90).content)
-                return is_valid_media(out, 50000)
-            if source == "WIKIPEDIA":
-                r = self._get("https://en.wikipedia.org/w/api.php", params={"action":"query","generator":"search","gsrsearch":safe_query,"gsrnamespace":0,"gsrlimit":10,"prop":"pageimages","piprop":"thumbnail","pithumbsize":1920,"format":"json"})
-                pages = [p for p in r.json().get("query", {}).get("pages", {}).values() if p.get("thumbnail", {}).get("source")]
-                if not pages: return False
-                out.write_bytes(self._get(pages[index % len(pages)]["thumbnail"]["source"], timeout=60).content)
-                return is_valid_visual(out, 10000)
-            if source == "ARCHIVE":
-                r = self._get("https://archive.org/advancedsearch.php", params={"q": f"{safe_query} AND mediatype:image", "fl[]":"identifier", "output":"json", "rows":10})
-                docs = r.json().get("response", {}).get("docs", [])
-                if len(docs) <= index: return False
-                identifier = docs[index].get("identifier")
-                if not identifier: return False
-                url = "https://archive.org/services/img/" + urllib.parse.quote(identifier)
-                out.write_bytes(self._get(url, timeout=60).content)
-                return is_valid_visual(out, 10000)
-            if source == "UNSPLASH":
-                if not CONFIG.unsplash: return False
-                r = self._get("https://api.unsplash.com/search/photos", params={"query":safe_query,"orientation":"landscape","per_page":10,"client_id":CONFIG.unsplash})
-                results = r.json().get("results", [])
-                if len(results) <= index: return False
-                url = results[index].get("urls", {}).get("regular") or results[index].get("urls", {}).get("full")
-                if not url: return False
-                out.write_bytes(self._get(url, timeout=60).content)
-                return is_valid_visual(out, 10000)
-            if source == "WIKIMEDIA":
-                commons = _safe_json_get("https://commons.wikimedia.org/w/api.php", {"action":"query","generator":"search","gsrsearch":safe_query,"gsrnamespace":6,"gsrlimit":10,"prop":"imageinfo","iiprop":"url","iiurlwidth":1920,"format":"json"}, timeout=30)
-                if commons:
-                    pages = list(commons.get("query", {}).get("pages", {}).values())
-                    urls=[]
-                    for pg in pages:
-                        ii=(pg.get("imageinfo") or [{}])[0]
-                        u=ii.get("thumburl") or ii.get("url")
-                        if u: urls.append(u)
-                    if urls:
-                        out.write_bytes(self._get(urls[index % len(urls)], timeout=60).content)
-                        return is_valid_visual(out,10000)
-                r = self._get("https://en.wikipedia.org/w/api.php", params={"action":"query","generator":"search","gsrsearch":safe_query,"gsrnamespace":0,"gsrlimit":10,"prop":"pageimages","piprop":"thumbnail","pithumbsize":1920,"format":"json"})
-                pages=[p for p in r.json().get("query", {}).get("pages", {}).values() if p.get("thumbnail", {}).get("source")]
-                if not pages: return False
-                out.write_bytes(self._get(pages[index % len(pages)]["thumbnail"]["source"], timeout=60).content)
-                return is_valid_visual(out,10000)
-            if source == "MAPBOX":
-                if not CONFIG.mapbox: return False
-                coords = None
-                mb = _safe_json_get("https://api.mapbox.com/geocoding/v5/mapbox.places/" + urllib.parse.quote(safe_query) + ".json", {"access_token":CONFIG.mapbox,"limit":1,"language":"en"})
-                if mb and mb.get("features"): coords = mb["features"][0].get("center")
-                if not coords and CONFIG.opencage:
-                    oc = _safe_json_get("https://api.opencagedata.com/geocode/v1/json", {"q":safe_query,"key":CONFIG.opencage,"limit":1,"language":"en"})
-                    if oc and oc.get("results"):
-                        g=oc["results"][0].get("geometry",{})
-                        if "lng" in g and "lat" in g: coords=[g["lng"],g["lat"]]
-                if not coords: return False
-                lon,lat=coords
-                url=f"https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/pin-s+ff0000({lon},{lat})/{lon},{lat},11/1280x720?access_token={CONFIG.mapbox}"
-                out.write_bytes(self._get(url, timeout=60).content)
-                return is_valid_visual(out, 10000)
-            if source == "APIFLASH":
-                if not CONFIG.apiflash: return False
-                target="https://en.wikipedia.org/wiki/"+urllib.parse.quote(safe_query.replace(" ","_"),safe="_")
-                r=self._get("https://api.apiflash.com/v1/urltoimage",params={"access_key":CONFIG.apiflash,"url":target,"format":"jpeg","width":1280,"height":720,"fresh":"true"},timeout=90)
-                out.write_bytes(r.content)
-                return is_valid_visual(out,10000)
-            if source == "FREESOUND":
-                if not CONFIG.freesound: return False
-                r = self._get("https://freesound.org/apiv2/search/text/", params={"query":safe_query,"token":CONFIG.freesound,"fields":"previews","page_size":5})
-                results = r.json().get("results", [])
-                if not results: return False
-                url = results[0].get("previews", {}).get("preview-hq-mp3")
-                if not url: return False
-                out.write_bytes(self._get(url, timeout=60).content)
-                return out.exists() and out.stat().st_size > 1000
-        except Exception:
-            pass
-        return False
-
-
-def get_source_pool(media_type):
-    pools = {
-        "PEXELS":["PEXELS","PEXELS","PIXABAY","PIXABAY","UNSPLASH","WIKIPEDIA","ARCHIVE"],
-        "PIXABAY":["PIXABAY","PIXABAY","PEXELS","PEXELS","UNSPLASH","WIKIPEDIA","ARCHIVE"],
-        "UNSPLASH":["UNSPLASH","UNSPLASH","PEXELS","PIXABAY","WIKIPEDIA","ARCHIVE"],
-        "WIKIMEDIA":["WIKIMEDIA","WIKIPEDIA","ARCHIVE","UNSPLASH"],
-        "WIKIPEDIA":["WIKIPEDIA","WIKIMEDIA","ARCHIVE","UNSPLASH"],
-        "ARCHIVE":["ARCHIVE","ARCHIVE","WIKIMEDIA","WIKIPEDIA","UNSPLASH"],
-        "MAPBOX":["MAPBOX","MAPBOX","WIKIMEDIA","WIKIPEDIA"],
-        "APIFLASH":["APIFLASH","WIKIMEDIA","WIKIPEDIA","ARCHIVE"],
-    }
-    return pools.get(str(media_type).upper(), pools["WIKIPEDIA"])
-
-
-def process_audio(voice, foley, has_foley, out):
-    if not is_valid_media(voice, 1000):
-        return 0.0
-    if has_foley and is_valid_media(foley, 1000):
-        fc = "[0:a]loudnorm=I=-16:TP=-1.5:LRA=11[v];[1:a]volume=0.04[bg];[v][bg]amix=inputs=2:duration=first:dropout_transition=0[aout]"
-        cmd = ["ffmpeg","-y","-i",str(voice),"-stream_loop","-1","-i",str(foley),"-filter_complex",fc,"-map","[aout]","-ar",str(TARGET_AR),"-ac","2","-c:a","aac","-b:a","192k",str(out)]
-    else:
-        cmd = ["ffmpeg","-y","-i",str(voice),"-filter_complex","[0:a]loudnorm=I=-16:TP=-1.5:LRA=11[aout]","-map","[aout]","-ar",str(TARGET_AR),"-ac","2","-c:a","aac","-b:a","192k",str(out)]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-        dur = probe_duration(out)
-        return dur if dur >= 0.5 else 0.0
-    except Exception:
-        return 0.0
-
-
-def _ass_time(seconds: float) -> str:
-    seconds = max(0.0, float(seconds))
-    total_cs = int(round(seconds * 100))
-    hours, rem = divmod(total_cs, 360000)
-    minutes, rem = divmod(rem, 6000)
-    secs, cs = divmod(rem, 100)
-    return f"{hours}:{minutes:02d}:{secs:02d}.{cs:02d}"
-
-def _normalize_subtitle_text(text: str) -> str:
-    t = unicodedata.normalize("NFC", str(text or ""))
-    replacements = {
-        "\u00a0": " ", "\u200b": "", "\u200c": "", "\u200d": "",
-        "\u2026": "…", "\u201c": "«", "\u201d": "»",
-        "\u2018": "'", "\u2019": "'", "\u2013": "—", "\u2014": "—",
-        "\u2212": "-", "\u00ad": "",
-    }
-    for a,b in replacements.items(): t=t.replace(a,b)
-    t = "".join(ch for ch in t if not unicodedata.category(ch).startswith("C") or ch in "\n\t")
-    return re.sub(r"[ \t]+", " ", t).strip()
-
-def _ass_escape(text: str) -> str:
-    t = _normalize_subtitle_text(text)
-    return t.replace("\\", "\\\\").replace("{", "\\{" ).replace("}", "\\}")
-
-def _normalize_alignment_token(text: str) -> str:
-    t = unicodedata.normalize("NFKC", str(text or ""))
-    t = t.replace("ـ", "")
-    t = "".join(ch for ch in t if not unicodedata.category(ch).startswith("M"))
-    t = t.translate(str.maketrans({
-        "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ؤ": "و", "ئ": "ي", "ى": "ي", "ة": "ه",
-        "٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4", "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9",
-    }))
-    t = "".join(ch.lower() if (ch.isalnum() or '\u0600' <= ch <= '\u06ff') else " " for ch in t)
-    return " ".join(t.split())
-
-def _tokenize_script(narration: str) -> List[str]:
-    return [x for x in re.split(r"\s+", str(narration or "").strip()) if x]
-
-def _align_original_script_to_whisper(narration: str, whisper_words, audio_duration: float):
-    script_tokens = _tokenize_script(narration)
-    clean_whisper = []
-    for w in whisper_words or []:
-        if not isinstance(w, dict): continue
-        raw = str(w.get("word", "")).strip()
-        if not raw: continue
-        try:
-            st = max(0.0, float(w.get("start", 0)))
-            en = max(st + 0.04, float(w.get("end", st)))
-        except Exception: continue
-        norm = _normalize_alignment_token(raw)
-        if not norm: continue
-        clean_whisper.append({"word": raw, "norm": norm, "start": st, "end": en})
-
-    if not script_tokens: return []
-
-    script_norm = [_normalize_alignment_token(x) for x in script_tokens]
-    whisper_norm = [x["norm"] for x in clean_whisper]
-    matcher = difflib.SequenceMatcher(a=script_norm, b=whisper_norm, autojunk=False)
-    mapped = [None] * len(script_tokens)
-
-    for i1, j1, size in matcher.get_matching_blocks():
-        if size <= 0: continue
-        for k in range(size): mapped[i1 + k] = clean_whisper[j1 + k]
-
-    matched_indices = [i for i, v in enumerate(mapped) if v is not None]
-    if matched_indices:
-        first = matched_indices[0]
-        if first > 0:
-            right = mapped[first]["start"]
-            step = max(0.05, right / first)
-            for i in range(first):
-                st = max(0.0, i * step)
-                en = min(right, max(st + 0.05, (i + 1) * step))
-                mapped[i] = {"start": st, "end": en}
-
-        for left_i, right_i in zip(matched_indices, matched_indices[1:]):
-            if right_i - left_i <= 1: continue
-            left_end = mapped[left_i]["end"]
-            right_start = mapped[right_i]["start"]
-            span = max(0.05, right_start - left_end)
-            count = right_i - left_i - 1
-            step = span / (count + 1)
-            for n, idx in enumerate(range(left_i + 1, right_i), start=1):
-                st = left_end + step * (n - 1)
-                en = left_end + step * n
-                mapped[idx] = {"start": st, "end": max(st + 0.05, en)}
-
-        last = matched_indices[-1]
-        if last < len(script_tokens) - 1:
-            left = mapped[last]["end"]
-            right = max(left + 0.05, audio_duration)
-            count = len(script_tokens) - last - 1
-            step = (right - left) / count
-            for n, idx in enumerate(range(last + 1, len(script_tokens)), start=0):
-                st = left + step * n
-                en = left + step * (n + 1)
-                mapped[idx] = {"start": st, "end": max(st + 0.05, en)}
-    else:
-        weights = [max(1, len(_normalize_alignment_token(x))) for x in script_tokens]
-        total = float(sum(weights)) or 1.0
-        cursor = 0.0
-        duration = max(0.1, audio_duration)
-        for i, weight in enumerate(weights):
-            st = cursor
-            cursor += duration * weight / total
-            mapped[i] = {"start": st, "end": max(st + 0.05, cursor)}
-
-    result = []
-    for token, timing in zip(script_tokens, mapped):
-        if timing is None: continue
-        st = max(0.0, float(timing["start"]))
-        en = max(st + 0.05, float(timing["end"]))
-        if audio_duration > 0:
-            st = min(st, max(0.0, audio_duration - 0.05))
-            en = min(max(en, st + 0.05), audio_duration)
-        result.append({"word": token, "start": st, "end": en})
-    return result
-
-def _write_ass_subtitles(words, out_ass: Path, audio_duration: float):
-    valid = []
-    for w in words or []:
-        if not isinstance(w, dict): continue
-        text = str(w.get("word", "")).strip()
-        try:
-            start = float(w.get("start", 0))
-            end = float(w.get("end", start))
-        except Exception: continue
-        if not text or end <= start: continue
-        valid.append({"word": text, "start": max(0.0, start), "end": max(0.0, end)})
-
-    if audio_duration > 0:
-        for w in valid:
-            w["start"] = min(w["start"], max(0.0, audio_duration - 0.05))
-            w["end"] = min(max(w["end"], w["start"] + 0.05), audio_duration)
-
-    groups=[]; current=[]
-    MAX_WORDS=9; MAX_DURATION=3.2; MAX_CHARS=38
-    hard_punct=re.compile(r"[.!؟?!؛:]$")
-    soft_punct=re.compile(r"[,،]$")
-    for w in valid:
-        if not current:
-            current=[w]; continue
-        gap=w["start"]-current[-1]["end"]
-        prospective=" ".join(x["word"] for x in current+[w])
-        sentence_end=bool(hard_punct.search(current[-1]["word"]))
-        soft_end=bool(soft_punct.search(current[-1]["word"]))
-        should_break=(sentence_end or gap>=0.42 or len(current)>=MAX_WORDS or
-                      (w["end"]-current[0]["start"]>MAX_DURATION) or
-                      (len(prospective)>MAX_CHARS and len(current)>=3) or
-                      (soft_end and len(current)>=4 and gap>=0.18))
-        if should_break:
-            groups.append(current); current=[w]
-        else:
-            current.append(w)
-    if current: groups.append(current)
-
-    lines = [
-        "[Script Info]",
-        "ScriptType: v4.00+",
-        "PlayResX: 1920",
-        "PlayResY: 1080",
-        "WrapStyle: 2",
-        "ScaledBorderAndShadow: yes",
-        "YCbCr Matrix: None",
-        "",
-        "[V4+ Styles]",
-        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        "Style: Arabic,Noto Sans Arabic,62,&H00FFFFFF,&H00FFFFFF,&H00101010,&H00000000,-1,0,0,0,100,100,0,0,1,0,2,2,80,80,65,1",
-        "",
-        "[Events]",
-        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-    ]
-
-    for group in groups:
-        start = group[0]["start"]
-        end = group[-1]["end"]
-        if end <= start: continue
-        text = " ".join(w["word"] for w in group).strip()
-        if audio_duration > 0: end = min(end, audio_duration)
-        if end <= start: continue
-        # استخدام كود \fad(150,150) في لغة ASS لإضافة تلاشي ناعم للترجمة يشبه الموشن جرافيك
-        lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Arabic,,0,0,0,,{{\\fad(150,150)}}{_ass_escape(text)}")
-
-    out_ass.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
-    return bool(groups)
-
-def generate_word_timed_subtitles(audio_path: Path, narration: str, out_ass: Path, out_json: Path) -> bool:
-    if not CONFIG.groq_api_key: return False
-    if out_ass.exists() and out_ass.stat().st_size > 500 and out_json.exists(): return True
-    try:
-        with open(audio_path, "rb") as fh:
-            files = {"file": (audio_path.name, fh, "audio/wav")}
-            data = {"model": CONFIG.groq_model, "language": "ar", "response_format": "verbose_json", "timestamp_granularities[]": "word", "temperature": "0"}
-            r = requests.post("https://api.groq.com/openai/v1/audio/transcriptions", headers={"Authorization": f"Bearer {CONFIG.groq_api_key}"}, files=files, data=data, timeout=180)
-        if r.status_code >= 400: raise RuntimeError(f"HTTP {r.status_code}: {r.text[:1000]}")
-        payload = r.json()
-        whisper_words = payload.get("words") or []
-        if not whisper_words: raise RuntimeError("Groq لم يُرجع word timestamps")
-        audio_duration = probe_duration(audio_path)
-        aligned_words = _align_original_script_to_whisper(narration, whisper_words, audio_duration)
-        if not aligned_words: raise RuntimeError("تعذر ربط النص الأصلي")
-        payload["subtitle_source_text"] = narration
-        payload["subtitle_mode"] = "ORIGINAL_SCRIPT_WITH_WHISPER_TIMING"
-        payload["aligned_script_words"] = aligned_words
-        out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        ok = _write_ass_subtitles(aligned_words, out_ass, audio_duration)
-        if not ok: raise RuntimeError("تعذر إنشاء ملف ASS")
-        return True
-    except Exception:
-        return False
-
-def _escape_subtitle_path(path: Path) -> str:
-    return str(path.resolve()).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-
 
 # ==============================================================================
-# PRO VFX ENGINE - لمحاكاة برامج المونتاج الاحترافية
+# RENDER ENGINE
 # ==============================================================================
-class Pro_VFX_Engine:
-    def __init__(self, target_w=TARGET_W, target_h=TARGET_H, fps=TARGET_FPS):
-        self.w = target_w
-        self.h = target_h
-        self.fps = fps
-
-    def base_scale(self):
-        """تجهيز مساحة العمل لتفادي الحواف السوداء أثناء الكين بيرنز"""
-        return f"scale={int(self.w*1.14)}:{int(self.h*1.14)}:force_original_aspect_ratio=increase,crop={int(self.w*1.14)}:{int(self.h*1.14)}"
-
-    def cinematic_motion(self, motion_type):
-        """حركة ناعمة ومعقدة تعتمد على الجيب الرياضي (Ease-In/Out)"""
-        m = str(motion_type).lower()
-        if m in {"slow_pull", "pull_out"}:
-            z = "if(eq(on,0),1.15,max(zoom-0.001*(1.2-cos(on/40)),1.0))"
-            x = "iw/2-(iw/zoom/2)"
-            y = "ih/2-(ih/zoom/2)"
-        elif m in {"lateral_drift", "pan_right"}:
-            z = "min(zoom+0.0003,1.06)"
-            x = "max(0,min(iw-iw/zoom,(iw-iw/zoom)*on/1500))"
-            y = "ih/2-(ih/zoom/2)"
+class Studio_Render_Engine:
+    @staticmethod
+    def render_scene(media, is_vid, aud, out, dur, style="CINEMATIC_PARALLAX", motion="slow_push", subtitle_ass=None):
+        v_filters = []
+        if is_vid: v_filters.append(f"setpts=PTS*1.08,scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=increase,crop={TARGET_W}:{TARGET_H}")
         else:
-            z = "min(zoom+0.001*(1.2-cos(on/40)),1.15)"
-            x = "iw/2-(iw/zoom/2)"
-            y = "ih/2-(ih/zoom/2)"
-        return f"zoompan=z='{z}':x='{x}':y='{y}':d=1:s={self.w}x{self.h}:fps={self.fps}"
+            pre = f"scale={int(TARGET_W*1.15)}:{int(TARGET_H*1.15)}:force_original_aspect_ratio=increase,crop={int(TARGET_W*1.15)}:{int(TARGET_H*1.15)}"
+            z = "min(zoom+0.001*(1.2-cos(on/40)),1.14)" if motion != "slow_pull" else "if(eq(on,0),1.14,max(zoom-0.0009*(1.2-cos(on/40)),1.0))"
+            v_filters.append(f"{pre},zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s={TARGET_W}x{TARGET_H}:fps={TARGET_FPS}")
 
-    def focus_pull(self):
-        """انتقال احترافي يبدأ كضباب ثم تتضح الصورة فجأة (Rack Focus) في أول نصف ثانية"""
-        return "boxblur=lr='max(15-t*30,0)':lp='max(15-t*30,0)'"
+        if style == "PAPER_COLLAGE": v_filters.append("fps=12,fps=30,eq=contrast=1.18:saturation=0.88,noise=alls=2:allf=t")
+        elif style == "CYBER_SCAN":
+            v_filters.append("eq=contrast=1.2:saturation=1.2")
+            v_filters.append("drawtext=text='● TARGET LOCK':x=80:y=80:fontsize=42:fontcolor=cyan:enable='lt(mod(t,1),0.6)'")
+        elif style == "GRUNGE_ARCHIVE":
+            v_filters.append("eq=contrast=1.4:saturation=0.1:gamma=0.8")
+            v_filters.append("vignette=PI/3.5,noise=alls=10:allf=t")
+        else: v_filters.append("boxblur=lr='max(12-t*24,0)':lp='max(12-t*24,0)',eq=contrast=1.08:saturation=0.92")
 
-    def cinematic_squeeze(self):
-        """دخول الأشرطة السوداء ببطء لتحويل الشاشة إلى الأبعاد السينمائية 2.35:1 لزيادة التوتر"""
-        # شريط علوي ينزل، وشريط سفلي يصعد
-        top_bar = "drawbox=x=0:y=0:w=iw:h='min(t*30, 100)':color=black:t=fill"
-        bottom_bar = "drawbox=x=0:y='ih-min(t*30, 100)':w=iw:h='min(t*30, 100)':color=black:t=fill"
-        return f"{top_bar},{bottom_bar}"
+        if style not in ["GRUNGE_ARCHIVE"]: v_filters.append("vignette=PI/4.5,noise=alls=1:allf=t")
+        if is_vid: v_filters.append(f"fps={TARGET_FPS},tpad=stop_mode=clone:stop_duration={max(0.0,dur):.3f}")
+        else: v_filters.append("format=yuv420p")
 
-    def apply_color_grading(self, attention_level, is_bw):
-        """تصحيح لوني سينمائي"""
-        if is_bw:
-            return "hue=s=0,eq=contrast=1.12:brightness=-0.02"
-        if attention_level == "HIGH":
-            return "eq=contrast=1.20:saturation=0.80:gamma=0.90"
-        return "eq=contrast=1.08:saturation=0.95"
-
-    def apply_investigative_hud(self):
-        """شاشة التحقيقات: إضافة Timecode يتغير، وكلمة REC وامضة، وخطوط شبكية"""
-        # كلمة REC تومض كل نصف ثانية
-        rec_text = "drawtext=text='REC':x=60:y=60:fontsize=40:fontcolor=red:enable='lt(mod(t,1),0.5)'"
-        # Timecode ديناميكي يعتمد على الوقت الفعلي للمشهد
-        timecode = "drawtext=text='%{pts\\:hms}':x=1600:y=60:fontsize=40:fontcolor=white@0.8:fontfile=arial.ttf"
-        # علامات تصويب الكاميرا (Crosshairs) في المنتصف
-        ch_h = "drawbox=x=iw/2-30:y=ih/2:w=60:h=2:color=white@0.5"
-        ch_v = "drawbox=x=iw/2:y=ih/2-30:w=2:h=60:color=white@0.5"
-        return f"{rec_text},{timecode},{ch_h},{ch_v}"
-
-    def flashbang_reveal(self):
-        """ومضة ساطعة قوية في أول ربع ثانية لجذب انتباه العين بقوة"""
-        return "colorlevels=rimin=1.0:gimin=1.0:bimin=1.0:enable='between(t,0,0.2)'"
-
-    def apply_textures(self):
-        return "vignette=PI/4.5,noise=alls=1:allf=t"
-
-
-def render_scene(media, is_vid, aud, out, dur, montage, subtitle_ass=None, directive=None, edit_bible=None):
-    media_ok = is_valid_media(media, 1000) if is_vid else is_valid_visual(media, 10000)
-    if not media_ok or not is_valid_media(aud, 1000): raise RuntimeError("Media/audio invalid before render")
+        vf_str = ",".join(v_filters)
         
-    directive = directive or {}
-    vfx = Pro_VFX_Engine(TARGET_W, TARGET_H, TARGET_FPS)
-    
-    motion = str(directive.get("camera_motion", "slow_push"))
-    attention = str(directive.get("attention_level", "MEDIUM")).upper()
-    is_bw = "BW" in str(montage).upper()
-    
-    filters = []
-    
-    # 1. التجهيز والحركة (Base & Motion)
-    if is_vid:
-        filters.append(f"setpts=PTS*1.08,scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=increase,crop={TARGET_W}:{TARGET_H}")
-    else:
-        filters.append(vfx.base_scale())
-        filters.append(vfx.cinematic_motion(motion))
-        
-    # 2. الفوكس السينمائي والألوان
-    filters.append(vfx.focus_pull())
-    filters.append(vfx.apply_color_grading(attention, is_bw))
-    
-    # 3. المؤثرات العالية (HUD و Flashbang و الضغط السينمائي)
-    if attention == "HIGH":
-        filters.append(vfx.flashbang_reveal())
-        filters.append(vfx.cinematic_squeeze())
-        filters.append(vfx.apply_investigative_hud())
-        
-    # 4. الملمس النهائي وتجهيز الفورمات
-    filters.append(vfx.apply_textures())
-    if is_vid:
-        filters.append(f"fps={TARGET_FPS},tpad=stop_mode=clone:stop_duration={max(0.0,dur):.3f}")
-    else:
-        filters.append("format=yuv420p")
+        if subtitle_ass and Path(subtitle_ass).exists():
+            sp = str(Path(subtitle_ass).resolve()).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+            sub_filter = f"subtitles=filename='{sp}':force_style='FontName=Noto Sans Arabic,FontSize=64,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,Outline=2,Shadow=2,Alignment=2,MarginV=70'"
+            vf_complex = f"[0:v]{vf_str}[base];[base]{sub_filter}[v]"
+        else: vf_complex = f"[0:v]{vf_str}[v]"
 
-    vf_chain = ",".join(filters)
-    subtitle_filter = ""
-    
-    if subtitle_ass and Path(subtitle_ass).exists():
-        sp = _escape_subtitle_path(Path(subtitle_ass))
-        # استخدام خط أسمك وأوضح للترجمة الاحترافية
-        subtitle_filter = f"subtitles=filename='{sp}':force_style='FontName=Noto Sans Arabic,FontSize=66,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00151515,Outline=2,Shadow=2,Alignment=2,MarginV=75'"
-        vf_complex = f"[0:v]{vf_chain}[base];[base]{subtitle_filter}[v]"
-    else:
-        vf_complex = f"[0:v]{vf_chain}[v]"
-
-    # تنفيذ أمر الرندر
-    base_cmd = ["ffmpeg", "-y", "-i", str(media), "-i", str(aud)]
-    if not is_vid:
-        base_cmd.insert(2, "-loop")
-        base_cmd.insert(3, "1")
-
-    base_cmd += [
-        "-filter_complex", vf_complex,
-        "-map", "[v]", "-map", "1:a:0", "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-        "-r", str(TARGET_FPS), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", str(TARGET_AR), "-ac", "2",
-        "-af", "loudnorm=I=-16:TP=-1.5:LRA=11", "-t", f"{max(.5,dur):.3f}", "-movflags", "+faststart", str(out)
-    ]
-
-    r = subprocess.run(base_cmd, capture_output=True, text=True, timeout=900)
-    
-    if r.returncode != 0 and not is_vid:
-        log.warning("⚠️ محرك الـ VFX فشل بسبب تعقيد المشهد؛ تطبيق وضع الحماية (Safe Mode).")
-        safe_filters = [
-            f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=increase,crop={TARGET_W}:{TARGET_H}",
-            vfx.apply_color_grading(attention, is_bw),
-            vfx.apply_textures(),
-            f"fps={TARGET_FPS}",
-            "format=yuv420p"
+        cmd = ["ffmpeg", "-y"] + ([] if is_vid else ["-loop", "1"]) + [
+            "-i", str(media), "-i", str(aud), "-filter_complex", vf_complex, "-map", "[v]", "-map", "1:a:0",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-r", str(TARGET_FPS), "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k", "-ar", str(TARGET_AR), "-ac", "2", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+            "-t", f"{max(.5,dur):.3f}", "-movflags", "+faststart", str(out)
         ]
-        safe_chain = ",".join(safe_filters)
-        safe_complex = f"[0:v]{safe_chain}[base];[base]{subtitle_filter}[v]" if subtitle_filter else f"[0:v]{safe_chain}[v]"
-        
-        safe_cmd = ["ffmpeg", "-y", "-loop", "1", "-i", str(media), "-i", str(aud), "-filter_complex", safe_complex,
-                  "-map", "[v]", "-map", "1:a:0", "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-                  "-r", str(TARGET_FPS), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", str(TARGET_AR), "-ac", "2",
-                  "-af", "loudnorm=I=-16:TP=-1.5:LRA=11", "-t", f"{max(.5,dur):.3f}", "-movflags", "+faststart", str(out)]
-        r = subprocess.run(safe_cmd, capture_output=True, text=True, timeout=900)
+        subprocess.run(cmd, capture_output=True, check=True)
 
-    if r.returncode != 0: 
-        raise RuntimeError(r.stderr[-3000:])
-        
-    actual = probe_duration(out)
-    if actual < .5 or not is_valid_media(out, 50000): 
-        raise RuntimeError(f"Rendered scene invalid: duration={actual}")
-        
-    log.info(f"🎬 Render 24.2 (PRO VFX) OK | {out.name} | {actual:.2f}s | motion={motion} | attention={attention}")
-
-
-def clean_old_scene_cache(pfx):
-    for suffix in [".mp4", ".wav", ".m4a", ".mp3", ".jpg", ".pcm", "_media.mp4", "_media.jpg", "_foley.mp3", "_best_backup.mp4", "_best_backup.jpg"]:
-        p = Path(str(pfx) + suffix) if suffix.startswith("_") else pfx.with_suffix(suffix)
-        if p.exists():
-            try: p.unlink()
-            except Exception: pass
-
-
-def concat_final(clips, final_vid):
-    txt_list = CONFIG.paths.base / "video_list.txt"
-    concat_lines = []
-    for c in clips:
-        path_str = c.resolve().as_posix().replace("'", "'\''")
-        concat_lines.append("file '" + path_str + "'")
-    txt_list.write_text("\n".join(concat_lines), encoding="utf-8")
-    cmd = [
-        "ffmpeg","-y","-f","concat","-safe","0","-i",str(txt_list),
-        "-c:v","libx264","-preset","veryfast","-crf","20","-r",str(TARGET_FPS),
-        "-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-ar",str(TARGET_AR),"-ac","2",
-        "-movflags","+faststart",str(final_vid)
-    ]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-    if r.returncode != 0:
-        raise RuntimeError(r.stderr[-3000:])
-    duration = probe_duration(final_vid)
-    if duration < 1 or not is_valid_media(final_vid, 50000):
-        raise RuntimeError("Final video failed validation")
-    return duration
-
-
-def generate_thumbnail(final_vid: Path):
-    if not CONFIG.thumbnail_enabled or not CONFIG.gemini_keys: return None
-    out=CONFIG.paths.base/f"thumbnail_{CONFIG.topic_key}.png"
-    if out.exists() and out.stat().st_size>10000: return out
-    prompt=("Create a professional cinematic 16:9 YouTube investigative documentary thumbnail about: " + CONFIG.topic + ".\nRealistic documentary photography, dramatic lighting, strong focal subject, premium broadcast look, deep contrast, no logo, no watermark, no tiny unreadable text, leave negative space for Arabic title added separately.")
-    for model in dict.fromkeys([CONFIG.thumbnail_model,"gemini-2.5-flash-image"]):
-        for key in CONFIG.gemini_keys:
-            try:
-                client=genai.Client(api_key=key); res=client.models.generate_content(model=model,contents=prompt)
-                cand=(getattr(res,"candidates",None) or [None])[0]; content=getattr(cand,"content",None)
-                for part in (getattr(content,"parts",[]) if content else []):
-                    blob=getattr(part,"inline_data",None); data=getattr(blob,"data",None) if blob else None
-                    if not data: continue
-                    raw=base64.b64decode(data) if isinstance(data,str) else data
-                    target=out if raw[:8]==b"\x89PNG\r\n\x1a\n" else out.with_suffix(".jpg") if raw[:2]==b"\xff\xd8" else None
-                    if not target: continue
-                    target.write_bytes(raw)
-                    if target.stat().st_size>10000: return target
-            except Exception: pass
+# Helper Functions
+def fetch_media(source, q, out):
+    q = enforce_english_query(q)
     try:
-        fallback=CONFIG.paths.base/f"thumbnail_fallback_{CONFIG.topic_key}.jpg"
-        r=subprocess.run(["ffmpeg","-y","-sseof","-3","-i",str(final_vid),"-frames:v","1","-q:v","2",str(fallback)],capture_output=True,text=True,timeout=60)
-        if r.returncode==0 and fallback.exists(): return fallback
+        if source == "PEXELS" and CONFIG.pexels:
+            r = requests.get("https://api.pexels.com/videos/search", params={"query": q, "per_page": 5}, headers={"Authorization": CONFIG.pexels}).json()
+            if r.get("videos"):
+                out.write_bytes(requests.get(r["videos"][0]["video_files"][0]["link"], timeout=90).content)
+                return True
+        r = requests.get("https://en.wikipedia.org/w/api.php", params={"action":"query","generator":"search","gsrsearch":q,"gsrlimit":5,"prop":"pageimages","piprop":"thumbnail","pithumbsize":1920,"format":"json"}).json()
+        if [p for p in r.get("query", {}).get("pages", {}).values() if p.get("thumbnail")]:
+            out.write_bytes(requests.get([p for p in r.get("query", {}).get("pages", {}).values() if p.get("thumbnail")][0]["thumbnail"]["source"], timeout=60).content)
+            return True
     except Exception: pass
-    return None
+    return False
 
+def generate_subtitles(audio_path, out_ass):
+    if not CONFIG.groq_api_key: return False
+    try:
+        with open(audio_path, "rb") as f:
+            r = requests.post("https://api.groq.com/openai/v1/audio/transcriptions", headers={"Authorization": f"Bearer {CONFIG.groq_api_key}"}, files={"file": (audio_path.name, f, "audio/wav")}, data={"model": "whisper-large-v3", "language": "ar", "response_format": "verbose_json", "timestamp_granularities[]": "word"}).json()
+        words = r.get("words", [])
+        if not words: return False
+        
+        lines = ["[Script Info]", "ScriptType: v4.00+", "PlayResX: 1920", "PlayResY: 1080", "", "[V4+ Styles]", "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding", "Style: Arabic,Noto Sans Arabic,64,&H00FFFFFF,&H00FFFFFF,&H00101010,&H00000000,-1,0,0,0,100,100,0,0,1,2,2,2,80,80,70,1", "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
+        chunk = []
+        for w in words:
+            chunk.append(w)
+            if len(chunk) >= 7 or (w.get("end",0) - chunk[0].get("start",0)) > 2.8:
+                lines.append(f"Dialogue: 0,{chunk[0]['start']:.2f},{chunk[-1]['end']:.2f},Arabic,,0,0,0,,{{\\fad(150,150)}}{' '.join(x['word'] for x in chunk)}")
+                chunk = []
+        out_ass.write_text("\n".join(lines), encoding="utf-8-sig")
+        return True
+    except Exception: return False
 
 def main():
-    start_time = datetime.now()
-    log.info(f"▶ بدء المحرك {ENGINE_VERSION} | القضية: {CONFIG.topic}")
-    director = Hybrid_Director()
-    fetcher = MediaFetcher()
-    edit_bible = _default_edit_bible()
-    if CONFIG.paths.edit_bible.exists():
-        try: edit_bible = normalize_edit_bible(json.loads(CONFIG.paths.edit_bible.read_text(encoding="utf-8")))
-        except Exception: pass
-    try:
-        script = director.plan_documentary()
-        if CONFIG.paths.edit_bible.exists():
-            try: edit_bible = normalize_edit_bible(json.loads(CONFIG.paths.edit_bible.read_text(encoding="utf-8")))
-            except Exception: pass
-        script = script[:TEST_SCENE_COUNT]
-        for n, sc in enumerate(script, 1): sc["scene_num"] = n
-        if len(script) < TEST_SCENE_COUNT: raise RuntimeError(f"الخطة أعادت {len(script)} مشاهد فقط.")
-        test_manifest = CONFIG.paths.base / "manifests" / "7scene_test_plan.json"
-        test_manifest.parent.mkdir(parents=True, exist_ok=True)
-        test_manifest.write_text(json.dumps({"engine": ENGINE_VERSION, "topic": CONFIG.topic, "scene_count": len(script), "edit_bible": edit_bible, "scenes": script}, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception as e:
-        log.error(str(e)); sys.exit(1)
-
+    log.info(f"▶ تشغيل استوديو ELITE VFX {ENGINE_VERSION} | القضية: {CONFIG.topic}")
+    script = Hybrid_Director().plan_documentary()
     clips = []
-    total_expected = 0.0
-
+    
     for i, scene in enumerate(script):
-        if (datetime.now() - start_time).total_seconds() > 13500: break
-
-        typ = str(scene.get("media_type", "WIKIPEDIA")).upper()
-        original_q = scene.get("search_query", "")
-        foley = scene.get("foley_type", "none")
-        txt = str(scene.get("narration", "")).strip()
-        scene_signature = json.dumps({"scene_num": i, "media_type": typ, "search_query": original_q, "foley_type": foley, "narration": txt}, ensure_ascii=False, sort_keys=True)
-        scene_key = hashlib.sha256(scene_signature.encode("utf-8")).hexdigest()[:12]
-        pfx = CONFIG.paths.cache / f"s_{i:03d}_{scene_key}"
-        c_mp4 = pfx.with_suffix(".mp4")
-        c_wav = pfx.with_suffix(".wav")
-        c_foley = Path(str(pfx) + "_foley.mp3")
-        c_mp3 = pfx.with_suffix(".m4a")
-        c_ass = pfx.with_suffix(".ass")
-        c_words = pfx.with_suffix(".words.json")
-
-        if is_valid_media(c_mp4, 50000):
-            cached_dur = probe_duration(c_mp4)
-            clips.append(c_mp4)
-            total_expected += cached_dur
-            log.info(f"⏭ المشهد {i+1} من الكاش | {cached_dur:.1f}s")
-            continue
-        if c_mp4.exists():
-            try: c_mp4.unlink()
-            except Exception: pass
-
-        log.info(f"\n🎥 المشهد {i+1}/{len(script)}...")
-        if not is_valid_media(c_wav, 1000):
-            if not director.generate_voice(txt, c_wav): continue
-
-        has_foley = False
-        if foley and str(foley).lower() != "none":
-            has_foley = fetcher.fetch_media("FREESOUND", enforce_english_query(foley), c_foley, 0)
-        dur = process_audio(c_wav, c_foley, has_foley, c_mp3)
-        if dur <= 0: continue
-
-        subtitles_ok = generate_word_timed_subtitles(c_mp3, txt, c_ass, c_words)
-        scene_approved = False
-        montage_style = "NORMAL"
-        current_q = enforce_english_query(original_q)
-        base_q = current_q
-        sources_pool = get_source_pool(typ)
-        max_attempts = 15
-        best_score = -1.0
-        best_media = None
-        best_montage = "NORMAL"
-        query_variants = ["documentary evidence","archival photograph","investigation scene","crime investigation","police investigation","historical evidence","news archive","forensic evidence","mysterious location","case evidence"]
-
-        for attempt in range(max_attempts):
-            source = sources_pool[attempt % len(sources_pool)]
-            idx = attempt % 3
-            ext = ".mp4" if source in ["PEXELS","PIXABAY"] else ".jpg"
-            c_media = pfx.with_name(pfx.name + "_media" + ext)
-            if c_media.exists():
-                try: c_media.unlink()
-                except Exception: pass
-            safe_q = enforce_english_query(current_q)
-            found = fetcher.fetch_media(source, safe_q, c_media, idx)
-            if found:
-                eval_res = director.evaluate_scene_with_scout(c_media, txt, source)
-                score = float(eval_res.get("score", 0))
-                if score > best_score:
-                    best_score = score
-                    best_montage = eval_res.get("montage", "NORMAL")
-                    best_media = Path(str(pfx) + f"_best_backup{ext}")
-                    try: shutil.copy2(c_media, best_media)
-                    except Exception: best_media = None
-                if eval_res.get("accepted"):
-                    scene_approved = True
-                    montage_style = eval_res.get("montage", "NORMAL")
-                    break
-                new_q = enforce_english_query(eval_res.get("new_query", ""))
-                current_q = new_q if new_q not in ["mystery evidence", safe_q] else enforce_english_query(f"{base_q} {query_variants[attempt % len(query_variants)]}")
-            else:
-                current_q = enforce_english_query(f"{base_q} {query_variants[attempt % len(query_variants)]}")
-            time.sleep(3)
-
-        if not scene_approved and best_media:
-            best_is_video = best_media.suffix.lower() == ".mp4"
-            best_is_valid = is_valid_media(best_media, 1000) if best_is_video else is_valid_visual(best_media, 10000)
-            if best_is_valid:
-                media_ext = ".mp4" if best_is_video else ".jpg"
-                c_media = pfx.with_name(pfx.name + "_media" + media_ext)
-                shutil.copy2(best_media, c_media)
-                scene_approved = True
-                montage_style = best_montage
-
-        if not scene_approved:
-            append_memory(f"Scene {i+1} failed after {max_attempts} attempts. Query: {original_q}")
-            continue
+        pfx = CONFIG.paths.cache / f"scene_{i:02d}"
+        c_mp4, c_wav, c_ass, raw_media = pfx.with_suffix(".mp4"), pfx.with_suffix(".wav"), pfx.with_suffix(".ass"), pfx.with_name(pfx.name + "_raw.jpg")
+        
+        log.info(f"\n🎬 إنتاج المشهد {i+1}/{len(script)} | النمط: {scene.get('visual_style', 'CINEMATIC_PARALLAX')}")
+        Hybrid_Director().generate_voice(scene["narration"], c_wav)
+        dur = probe_duration(c_wav)
+        sub_ok = generate_subtitles(c_wav, c_ass)
+        fetch_media(scene.get("media_type", "WIKIPEDIA"), scene.get("search_query", "evidence"), raw_media)
+        
+        render_input, is_video, style = raw_media, raw_media.suffix.lower() == ".mp4", scene.get("visual_style", "CINEMATIC_PARALLAX")
+        
+        if not is_video and raw_media.exists():
+            mod_img = pfx.with_name(pfx.name + "_vfx.jpg")
+            if style == "CYBER_SCAN" and AdvancedVFXStudio.create_cyber_scan(raw_media, mod_img): render_input = mod_img
+            elif style == "GRUNGE_ARCHIVE" and AdvancedVFXStudio.create_grunge_archive(raw_media, mod_img): render_input = mod_img
+            elif style == "PAPER_COLLAGE" and AdvancedVFXStudio.create_paper_cutout(raw_media, mod_img): render_input = mod_img
 
         try:
-            render_scene(c_media, c_media.suffix.lower() == ".mp4", c_mp3, c_mp4, dur, montage_style, c_ass if subtitles_ok else None, directive=scene, edit_bible=edit_bible)
+            Studio_Render_Engine.render_scene(render_input, is_video, c_wav, c_mp4, dur, style=style, motion=scene.get("camera_motion", "slow_push"), subtitle_ass=c_ass if sub_ok else None)
             clips.append(c_mp4)
-            total_expected += probe_duration(c_mp4)
-            for b in CONFIG.paths.cache.glob(pfx.name + "_best_backup*"):
-                try: b.unlink()
-                except Exception: pass
-        except Exception: pass
+        except Exception as e: log.error(f"❌ خطأ رندر المشهد {i+1}: {e}")
 
-    final_vid = CONFIG.paths.base / "final_documentary.mp4"
-    if len(clips) != TEST_SCENE_COUNT: raise RuntimeError(f"❌ الاختبار غير مكتمل: تم رندر {len(clips)}/{TEST_SCENE_COUNT} مشاهد فقط.")
-    try:
-        concat_final(clips, final_vid)
-        write_otio_timeline(clips, CONFIG.paths.timeline, script)
-        generate_thumbnail(final_vid)
-    except Exception as e: log.error(f"❌ فشل إخراج الفيلم النهائي: {e}")
+    final_video = CONFIG.paths.base / "final_documentary.mp4"
+    txt = CONFIG.paths.base / "list.txt"
+    txt.write_text("\n".join(f"file '{c.resolve().as_posix()}'" for c in clips), encoding="utf-8")
+    subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(txt), "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-r", str(TARGET_FPS), "-c:a", "aac", "-b:a", "192k", "-ar", str(TARGET_AR), "-movflags", "+faststart", str(final_video)], check=True)
+    log.info(f"🏆 اكتمل الفيلم! المدة: {probe_duration(final_video)/60:.2f} دقيقة | الملف: {final_video}")
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
