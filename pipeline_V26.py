@@ -3,12 +3,12 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V45 - STABILIZED PIPELINE & QUERY RELAXATION
+V46 - PURE AGY PIPELINE + FIXED ARCHIVES
 
-- Solved the "Infinite Fast-Spin" issue: Added mandatory async sleeps between queue re-entries to prevent API throttling and spam logs.
-- Smart Query Relaxation: If Cinematic queries fail, it strips out appended modifiers ("dark", "mystery") to broaden search results.
-- Robust Payload Checking: Ensure media files are fully downloaded and validated before triggering the AI reviewer.
-- Safe Gemini Fallback: Explicitly handles fallback logic correctly to prevent false "0.0" rejections when quotas are exhausted.
+- 100% AGY Reviewer & Image Generation (Gemini fallbacks removed as quota is upgraded).
+- Fixed Archive Exhaustion Bug: Media IDs are only reserved upon ACCEPTANCE.
+- Context-Aware Archival Reviewer: AGY knows the source repository to accept real historical records.
+- Stabilized Queue: Prevents infinite looping and API throttling.
 """
 
 import os
@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V45-STABILIZED-PIPELINE"
+ENGINE_VERSION = "V46-PURE-AGY-ARCHIVES"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -51,7 +51,7 @@ AGY_REVIEWER_MODEL = "gemini-3.6-flash"
 GROQ_MODEL = "whisper-large-v3"
 
 MAX_MEDIA_SIZE_MB = 120
-MAX_ATTEMPTS_PER_SHOT = 10  # خُفضت من 15 للحد من الدوران الزائد
+MAX_ATTEMPTS_PER_SHOT = 10
 
 API_HEADERS = {
     "User-Agent": "InvestigativeDocumentaryBot/1.0 (https://github.com/Ya7ossaaain; contact@example.com)",
@@ -63,12 +63,10 @@ MEDIA_DOWNLOAD_HEADERS = {
     "Accept": "*/*"
 }
 
-REVIEWER_SEMAPHORE = asyncio.Semaphore(4) # تقليل الضغط على المراجع
+REVIEWER_SEMAPHORE = asyncio.Semaphore(4)
 
 ARCHIVE_SOURCES = ["WIKIPEDIA", "FBI_ARCHIVE", "LOC"]
 CINEMATIC_SOURCES = ["PEXELS", "PIXABAY"]
-
-AGY_QUOTA_BLOCKED = False
 
 class ProTelemetryFormatter(logging.Formatter):
     def format(self, record):
@@ -194,35 +192,29 @@ def extract_json(text):
 
 
 async def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
-    global AGY_QUOTA_BLOCKED
-    log(f"🎨 [توليد ذكي بديل] إنشاء صورة مخصصة: '{prompt[:70]}...'", "info")
+    log(f"🎨 إنشاء صورة مخصصة عبر AGY: '{prompt[:70]}...'", "info")
     full_prompt = f"[CRITICAL: NO TEXT ON IMAGE. OUTPUT RAW IMAGE ONLY] Photorealistic cinematic documentary photo: {prompt}. Aspect Ratio: {aspect_ratio}"
 
-    if not AGY_QUOTA_BLOCKED:
-        try:
-            if Path(output_path).exists(): Path(output_path).unlink()
-            cmd_binary = ["agy", "--model", AGY_REVIEWER_MODEL, "--dangerously-skip-permissions", "-p", full_prompt]
-            res_bin = await asyncio.to_thread(subprocess.run, cmd_binary, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
-            
-            err_output = res_bin.stderr.decode('utf-8', errors='ignore')
-            if "RESOURCE_EXHAUSTED" in err_output or "quota reached" in err_output:
-                AGY_QUOTA_BLOCKED = True
-                log("⚠️ كوتا Antigravity CLI نفدت. التحويل لمفاتيح Gemini...", "warning")
-            else:
-                if res_bin.stdout.startswith(b'\xff\xd8') or res_bin.stdout.startswith(b'\x89PNG'):
-                    with open(output_path, "wb") as f: f.write(res_bin.stdout)
-                else:
-                    data = extract_json(res_bin.stdout.decode('utf-8', errors='ignore'))
-                    if data and isinstance(data, dict) and "image" in data:
-                        with open(output_path, "wb") as f: f.write(base64.b64decode(data["image"]))
+    try:
+        if Path(output_path).exists(): Path(output_path).unlink()
+        cmd_binary = ["agy", "--model", AGY_REVIEWER_MODEL, "--dangerously-skip-permissions", "-p", full_prompt]
+        res_bin = await asyncio.to_thread(subprocess.run, cmd_binary, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+        
+        if res_bin.stdout.startswith(b'\xff\xd8') or res_bin.stdout.startswith(b'\x89PNG'):
+            with open(output_path, "wb") as f: f.write(res_bin.stdout)
+        else:
+            data = extract_json(res_bin.stdout.decode('utf-8', errors='ignore'))
+            if data and isinstance(data, dict) and "image" in data:
+                with open(output_path, "wb") as f: f.write(base64.b64decode(data["image"]))
 
-                if is_valid_visual(output_path):
-                    return True
-        except Exception:
-            pass
+        if is_valid_visual(output_path):
+            return True
+    except Exception as e:
+        log(f"⚠️ فشل التوليد عبر AGY: {e}", "warning")
 
     log("🎞️ استخدام الخلفية السينمائية كبديل نهائي...", "info")
     return await create_fallback_visual(output_path)
+
 
 async def create_fallback_visual(output):
     res = await asyncio.to_thread(subprocess.run, [
@@ -369,6 +361,7 @@ class WordSyncSlicer:
 class MediaSources:
     @staticmethod
     def _track_and_save(items, output, extract_url_func):
+        """تحميل الملف مع فحص عدم التكرار، ودون حرق المعرّف مسبقاً قبل قبوله من المراجع"""
         random.shuffle(items)
         for item in items:
             url, uid = extract_url_func(item)
@@ -509,7 +502,6 @@ class MediaSources:
 
 
 async def agy_evaluate_scout(media_path, shot, story, source_name, query):
-    global AGY_QUOTA_BLOCKED
     if not media_path: return False, 0.0, 0.0, "ملف مفقود"
     cat = shot.get("category", "CINEMATIC")
     
@@ -529,44 +521,18 @@ CRITICAL RULES FOR REVIEW:
 
 Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0, "reason": "Arabic Reason"}}"""
 
-    # 1. Antigravity Reviewer
-    if not AGY_QUOTA_BLOCKED:
-        try:
-            cmd = ["agy", "--model", AGY_REVIEWER_MODEL, "--dangerously-skip-permissions", "-p", prompt]
-            res = await asyncio.to_thread(subprocess.run, cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
-            err_str = res.stderr or ""
-            if "RESOURCE_EXHAUSTED" in err_str or "quota reached" in err_str or "429" in err_str:
-                AGY_QUOTA_BLOCKED = True
-                log("⚡ [قاطع الدائرة] تم اكتشاف استنزاف كوتا Antigravity! التحويل إلى مفاتيح Gemini...", "warning")
-            else:
-                data = extract_json(res.stdout)
-                if data:
-                    score = float(data.get("score", 0.0))
-                    is_accepted = (data.get("decision", "").lower() == "accept" and score >= 0.35)
-                    return is_accepted, score, 0.0, str(data.get("reason", ""))
-        except Exception as e:
-            pass
-
-    # 2. Gemini Keys Fallback Reviewer
     try:
-        key_idx, api_key = GEMINI_POOL.acquire()
-        try:
-            client = genai.Client(api_key=api_key)
-            resp = await asyncio.to_thread(
-                client.models.generate_content,
-                model="gemini-2.5-flash",
-                contents=prompt
-            )
-            data = extract_json(resp.text)
-            if data:
-                score = float(data.get("score", 0.0))
-                return (data.get("decision", "").lower() == "accept" and score >= 0.35), score, 0.0, str(data.get("reason", ""))
-        finally:
-            GEMINI_POOL.release(key_idx)
+        cmd = ["agy", "--model", AGY_REVIEWER_MODEL, "--dangerously-skip-permissions", "-p", prompt]
+        res = await asyncio.to_thread(subprocess.run, cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+        data = extract_json(res.stdout)
+        if data:
+            score = float(data.get("score", 0.0))
+            is_accepted = (data.get("decision", "").lower() == "accept" and score >= 0.35)
+            return is_accepted, score, 0.0, str(data.get("reason", ""))
     except Exception as e:
-        log(f"⚠️ فشل المراجعة السحابية (Gemini Fallback): {e}", "warning")
+        return False, 0.0, 0.0, f"Reviewer Error: {e}"
 
-    return False, 0.0, 0.0, "Reviewer fallback failed"
+    return False, 0.0, 0.0, "No valid response from reviewer"
 
 
 async def apply_fallback(shot, story):
@@ -666,7 +632,6 @@ async def run_pipelined_production(shots, story):
             except Exception as e:
                 log(f"⚠️ خطأ جلب {src_name}: {e}", "warning")
             
-            # إذا فشل التحميل كلياً ولم يوجد ملف، نعتبره خطأ تحميل وننتقل (False).
             valid = False
             if found_file and Path(found_file).exists():
                 output_path = Path(found_file)
@@ -700,7 +665,7 @@ async def run_pipelined_production(shots, story):
 
             queues[src_name].task_done()
 
-            # إيقاف إجباري لمنع الدوران العشوائي الفائق السرعة في حال رفض متكرر
+            # إيقاف إجباري لمنع الدوران العشوائي الفائق السرعة في حال الرفض أو الفشل المتكرر
             await asyncio.sleep(1.5)
 
             async with completed_lock:
@@ -724,7 +689,6 @@ async def run_pipelined_production(shots, story):
                         if len(completed_results) == total_shots:
                             completion_event.set()
                     else:
-                        # تبسيط وتهدئة الكلمات السينمائية في حال الرفض المتكرر
                         if cat == "ARCHIVE":
                             pool = ARCHIVE_SOURCES
                             entities = shot.get("exact_entities", [CONFIG.topic_clean])
@@ -733,7 +697,7 @@ async def run_pipelined_production(shots, story):
                             pool = CINEMATIC_SOURCES
                             vibes = shot.get("visual_vibes", ["mystery"])
                             base_q = vibes[shot['attempts'] % len(vibes)]
-                            # إذا تعدت المحاولات المنتصف، نقوم بتخفيف الكلمة لتوسيع نتائج البحث
+                            # تبسيط الكلمة إذا تجاوز المشهد نصف المحاولات لتوسيع نتائج البحث
                             if shot['attempts'] > (MAX_ATTEMPTS_PER_SHOT // 2):
                                 next_q = base_q
                             else:
