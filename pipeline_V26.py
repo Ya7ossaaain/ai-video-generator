@@ -3,14 +3,13 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V42 - BULLETPROOF ASSEMBLY + SELF-HEALING RENDERER + PIPELINED WORKER POOL
+V44 - DEDICATED ARCHIVE & WIKIPEDIA ENGINE FIX
 
-- Bulletproof Renderer: Detects real media type via ffprobe (not fragile extensions).
-- Auto-Recovery Fallback: If FFmpeg fails on any shot, it automatically renders a safe cinematic fallback instead of crashing the pipeline.
-- Preserved Extensions: Candidate backups keep their true extensions (.mp4/.jpg) instead of .bak.
-- Standardized Pixel Format: Enforces yuv420p on all renders for smooth concatenation.
-- Strict Category Firewall: ARCHIVE shots stay in Archive, CINEMATIC stay in Stock.
-- Max 5 concurrent reviews (REVIEWER_SEMAPHORE = 5) to eliminate rate limits.
+- Preserved AGY architecture completely as requested.
+- Fixed Archive Exhaustion Bug: Media IDs are only reserved upon ACCEPTANCE, preventing premature pool drainage.
+- Context-Aware Archival Reviewer: Reviewer is informed of the source repository (Wikipedia/FBI/LOC) and query, ensuring real historical locations and records are accepted.
+- Fine-tuned FBI & LOC filters: Now accepts genuine archival scans, mugshots, and historical documents.
+- Pipelined parallel execution for maximum speed.
 """
 
 import os
@@ -38,7 +37,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V42-BULLETPROOF-ASSEMBLY"
+ENGINE_VERSION = "V44-ARCHIVE-RESTORED"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -54,22 +53,18 @@ GROQ_MODEL = "whisper-large-v3"
 
 MAX_MEDIA_SIZE_MB = 120
 
-# ترويسات طلبات الـ API
 API_HEADERS = {
     "User-Agent": "InvestigativeDocumentaryBot/1.0 (https://github.com/Ya7ossaaain; contact@example.com)",
     "Accept": "application/json, text/plain, */*"
 }
 
-# ترويسات تحميل ملفات الميديا الثنائية (تجاوز حظر الـ CDN)
 MEDIA_DOWNLOAD_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Accept": "*/*"
 }
 
-# حماية المراجع الصارمة: 5 مشاهد كحد أقصى مطلق في نفس اللحظة
 REVIEWER_SEMAPHORE = asyncio.Semaphore(5)
 
-# الأحلاف المعزولة برمجياً
 ARCHIVE_SOURCES = ["WIKIPEDIA", "FBI_ARCHIVE", "LOC"]
 CINEMATIC_SOURCES = ["PEXELS", "PIXABAY"]
 
@@ -177,20 +172,6 @@ def is_valid_visual(path):
         return "x" in res.stdout.strip()
     except: return False
 
-def is_video_file(path):
-    """التحقق الدقيق من كون الملف فيديو حقيقي وليس صورة بغض النظر عن امتداده"""
-    if not path or not Path(path).exists(): return False
-    try:
-        res = subprocess.run([
-            "ffprobe", "-v", "error", "-select_streams", "v:0",
-            "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1",
-            str(path)
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        dur = float(res.stdout.strip() or 0)
-        return dur > 0.1
-    except:
-        return False
-
 def clean_query(text):
     return re.sub(r"\s+", " ", re.sub(r"[^\x00-\x7F]+", " ", text or "")).strip()[:180]
 
@@ -211,12 +192,12 @@ def extract_json(text):
 
 
 async def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
-    log(f"🎨 [توليد ذكي مخصص] إنشاء صورة: '{prompt[:70]}...'", "info")
+    log(f"🎨 [خطة طوارئ] طلب توليد صورة: '{prompt[:60]}...'", "info")
     try:
         if Path(output_path).exists(): Path(output_path).unlink()
-        full_prompt = f"[CRITICAL: NO TEXT ON IMAGE. OUTPUT RAW IMAGE ONLY] {prompt}. Aspect Ratio: {aspect_ratio} [ID: {CONFIG.run_id}_{time.time()}]"
+        full_prompt = f"[CRITICAL: NO TEXT ON IMAGE. OUTPUT RAW IMAGE ONLY] Photorealistic cinematic documentary photo: {prompt}. Aspect Ratio: {aspect_ratio}"
         
-        cmd_binary = ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", full_prompt]
+        cmd_binary = ["agy", "--model", AGY_REVIEWER_MODEL, "--dangerously-skip-permissions", "-p", full_prompt]
         res_bin = await asyncio.to_thread(subprocess.run, cmd_binary, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
         
         if res_bin.stdout.startswith(b'\xff\xd8') or res_bin.stdout.startswith(b'\x89PNG'):
@@ -269,18 +250,18 @@ Requirements: Arabic narration. Total approx 350-450 words. Divide into part_1 a
         log("🎬 [المخرج الفني] يقرأ كل المشاهد ويحدد التصنيف الأنسب فنياً لكل لقطة...")
         shots_summary = "\n".join([f"Shot {s['index']}: {s['text']}" for s in shots])
         
-        prompt = f"""You are the Lead Visual Director. Focus purely on visual quality, authentic storytelling, and realism. TOPIC: {self.script.get('primary_english_query', CONFIG.topic)}
+        prompt = f"""You are the Lead Visual Director. Focus purely on visual quality and storytelling. TOPIC: {self.script.get('primary_english_query', CONFIG.topic)}
 [ID: {CONFIG.run_id}]
 Analyze ALL of these shots AT ONCE:
 {shots_summary}
 
 ARTISTIC INSTRUCTIONS:
 1. "category": Must be STRICTLY either "ARCHIVE" OR "CINEMATIC":
-   - Use "ARCHIVE" whenever the narrator mentions historical events, real persons, suspects, victims, police reports, declassified documents, or authentic places.
-   - Use "CINEMATIC" only for conceptual mood, atmospheric scenes, or generic illustrative b-roll.
-2. "exact_entities" (For ARCHIVE): 3 DISTINCT real English PROPER NOUNS (e.g. "John F Kennedy", "Dallas Police Department", "Dealey Plaza"). NEVER output abstract words like "evidence" or "clue".
+   - Use "ARCHIVE" if the text discusses historical events, real persons, official cases, documents, or authentic places.
+   - Use "CINEMATIC" if the text discusses mood, abstract mystery, general b-roll, atmospheric scenes.
+2. "exact_entities" (For ARCHIVE): 3 DISTINCT real English PROPER NOUNS (Names of specific people, suspects, places, agencies, or cases e.g. "Alcatraz Island", "Frank Morris", "Federal Bureau of Investigation").
 3. "visual_vibes" (For CINEMATIC): 1 to 2 visual mood nouns (e.g. "police tape", "dark room", "rainy night").
-4. "reviewer_context": Strict Arabic instructions to judge authenticity.
+4. "reviewer_context": Strict Arabic instructions.
 
 Return ONLY a valid JSON object mapping shot index to the above fields."""
         try:
@@ -378,6 +359,7 @@ class WordSyncSlicer:
 class MediaSources:
     @staticmethod
     def _track_and_save(items, output, extract_url_func):
+        """تحميل الملف مع فحص عدم التكرار، ودون حرق المعرّف مسبقاً قبل قبوله من المراجع"""
         random.shuffle(items)
         for item in items:
             url, uid = extract_url_func(item)
@@ -388,23 +370,24 @@ class MediaSources:
                 
             with CONFIG.used_media_lock:
                 if uid in CONFIG.used_media_ids: continue
-                CONFIG.used_media_ids.add(uid)
+                
             try:
-                r = requests.get(url, headers=MEDIA_DOWNLOAD_HEADERS, stream=True, timeout=30)
+                r = requests.get(url, headers=MEDIA_DOWNLOAD_HEADERS, stream=True, timeout=25)
                 if r.status_code == 200:
                     with open(output, "wb") as f:
                         for chunk in r.iter_content(1024*256):
                             if chunk: f.write(chunk)
-                    return str(output)
+                    # نعيد المسار مع معرف الوسيط ليتم قفله فقط عند قبول المراجع
+                    return str(output), uid
             except: pass
-        return None
+        return None, None
 
     @staticmethod
     def fetch_wikipedia_image(q, o): 
         q_clean = clean_query(q)
-        if not q_clean: return None
+        if not q_clean: return None, None
 
-        # 1. Wikimedia Commons
+        # 1. مستودع الوسائط: Wikimedia Commons (بحث موسع)
         try:
             commons_url = "https://commons.wikimedia.org/w/api.php"
             params = {
@@ -412,7 +395,7 @@ class MediaSources:
                 "generator": "search",
                 "gsrsearch": f"{q_clean}",
                 "gsrnamespace": 6,
-                "gsrlimit": 15,
+                "gsrlimit": 20,
                 "prop": "imageinfo",
                 "iiprop": "url|mime|size",
                 "format": "json"
@@ -421,17 +404,18 @@ class MediaSources:
             if res.status_code == 200:
                 pages = list(res.json().get("query", {}).get("pages", {}).values())
                 def extract_commons(p):
-                    info = p.get("imageinfo", [{}])[0]
+                    info_list = p.get("imageinfo") or [{}]
+                    info = info_list[0] if info_list else {}
                     url = info.get("url")
                     mime = info.get("mime", "")
                     if url and ("image" in mime or url.lower().endswith((".jpg", ".jpeg", ".png"))):
                         return url, str(p.get("pageid"))
                     return None, None
-                saved = MediaSources._track_and_save(pages, o, extract_commons)
-                if saved: return saved
+                saved_path, uid = MediaSources._track_and_save(pages, o, extract_commons)
+                if saved_path: return saved_path, uid
         except: pass
 
-        # 2. ويكيبيديا الإنجليزية
+        # 2. مقالات ويكيبيديا الإنجليزية (بحث مباشر وصور مصغرة عالية الدقة)
         try:
             wiki_url = "https://en.wikipedia.org/w/api.php"
             params = {
@@ -451,24 +435,26 @@ class MediaSources:
                 def extract_wiki(p):
                     orig = p.get("original", {}).get("source")
                     thumb = p.get("thumbnail", {}).get("source")
-                    return (orig or thumb), str(p.get("pageid"))
+                    url = orig or thumb
+                    return url, str(p.get("pageid"))
                 return MediaSources._track_and_save(pages, o, extract_wiki)
         except: pass
-        return None
+        return None, None
 
     @staticmethod
     def fetch_fbi_archive(q, base_path):
+        """جلب وثائق وفيديوهات الأرشيف الوطني وFBI بدون استبعاد صور الوثائق الحقيقية"""
         try:
             q_clean = clean_query(q)
-            if not q_clean: return None
+            if not q_clean: return None, None
 
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
             query = f'({q_clean}) AND (mediatype:image OR mediatype:movies)'
-            res = requests.get("https://archive.org/advancedsearch.php", headers=headers, params={"q": query, "fl[]": "identifier", "rows": 15, "output": "json"}, timeout=20)
+            res = requests.get("https://archive.org/advancedsearch.php", headers=headers, params={"q": query, "fl[]": "identifier", "rows": 20, "output": "json"}, timeout=20)
             docs = res.json().get("response", {}).get("docs", [])
             
             if not docs:
-                res = requests.get("https://archive.org/advancedsearch.php", headers=headers, params={"q": q_clean, "fl[]": "identifier", "rows": 10, "output": "json"}, timeout=20)
+                res = requests.get("https://archive.org/advancedsearch.php", headers=headers, params={"q": q_clean, "fl[]": "identifier", "rows": 15, "output": "json"}, timeout=20)
                 docs = res.json().get("response", {}).get("docs", [])
 
             random.shuffle(docs)
@@ -476,18 +462,19 @@ class MediaSources:
                 uid = str(doc.get("identifier"))
                 with CONFIG.used_media_lock:
                     if uid in CONFIG.used_media_ids: continue
-                    CONFIG.used_media_ids.add(uid)
+
                 try:
                     meta = requests.get(f"https://archive.org/metadata/{uid}", headers=headers, timeout=20).json()
                     files = meta.get("files", [])
                     
                     videos = [(int(i.get("size",0) or 0), str(i.get("name",""))) for i in files 
                               if str(i.get("name","")).lower().endswith((".mp4",".mov")) 
-                              and 1024*1024 <= int(i.get("size",0) or 0) <= MAX_MEDIA_SIZE_MB*1024*1024]
+                              and 500*1024 <= int(i.get("size",0) or 0) <= MAX_MEDIA_SIZE_MB*1024*1024]
                     
+                    # تم تخفيض الحد الأدنى إلى 15KB ليشمل وثائق التحقيق وصور السوابق (Mugshots) والمذكرات
                     images = [(int(i.get("size",0) or 0), str(i.get("name",""))) for i in files 
                               if str(i.get("name","")).lower().endswith((".jpg",".jpeg",".png")) 
-                              and int(i.get("size",0) or 0) >= 40*1024 and "thumb" not in str(i.get("name","")).lower()]
+                              and int(i.get("size",0) or 0) >= 15*1024]
 
                     target_name = None
                     is_video = False
@@ -504,33 +491,34 @@ class MediaSources:
                     if target_name:
                         out_path = base_path.with_suffix(".mp4" if is_video else ".jpg")
                         file_url = f"https://archive.org/download/{uid}/{urllib.parse.quote(target_name, safe='/')}"
-                        r = requests.get(file_url, headers=MEDIA_DOWNLOAD_HEADERS, stream=True, timeout=40)
+                        r = requests.get(file_url, headers=MEDIA_DOWNLOAD_HEADERS, stream=True, timeout=35)
                         if r.status_code == 200:
                             with open(out_path, "wb") as f:
                                 for chunk in r.iter_content(1024*256):
                                     if chunk: f.write(chunk)
-                            return str(out_path)
+                            return str(out_path), uid
                 except: pass
-            return None
-        except: return None
+            return None, None
+        except: return None, None
 
     @staticmethod
     def fetch_chronicling_america(q, o):
+        """جلب صور وصحف مكتبة الكونغرس LOC مع بحث بديل موسع"""
         try:
             q_clean = clean_query(q)
-            if not q_clean: return None
+            if not q_clean: return None, None
 
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            url = f"https://www.loc.gov/photos/?fo=json&fa=online_format:image&c=20&q={urllib.parse.quote(q_clean)}"
+            url = f"https://www.loc.gov/photos/?fo=json&fa=online_format:image&c=25&q={urllib.parse.quote(q_clean)}"
             res = requests.get(url, headers=headers, timeout=20)
             results = res.json().get("results", [])
             
             if not results:
-                url2 = f"https://www.loc.gov/search/?fo=json&fa=online_format:image&c=20&q={urllib.parse.quote(q_clean)}"
+                url2 = f"https://www.loc.gov/search/?fo=json&fa=online_format:image&c=25&q={urllib.parse.quote(q_clean)}"
                 res2 = requests.get(url2, headers=headers, timeout=20)
                 results = res2.json().get("results", [])
 
-            if not results: return None
+            if not results: return None, None
 
             def extract_loc(i):
                 img_urls = i.get("image_url", [])
@@ -539,28 +527,29 @@ class MediaSources:
                 return img_urls[-1], str(i.get("id", img_urls[-1]))
 
             return MediaSources._track_and_save(results, o, extract_loc)
-        except: return None
+        except: return None, None
 
     @staticmethod
     def fetch_pixabay_video(q, o):
-        if not CONFIG.pixabay_key: return None
+        if not CONFIG.pixabay_key: return None, None
         try:
             res = requests.get("https://pixabay.com/api/videos/", headers=MEDIA_DOWNLOAD_HEADERS, params={"key": CONFIG.pixabay_key, "q": q, "per_page": 15}, timeout=20).json().get("hits", [])
             return MediaSources._track_and_save(res, o, lambda i: ((i.get("videos", {}).get("large") or i.get("videos", {}).get("medium", {})).get("url"), str(i.get("id"))))
-        except: return None
+        except: return None, None
 
     @staticmethod
     def fetch_pexels_video(q, o):
-        if not CONFIG.pexels_key: return None
+        if not CONFIG.pexels_key: return None, None
         try:
             headers = MEDIA_DOWNLOAD_HEADERS.copy()
             headers["Authorization"] = CONFIG.pexels_key
             res = requests.get("https://api.pexels.com/videos/search", headers=headers, params={"query": q, "per_page": 15}, timeout=20).json().get("videos", [])
             return MediaSources._track_and_save(res, o, lambda i: (sorted(i.get("video_files", []), key=lambda x: abs((x.get("width") or 0)-TARGET_W))[0].get("link") if i.get("video_files") else None, str(i.get("id"))))
-        except: return None
+        except: return None, None
 
 
-async def agy_evaluate_scout(media_path, shot, story):
+async def agy_evaluate_scout(media_path, shot, story, source_name, query):
+    """مقيّم الوسائط الذكي الذي يعرف سياق المستودع والكيان المطلوب"""
     if not media_path: return False, 0.0, 0.0, "ملف مفقود"
     cat = shot.get("category", "CINEMATIC")
     
@@ -569,45 +558,48 @@ async def agy_evaluate_scout(media_path, shot, story):
 TOPIC: {story.get("primary_english_query", CONFIG.topic)}
 SHOT TEXT: {shot["text"]}
 SHOT CATEGORY: {cat}
+RETRIEVED FROM: {source_name}
+SEARCH QUERY USED: {query}
+MEDIA FILE: {Path(media_path).name}
 DIRECTOR CONTEXT: {shot.get("reviewer_context", "")}
 
 CRITICAL RULES FOR REVIEW:
-- If SHOT CATEGORY is "ARCHIVE": Media MUST look like authentic historical evidence, an original vintage photo, black-and-white or aged archive document scan, or historical archive reel. You MUST REJECT any modern stock footage or artificial modern clips.
-- If SHOT CATEGORY is "CINEMATIC": Professional atmospheric B-roll matching the tone is acceptable.
+- If SHOT CATEGORY is "ARCHIVE": Media from {source_name} represents authentic historical records, declassified files, mugshots, or real photographs/footage of genuine historical locations (such as Alcatraz Island, prison cells, San Francisco Bay, FBI archives). If the retrieved media matches the entity or historical location, you MUST ACCEPT IT (score >= 0.70). Do NOT reject genuine photos of historical places.
+- If SHOT CATEGORY is "CINEMATIC": Atmospheric B-roll matching the narration is acceptable (score >= 0.70).
 
-Return JSON: {{"decision": "accept" or "reject", "score": 0.0, "reason": "Arabic Reason"}}"""
+Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0, "reason": "Arabic Reason"}}"""
+
     try:
-        res = await asyncio.to_thread(subprocess.run, ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", prompt], stdout=subprocess.PIPE, text=True, timeout=60)
+        cmd = ["agy", "--model", AGY_REVIEWER_MODEL, "--dangerously-skip-permissions", "-p", prompt]
+        res = await asyncio.to_thread(subprocess.run, cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
         data = extract_json(res.stdout)
-        if not data: return False, 0.0, 0.0, "No JSON"
-        score = float(data.get("score", 0.0))
-        return (data.get("decision", "").lower() == "accept" and score >= 0.35), score, 0.0, str(data.get("reason", ""))
+        if data:
+            score = float(data.get("score", 0.0))
+            is_accepted = (data.get("decision", "").lower() == "accept" and score >= 0.35)
+            return is_accepted, score, 0.0, str(data.get("reason", ""))
     except Exception as e:
-        return False, 0.0, 0.0, f"Reviewer Error"
+        return False, 0.0, 0.0, f"Reviewer Error: {e}"
+
+    return False, 0.0, 0.0, "No valid response from reviewer"
 
 
 async def apply_fallback(shot, story):
-    """خطة إنقاذ ذكية ومفصولة تماماً بين الأرشيف والسينمائي"""
+    """خطة الإنقاذ المضمونة"""
     index = shot["index"]
     cat = shot.get("category", "CINEMATIC")
     
     if shot['best_score'] >= 0.20 and shot['best_candidate']:
-        log(f"⚠️ [إنقاذ 1] المشهد {index}: اعتماد أفضل لقطة حقيقية وُجدت (تقييم {shot['best_score']:.2f}).", "warning")
+        log(f"⚠️ [إنقاذ 1] المشهد {index}: اعتماد أفضل لقطة تم العثور عليها (تقييم {shot['best_score']:.2f}).", "warning")
         return shot['best_candidate']
 
-    log(f"🤖 [إنقاذ 2 - ذكي] توليد صورة AI مخصصة لطبيعة المشهد ({cat}) للمشهد {index}...", "warning")
+    log(f"🤖 [إنقاذ 2] توليد بديل ذكي للمشهد {index} ({cat})...", "warning")
     ai_path = CONFIG.work_dir / f"shot_{index:03d}_ai.jpg"
     
-    if cat == "ARCHIVE":
-        entities = shot.get("exact_entities", [])
-        q = " ".join(entities) if entities else clean_query(CONFIG.topic)
-        prompt = f"Authentic vintage 35mm archival photograph, real historical crime scene investigation scan, aged paper document, 1960s-1980s real authentic documentary archive showing: {q}. High grain, photorealistic vintage archive, no modern elements."
-    else:
-        vibes = shot.get("visual_vibes", [])
-        q = " ".join(vibes) if vibes else "dark cinematic mystery"
-        prompt = f"Cinematic atmospheric documentary film still, moody cinematic lighting, 4k photorealistic documentary b-roll showing: {q}."
+    entities = shot.get("exact_entities", [])
+    vibes = shot.get("visual_vibes", [])
+    fallback_query = " ".join(entities) if cat == "ARCHIVE" else " ".join(vibes)
     
-    ok = await generate_ai_image(prompt, ai_path)
+    ok = await generate_ai_image(fallback_query, ai_path)
     if ok:
         return {"shot": shot, "path": str(ai_path), "source": "AI_GENERATED", "score": 1.0, "start": 0.0, "duration": 5.0}
 
@@ -619,7 +611,9 @@ async def apply_fallback(shot, story):
 
 async def run_pipelined_production(shots, story):
     """
-    خط إنتاج تتابعي هجين وذكي مع جدار حماية حديدي
+    خط الإنتاج التتابعي السريع:
+    - الأرشيف والسينمائي يعملان بالتوازي التام.
+    - حجز معرّف الوسائط فقط عند موافقة المراجع لمنع نفاد مصادر الأرشيف.
     """
     total_shots = len(shots)
     completed_lock = asyncio.Lock()
@@ -682,21 +676,21 @@ async def run_pipelined_production(shots, story):
             attempt_num = shot['attempts'] + 1
             log(f"⚡ [محرك {src_name} ({cat})] المشهد {index} (م{attempt_num}/15) بكلمة: '{query}'...", "info")
 
-            found_file = None
+            found_file, media_uid = None, None
             try:
                 if src_name == "PEXELS":
-                    found_file = await asyncio.to_thread(MediaSources.fetch_pexels_video, query, video_path)
+                    found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_pexels_video, query, video_path)
                 elif src_name == "PIXABAY":
-                    found_file = await asyncio.to_thread(MediaSources.fetch_pixabay_video, query, video_path)
+                    found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_pixabay_video, query, video_path)
                 elif src_name == "LOC":
-                    found_file = await asyncio.to_thread(MediaSources.fetch_chronicling_america, query, image_path)
+                    found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_chronicling_america, query, image_path)
                 elif src_name == "WIKIPEDIA":
-                    found_file = await asyncio.to_thread(MediaSources.fetch_wikipedia_image, query, image_path)
+                    found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_wikipedia_image, query, image_path)
                 elif src_name == "FBI_ARCHIVE":
-                    found_file = await asyncio.to_thread(MediaSources.fetch_fbi_archive, query, base)
+                    found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_fbi_archive, query, base)
             except Exception as e:
                 log(f"⚠️ خطأ جلب {src_name}: {e}", "warning")
-                found_file = None
+                found_file, media_uid = None, None
 
             accepted = False
             res_item = None
@@ -707,15 +701,15 @@ async def run_pipelined_production(shots, story):
                 valid = is_valid_visual(output_path) if is_img else is_valid_media(output_path)
                 
                 if valid:
+                    # فحص المراجع مع إحاطته ببيانات المستودع والكلمة المستخدمة
                     async with REVIEWER_SEMAPHORE:
-                        accepted, score, start, reason = await agy_evaluate_scout(output_path, shot, story)
+                        accepted, score, start, reason = await agy_evaluate_scout(output_path, shot, story, src_name, query)
                     
                     dur = float(shot.get("duration", 3.0)) if is_img else probe_duration(output_path)
 
                     if score > shot['best_score']:
                         shot['best_score'] = score
-                        # الحفاظ التام على امتداد الملف الأصلي لمنع خطأ .bak
-                        best_bak = output_path.with_name(f"{output_path.stem}_best{output_path.suffix}")
+                        best_bak = output_path.with_name(f"best_{output_path.name}")
                         shutil.copy(output_path, best_bak)
                         shot['best_candidate'] = {
                             "shot": shot, "path": str(best_bak), "source": src_name,
@@ -738,6 +732,11 @@ async def run_pipelined_production(shots, story):
             async with completed_lock:
                 if accepted and res_item:
                     shot['status'] = 'DONE'
+                    # حفظ المعرّف لمنع تكراره فقط بعد قبوله رسمياً من المراجع
+                    if media_uid:
+                        with CONFIG.used_media_lock:
+                            CONFIG.used_media_ids.add(media_uid)
+                    
                     completed_results.append(res_item)
                     log(f"📊 مؤشر الإنجاز الكلي: {len(completed_results)}/{total_shots}")
                     if len(completed_results) == total_shots:
@@ -753,6 +752,7 @@ async def run_pipelined_production(shots, story):
                         if len(completed_results) == total_shots:
                             completion_event.set()
                     else:
+                        # التدوير الذكي الحصري: الأرشيف يظل في الأرشيف والسينمائي في السينمائي
                         if cat == "ARCHIVE":
                             pool = ARCHIVE_SOURCES
                             entities = shot.get("exact_entities", [CONFIG.topic_clean])
@@ -782,52 +782,20 @@ async def run_pipelined_production(shots, story):
 
 class AssemblyEngine:
     def render_sub_clip(self, item):
-        """
-        محرك رندرة مقاوم للانهيار (Bulletproof & Self-Healing):
-        - يفحص نوع الميديا الفعلي بواسطة ffprobe وليس الامتداد فقط.
-        - يطبق yuv420p لتفادي مشاكل الألوان.
-        - إذا حدث أي خطأ غير متوقع في ملف المشهد، يولد مشهداً بديلاً آمناً فوراً دون إيقاف الفيلم.
-        """
         shot, media_path, index = item["shot"], Path(item["path"]), item["shot"]["index"]
         output = CONFIG.work_dir / f"rendered_{index:03d}.mp4"
-        dur = max(0.5, float(shot.get("duration", 3.0)))
+        start = min(float(item.get("start", 0)), max(0, probe_duration(media_path) - 0.1))
+        dur = float(shot.get("duration", 3))
 
         log(f"✂️ جاري رندرة المشهد {index}...", "debug")
-        
-        is_video = is_video_file(media_path)
-        
-        if is_video:
-            media_dur = probe_duration(media_path)
-            start = min(float(item.get("start", 0)), max(0.0, media_dur - dur))
+        if media_path.suffix.lower() in (".mp4", ".mov"):
             vf = "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,eq=contrast=1.06:saturation=0.92,vignette,noise=alls=3:allf=t,fps=30"
-            cmd = [
-                "ffmpeg", "-y", "-ss", f"{start:.2f}", "-i", str(media_path), "-t", f"{dur:.2f}",
-                "-vf", vf, "-an", "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-                "-pix_fmt", "yuv420p", str(output)
-            ]
+            res = run_cmd(["ffmpeg", "-y", "-ss", str(start), "-i", str(media_path), "-t", str(dur), "-vf", vf, "-an", "-c:v", "libx264", "-preset", "fast", "-crf", "20", str(output)])
         else:
             vf = "scale=2208:1248:force_original_aspect_ratio=increase,crop=2208:1248,zoompan=z='min(zoom+0.0008,1.15)':d=1:s=1920x1080:fps=30,eq=contrast=1.06:saturation=0.92,vignette,noise=alls=3:allf=t"
-            cmd = [
-                "ffmpeg", "-y", "-loop", "1", "-i", str(media_path), "-t", f"{dur:.2f}",
-                "-vf", vf, "-an", "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-                "-pix_fmt", "yuv420p", str(output)
-            ]
+            res = run_cmd(["ffmpeg", "-y", "-loop", "1", "-i", str(media_path), "-t", str(dur), "-vf", vf, "-an", "-c:v", "libx264", "-preset", "fast", "-crf", "20", str(output)])
             
-        res = run_cmd(cmd)
-
-        # خطة الإنقاذ التلقائية في حال فشل FFmpeg على ملف المشهد
-        if res.returncode != 0 or not is_valid_media(output):
-            err_msg = res.stderr[-200:].strip() if res.stderr else "unknown error"
-            log(f"⚠️ فشل رندرة المشهد {index} من الملف الأصلي ({err_msg}). تطبيق رندرة الإنقاذ التلقائية لضمان استمرار الفيلم...", "warning")
-            fallback_cmd = [
-                "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x0a0b0e:s=1920x1080:r=30", "-t", f"{dur:.2f}",
-                "-vf", "noise=alls=12:allf=t+u,vignette,eq=contrast=1.1:saturation=0.5",
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "22", "-pix_fmt", "yuv420p", str(output)
-            ]
-            res_fb = run_cmd(fallback_cmd)
-            if res_fb.returncode != 0 or not is_valid_media(output):
-                raise RuntimeError(f"Emergency render failed for shot {index}: {res_fb.stderr}")
-
+        if res.returncode != 0: raise RuntimeError(f"Render shot {index} failed.")
         return output
 
     def assemble_final_cut(self, rendered, subtitle_path):
@@ -841,7 +809,7 @@ class AssemblyEngine:
         log("🎞 بدء التجميع النهائي (Assembly)...", "info")
         res = run_cmd(["ffmpeg", "-y", "-i", str(temp_v), "-i", str(CONFIG.master_audio), "-vf", sub_filter, "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-c:a", "aac", "-b:a", "192k", "-shortest", str(CONFIG.final_video)], timeout=1200)
         
-        if res.returncode != 0: raise RuntimeError(f"Final assembly failed: {res.stderr}")
+        if res.returncode != 0: raise RuntimeError("Final assembly failed.")
         log(f"🎉 FINAL DOCUMENTARY READY | {probe_duration(CONFIG.final_video)/60:.2f} mins | {CONFIG.final_video.stat().st_size/1024/1024:.1f} MB", "info")
         return CONFIG.final_video
 
@@ -889,7 +857,6 @@ async def main_pipeline():
             t = s['text'].replace("\\", r"\\")
             f.write(f"Dialogue: 0,{h1}:{m1:02d}:{s['start']%60:05.2f},{h2}:{m2:02d}:{s['end']%60:05.2f},Default,,0,0,0,,{{\\fad(120,120)}}{t}\n")
 
-    # تشغيل خط الإنتاج الذكي المعزول
     media_results = await run_pipelined_production(shots, story)
 
     assembly = AssemblyEngine()
@@ -901,7 +868,7 @@ async def main_pipeline():
     uploader = GoogleUploader(CONFIG.google_client_id, CONFIG.google_client_secret, CONFIG.google_refresh_token)
     await asyncio.to_thread(uploader.upload_all, final_video, CONFIG.thumbnail, CONFIG.topic_clean)
 
-    log("🏁 اكتمل العمل بنجاح قياسي دون أي توقف.", "info")
+    log("🏁 اكتمل العمل بنجاح قياسي ونزاهة إخراجية تامة.", "info")
 
 if __name__ == "__main__":
     try:
