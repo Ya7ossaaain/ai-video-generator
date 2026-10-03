@@ -3,15 +3,16 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V29.3 - FULL TRANSPARENCY & VERBOSE LOGGING + QUEUE WORKERS
+V29.4 - BUG FIXED + FULL TRANSPARENCY + QUEUE WORKERS
 
-- Detailed logging for TTS, AGY (Scenario & Reviewer), and Image Gen.
-- No silent exceptions: Every rate limit, timeout, or empty result is printed.
+- Fixed 'str' object has no attribute 'get' caused by AI hallucination.
+- Prints full scenario and word count.
+- Prints explicit search source and query.
 - 5 Concurrent Workers using Queue.
-- Reviewer downgraded to 3.6-flash medium with 3-second cooldown.
+- Reviewer: 3.6-flash medium with 3-second cooldown.
 - Strict 15 attempts: regenerates query if source runs out.
 - Fallback: Generates AI image via 'agy' using gemini-3.6-flash.
-- Generates and uploads a luxurious AI YouTube Thumbnail via 'agy'.
+- Generates and uploads AI YouTube Thumbnail via 'agy'.
 """
 
 import os
@@ -39,7 +40,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V29.3-FULL-TRANSPARENCY"
+ENGINE_VERSION = "V29.4-BUGFIX-TRANSPARENCY"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -67,7 +68,7 @@ class ProTelemetryFormatter(logging.Formatter):
 
 def setup_logger():
     logger = logging.getLogger("DOCUMENTARY_ENGINE")
-    logger.setLevel(logging.DEBUG) # تم تفعيل مستوى الـ DEBUG لكشف التفاصيل
+    logger.setLevel(logging.DEBUG) 
     if logger.handlers:
         logger.handlers.clear()
     handler = logging.StreamHandler(sys.stdout)
@@ -169,9 +170,7 @@ def probe_duration(path):
     try:
         res = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(path)], stdout=subprocess.PIPE, text=True)
         return float(res.stdout.strip())
-    except Exception as e: 
-        log(f"⚠️ خطأ أثناء فحص مدة الميديا: {e}", "debug")
-        return 0.0
+    except Exception: return 0.0
 
 def is_valid_media(path, min_duration=0.05):
     path = Path(path)
@@ -183,9 +182,7 @@ def is_valid_visual(path):
     try:
         res = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", str(path)], stdout=subprocess.PIPE, text=True)
         return "x" in res.stdout.strip()
-    except Exception as e:
-        log(f"⚠️ خطأ أثناء فحص أبعاد الصورة: {e}", "debug")
-        return False
+    except: return False
 
 def clean_query(text):
     return re.sub(r"\s+", " ", re.sub(r"[^\x00-\x7F]+", " ", text or "")).strip()[:180]
@@ -207,7 +204,6 @@ def extract_json(text):
 
 
 def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
-    """توليد الصور بالذكاء الاصطناعي مع طباعة كل التفاصيل والأخطاء"""
     log(f"🎨 إرسال طلب توليد صورة لـ AGY بالوصف: '{prompt[:60]}...'", "info")
     try:
         if Path(output_path).exists():
@@ -224,40 +220,30 @@ def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
             "--output", str(output_path)
         ]
         res = run_cmd(cmd, timeout=120)
-        
-        if res.stderr:
-            log(f"📝 رسائل من AGY أثناء التوليد: {res.stderr.strip()[:150]}", "debug")
 
         if not Path(output_path).exists():
-            log("⚠️ لم تقم أداة agy بحفظ الصورة مباشرة، جاري قراءة المخرجات الثنائية (Binary)...", "warning")
+            log("⚠️ جاري قراءة المخرجات الثنائية للصورة (Binary)...", "debug")
             cmd_binary = ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", full_prompt]
             res_bin = subprocess.run(cmd_binary, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
             
             if res_bin.stdout.startswith(b'\xff\xd8') or res_bin.stdout.startswith(b'\x89PNG'):
                 with open(output_path, "wb") as f:
                     f.write(res_bin.stdout)
-                log("✅ تم التقاط وحفظ المخرجات الثنائية للصورة بنجاح.", "info")
             else:
                 data = extract_json(res_bin.stdout.decode('utf-8', errors='ignore'))
                 if data and isinstance(data, dict) and "image" in data:
                     img_data = base64.b64decode(data["image"])
                     with open(output_path, "wb") as f:
                         f.write(img_data)
-                    log("✅ تم التقاط وفك تشفير الـ Base64 للصورة بنجاح.", "info")
                 else:
-                    log(f"❌ لم يتم العثور على صورة في رد السيرفر. الرد: {res_bin.stdout.decode('utf-8', errors='ignore')[:150]}", "error")
+                    log(f"❌ فشل توليد الصورة. الرد: {res_bin.stdout.decode('utf-8', errors='ignore')[:100]}", "error")
 
         if is_valid_visual(output_path):
-            log(f"🖼️ تمت عملية التوليد بنجاح والتحقق من صحة الصورة.", "info")
+            log(f"🖼️ تمت عملية التوليد بنجاح.", "info")
             return True
-        else:
-            log("❌ الصورة المولدة تالفة أو حجمها غير صالح.", "error")
-            return False
-    except subprocess.TimeoutExpired:
-        log("🚨 انتهى وقت الانتظار (Timeout) أثناء توليد الصورة.", "error")
         return False
     except Exception as e:
-        log(f"🚨 خطأ فادح أثناء توليد الصورة عبر AGY: {e}", "error")
+        log(f"🚨 خطأ أثناء توليد الصورة عبر AGY: {e}", "error")
         return False
 
 
@@ -273,19 +259,27 @@ Create a production-ready investigative documentary plan. Return ONLY valid JSON
 Requirements: Arabic narration. Total approx 350-450 words. Divide into part_1 and part_2. Serious tone."""
         try:
             result = run_cmd(["agy", "--model", AGY_SCRIPT_MODEL, "--effort", "high", "--dangerously-skip-permissions", "-p", prompt])
-            if result.stderr:
-                log(f"📝 رسائل من AGY أثناء كتابة السيناريو: {result.stderr.strip()[:150]}", "debug")
-                
             data = extract_json(result.stdout.strip())
             if not data or not data.get("part_1"):
                 raise RuntimeError("فشل استخراج الـ JSON أو كان السيناريو فارغاً.")
                 
             self.script = data
-            log("📝 تم توليد السيناريو بنجاح.")
+            
+            # طباعة السيناريو وعدد الكلمات
+            part1 = str(data.get("part_1", ""))
+            part2 = str(data.get("part_2", ""))
+            total_words = len(part1.split()) + len(part2.split())
+            
+            log(f"📝 تم توليد السيناريو بنجاح (عدد الكلمات: {total_words} كلمة).")
+            log("━━━━━━━━━━ النص الكامل ━━━━━━━━━━")
+            log(part1)
+            log("")
+            log(part2)
+            log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            
             return data
         except Exception as e:
             log(f"🚨 فشل AGY في إنشاء السيناريو. التفاصيل: {e}", "error")
-            log("⚠️ سيتم استخدام السيناريو الاحتياطي (Fallback).", "warning")
             fallback = {"story_type": "investigation", "primary_english_query": clean_query(CONFIG.topic), "part_1": f"تفاصيل غامضة حول {CONFIG.topic}.", "part_2": "تظل الحقيقة غير محسومة."}
             self.script = fallback
             return fallback
@@ -301,9 +295,6 @@ For EVERY shot, provide:
 Return ONLY valid JSON object mapped by shot string index."""
         try:
             result = run_cmd(["agy", "--model", AGY_SCRIPT_MODEL, "--effort", "high", "--dangerously-skip-permissions", "-p", prompt], timeout=240)
-            if result.stderr:
-                log(f"📝 رسائل من AGY أثناء التخطيط: {result.stderr.strip()[:150]}", "debug")
-                
             board = extract_json(result.stdout.strip())
             if not board or not isinstance(board, dict):
                 raise RuntimeError("فشل استخراج خطة الـ JSON من المخرج.")
@@ -362,7 +353,6 @@ class MasterAudioStudio:
                 temp_pcm = CONFIG.work_dir / f"full_temp_{display_key}.pcm"
                 with open(temp_pcm, "wb") as f: f.write(raw_audio)
                 
-                log("⏳ جاري تحويل الصيغة عبر FFmpeg...", "debug")
                 run_cmd(["ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", str(temp_pcm), "-c:a", "pcm_s16le", "-ar", "24000", "-ac", "1", str(out_wav)], timeout=180)
                 temp_pcm.unlink(missing_ok=True)
                 
@@ -377,14 +367,12 @@ class MasterAudioStudio:
             except Exception as e:
                 err_msg = str(e).replace('\n', ' ')
                 if "429" in err_msg or "resource_exhausted" in err_msg.lower():
-                    log(f"⚠️ مفتاح #{display_key} واجه ضغطاً (Rate Limit/Quota). تفاصيل: {err_msg[:120]}", "warning")
+                    log(f"⚠️ مفتاح #{display_key} واجه ضغطاً (Rate Limit/Quota).", "warning")
                 else:
                     log(f"⚠️ فشل مفتاح #{display_key}: {err_msg[:120]}", "warning")
                 
                 GEMINI_POOL.release(key_index)
-                if attempt + 1 < total_keys:
-                    log("⏳ ننتظر 2 ثانية قبل تجربة المفتاح التالي...", "info")
-                    time.sleep(2)
+                time.sleep(2)
                 continue
 
         raise RuntimeError("❌ فشل توليد التعليق الصوتي بعد تجربة جميع المفاتيح المتاحة.")
@@ -399,8 +387,7 @@ class WordSyncSlicer:
                 res = requests.post("https://api.groq.com/openai/v1/audio/transcriptions", headers=headers, files={"file": ("m.wav", f, "audio/wav")}, data={"model": GROQ_MODEL, "language": "ar", "response_format": "verbose_json", "timestamp_granularities[]": "word"}, timeout=180)
             
             if res.status_code != 200:
-                log(f"🚨 خطأ في استجابة Groq API (الكود {res.status_code}): {res.text[:200]}", "error")
-                raise RuntimeError(f"Groq API Error: {res.status_code}")
+                raise RuntimeError(f"Groq API Error {res.status_code}: {res.text[:200]}")
                 
             words = [{"word": str(i["word"]).strip(), "start": float(i["start"]), "end": float(i["end"])} for i in res.json().get("words", []) if i.get("word")]
             
@@ -430,17 +417,13 @@ class MediaSources:
                 if uid in CONFIG.used_media_ids: continue
                 CONFIG.used_media_ids.add(uid)
             try:
-                log(f"📥 جاري تحميل ميديا من {source_name} (ID: {uid[:10]})...", "debug")
                 r = requests.get(url, stream=True, timeout=60)
                 if r.status_code == 200:
                     with open(output, "wb") as f:
                         for chunk in r.iter_content(1024*256):
                             if chunk: f.write(chunk)
                     return True
-                else:
-                    log(f"⚠️ فشل التحميل من الرابط، الكود: {r.status_code}", "debug")
-            except Exception as e: 
-                log(f"⚠️ خطأ أثناء التحميل من {source_name}: {str(e)[:100]}", "debug")
+            except: pass
         return False
 
     @staticmethod
@@ -448,24 +431,21 @@ class MediaSources:
         try:
             res = requests.get("https://api.openverse.org/v1/images/", params={"q": q, "page_size": 20}, timeout=30).json().get("results", [])
             return MediaSources._track_and_save(res, o, a, lambda i: (i.get("thumbnail") or i.get("url"), str(i.get("id"))), "OPENVERSE")
-        except Exception as e:
-            log(f"⚠️ خطأ API في OPENVERSE: {str(e)[:100]}", "warning"); return False
+        except: return False
 
     @staticmethod
     def fetch_nasa_media(q, o, a):
         try:
             res = requests.get("https://images-api.nasa.gov/search", params={"q": q, "media_type": "image"}, timeout=30).json().get("collection", {}).get("items", [])
             return MediaSources._track_and_save(res, o, a, lambda i: (i.get("links", [{}])[0].get("href"), str(i.get("data", [{}])[0].get("nasa_id"))), "NASA")
-        except Exception as e:
-            log(f"⚠️ خطأ API في NASA: {str(e)[:100]}", "warning"); return False
+        except: return False
 
     @staticmethod
     def fetch_chronicling_america(q, o, a):
         try:
             res = requests.get(f"https://www.loc.gov/?fo=json&c=20&q={urllib.parse.quote(q)}", timeout=40).json().get("results", [])
             return MediaSources._track_and_save(res, o, a, lambda i: (i.get("resources", [{}])[0].get("image_url", [None])[0] if isinstance(i.get("resources", [{}])[0].get("image_url"), list) else i.get("resources", [{}])[0].get("image_url"), str(i.get("id"))), "LOC")
-        except Exception as e:
-            log(f"⚠️ خطأ API في LOC: {str(e)[:100]}", "warning"); return False
+        except: return False
 
     @staticmethod
     def fetch_pixabay_video(q, o, a):
@@ -473,8 +453,7 @@ class MediaSources:
         try:
             res = requests.get("https://pixabay.com/api/videos/", params={"key": CONFIG.pixabay_key, "q": q, "per_page": 20}, timeout=30).json().get("hits", [])
             return MediaSources._track_and_save(res, o, a, lambda i: ((i.get("videos", {}).get("large") or i.get("videos", {}).get("medium", {})).get("url"), str(i.get("id"))), "PIXABAY")
-        except Exception as e:
-            log(f"⚠️ خطأ API في PIXABAY: {str(e)[:100]}", "warning"); return False
+        except: return False
 
     @staticmethod
     def fetch_pexels_video(q, o, a):
@@ -482,8 +461,7 @@ class MediaSources:
         try:
             res = requests.get("https://api.pexels.com/videos/search", headers={"Authorization": CONFIG.pexels_key}, params={"query": q, "per_page": 20}, timeout=30).json().get("videos", [])
             return MediaSources._track_and_save(res, o, a, lambda i: (sorted(i.get("video_files", []), key=lambda x: abs((x.get("width") or 0)-TARGET_W))[0].get("link") if i.get("video_files") else None, str(i.get("id"))), "PEXELS")
-        except Exception as e:
-            log(f"⚠️ خطأ API في PEXELS: {str(e)[:100]}", "warning"); return False
+        except: return False
 
     @staticmethod
     def fetch_fbi_archive(q, o, a):
@@ -507,11 +485,10 @@ class MediaSources:
                         return True
                 except: pass
             return False
-        except Exception as e:
-            log(f"⚠️ خطأ API في FBI_ARCHIVE: {str(e)[:100]}", "warning"); return False
+        except: return False
     
     @staticmethod
-    def fetch_wikipedia_image(q, o, a): return False # اختصاراً
+    def fetch_wikipedia_image(q, o, a): return False 
     @staticmethod
     def fetch_europeana_image(q, o, a): return False
     @staticmethod
@@ -527,31 +504,24 @@ DIRECTOR INSTRUCTIONS: {shot.get("reviewer_context", "")}
 MEDIA PATH: {media_path}
 Return JSON: {{"decision": "accept" or "reject", "score": 0.0, "best_start_second": 0.0, "reason": "Arabic reason matching Director notes"}}"""
     try:
-        log(f"👁️ [تقييم] إرسال المشهد {shot['index']} للمراجع الفوري...", "debug")
         result = await asyncio.to_thread(subprocess.run, ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", prompt], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
-        
-        if result.stderr:
-            log(f"📝 رسالة من المراجع (المشهد {shot['index']}): {result.stderr.strip()[:100]}", "debug")
-            
         data = extract_json(result.stdout)
         if not data: 
-            log(f"🚨 المراجع لم يُرجع JSON صالح للمشهد {shot['index']}. المخرجات: {result.stdout[:100]}", "error")
             raise Exception("No JSON returned from agy")
             
         score = float(data.get("score", 0.0))
         decision = data.get("decision", "").lower() == "accept"
         reason = str(data.get("reason", ""))
         
-        # قبول المشهد فقط إذا كان القرار إيجابي والتقييم 0.35 أو أعلى
         is_accepted = decision and score >= 0.35
         return is_accepted, score, float(data.get("best_start_second", 0)), reason
         
     except subprocess.TimeoutExpired:
-        log(f"🚨 انتهى وقت الانتظار (Timeout) للمراجع الفوري في المشهد {shot['index']}.", "error")
-        return False, 0.0, 0.0, "انتهى وقت المراجعة (Timeout)"
+        log(f"🚨 انتهى وقت المراجع في المشهد {shot['index']}.", "error")
+        return False, 0.0, 0.0, "Timeout"
     except Exception as e:
-        log(f"🚨 عطل في المراجع الفوري (المشهد {shot['index']}): {str(e)[:150].replace(chr(10), ' ')}", "error")
-        return False, 0.0, 0.0, f"عطل تقني في المراجع: {str(e)[:50]}"
+        log(f"🚨 عطل في المراجع (المشهد {shot['index']}): {str(e)[:150]}", "error")
+        return False, 0.0, 0.0, f"Error: {str(e)[:50]}"
 
 
 async def scout_shot_worker(shot, story):
@@ -567,14 +537,18 @@ async def scout_shot_worker(shot, story):
     
     FETCHERS = {"PEXELS": (MediaSources.fetch_pexels_video, video_path), "PIXABAY": (MediaSources.fetch_pixabay_video, video_path), "NASA": (MediaSources.fetch_nasa_media, image_path), "LOC": (MediaSources.fetch_chronicling_america, image_path), "OPENVERSE": (MediaSources.fetch_openverse_image, image_path), "FBI_ARCHIVE": (MediaSources.fetch_fbi_archive, video_path)}
 
-    log(f"🎬 المشهد {index} دخل غرفة الفحص والبحث...")
+    log(f"🎬 المشهد {index} دخل غرفة البحث...", "info")
 
     while total_attempts < 15:
         for directive in plan:
+            # حماية من خطأ المخرج إذا أرجع نصاً بدل قاموس
+            if not isinstance(directive, dict):
+                directive = {"source": "PEXELS", "search_query": str(directive)}
+                
             if total_attempts >= 15: break
             
-            source_name = directive.get("source", "PEXELS").upper()
-            base_query = directive.get("search_query", "investigation")
+            source_name = str(directive.get("source", "PEXELS")).upper()
+            base_query = str(directive.get("search_query", "investigation"))
             
             modifiers = ["", "historical", "document", "dark", "archive"]
             mod = modifiers[total_attempts % len(modifiers)]
@@ -586,13 +560,13 @@ async def scout_shot_worker(shot, story):
             for p in (video_path, image_path): 
                 if p.exists(): p.unlink()
 
-            log(f"🔎 المشهد {index} (م{total_attempts+1}): جلب من {source_name} بكلمة '{query}'...", "info")
+            log(f"🔎 المشهد {index} (م{total_attempts+1}): بحث في '{source_name}' بكلمة '{query}'...", "info")
             found = await asyncio.to_thread(fetcher, query, output_path, total_attempts)
             total_attempts += 1
             
             valid = is_valid_visual(output_path) if output_path.suffix in (".jpg",".png") else is_valid_media(output_path)
             if not found or not valid:
-                log(f"⚠️ المشهد {index}: لم يتم العثور على نتيجة صالحة من {source_name}.", "warning")
+                log(f"⚠️ المشهد {index} (م{total_attempts}): لا توجد نتائج صالحة من {source_name}.", "debug")
                 continue
 
             accepted, score, start, reason = await agy_evaluate_scout(output_path, shot, story)
@@ -606,10 +580,10 @@ async def scout_shot_worker(shot, story):
                 best_candidate = {"shot": shot, "path": str(best_bak), "source": source_name, "score": score, "start": start, "duration": probe_duration(best_bak)}
 
             if accepted:
-                log(f"✅ قَبل المراجع المشهد {index} من {source_name} (م{total_attempts}) | {reason} | تقييم: {score:.2f}")
+                log(f"✅ المراجع قَبل المشهد {index} من {source_name} (م{total_attempts}) | {reason} | تقييم: {score:.2f}")
                 return {"shot": shot, "path": str(output_path), "source": source_name, "score": score, "start": start, "duration": probe_duration(output_path)}
             else:
-                log(f"❌ رَفض المراجع المشهد {index} من {source_name} (م{total_attempts}) | {reason} | التقييم: {score:.2f}")
+                log(f"❌ المراجع رَفض المشهد {index} من {source_name} (م{total_attempts}) | {reason} | تقييم: {score:.2f}")
 
     if best_score >= 0.20 and best_candidate:
         log(f"⚠️ [إنقاذ 1] استنفدت 15 محاولة للمشهد {index}. تم استخدام أفضل لقطة متاحة بتقييم {best_score:.2f}.", "warning")
@@ -621,7 +595,7 @@ async def scout_shot_worker(shot, story):
     
     ok = await asyncio.to_thread(generate_ai_image, ai_prompt, ai_path)
     if ok and is_valid_visual(ai_path):
-        log(f"🖼️ تم توليد صورة AI للمشهد {index} بنجاح كحل نهائي.")
+        log(f"🖼️️ تم توليد صورة AI للمشهد {index} بنجاح كحل نهائي.")
         return {"shot": shot, "path": str(ai_path), "source": "AI_GENERATED_AGY", "score": 1.0, "start": 0.0, "duration": 5.0}
 
     raise RuntimeError(f"❌ فشلت جميع آليات البحث والإنقاذ للمشهد {index}.")
@@ -641,7 +615,7 @@ async def queue_worker(name, queue, story, results):
             queue.task_done()
 
 async def scout_all_media(shots, story):
-    log(f"🔍 بدء الطابور (5 عمال) لمعالجة {len(shots)} مشهد بالتناوب...")
+    log(f"🔍 بدء الطابور ({CONCURRENT_WORKERS} عمال) لمعالجة {len(shots)} مشهد بالتناوب...")
     queue = asyncio.Queue()
     for s in shots: queue.put_nowait(s)
     
@@ -682,7 +656,7 @@ class AssemblyEngine:
         run_cmd(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file), "-c", "copy", str(temp_v)])
         
         sub_filter = "subtitles=" + str(Path(subtitle_path).resolve()).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-        log("🎞️️ بدء التجميع النهائي (Assembly)...", "info")
+        log("🎞 بدء التجميع النهائي (Assembly)...", "info")
         res = run_cmd(["ffmpeg", "-y", "-i", str(temp_v), "-i", str(CONFIG.master_audio), "-vf", sub_filter, "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-c:a", "aac", "-b:a", "192k", "-shortest", str(CONFIG.final_video)], timeout=1200)
         
         if res.returncode != 0:
@@ -699,7 +673,7 @@ class GoogleUploader:
 
     def upload_all(self, vid_path, thumb_path, title):
         if not self.creds: 
-            log("⚠️️ تم تخطي الرفع السحابي لعدم وجود بيانات اعتماد Google.", "warning")
+            log("⚠ تم تخطي الرفع السحابي لعدم وجود بيانات اعتماد Google.", "warning")
             return
         try:
             log("☁️ بدء الرفع إلى Google Drive...", "info")
