@@ -3,12 +3,11 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V46 - PURE AGY PIPELINE + FIXED ARCHIVES
+V47 - X-RAY LOGS & TRANSPARENT REJECTIONS
 
-- 100% AGY Reviewer & Image Generation (Gemini fallbacks removed as quota is upgraded).
-- Fixed Archive Exhaustion Bug: Media IDs are only reserved upon ACCEPTANCE.
-- Context-Aware Archival Reviewer: AGY knows the source repository to accept real historical records.
-- Stabilized Queue: Prevents infinite looping and API throttling.
+- Exposes the EXACT reason for rejection (Download fail, Invalid File, AGY Error, or AI Decision).
+- Pure AGY pipeline preserved.
+- Stabilized Queue.
 """
 
 import os
@@ -36,7 +35,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V46-PURE-AGY-ARCHIVES"
+ENGINE_VERSION = "V47-XRAY-LOGS"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -361,7 +360,6 @@ class WordSyncSlicer:
 class MediaSources:
     @staticmethod
     def _track_and_save(items, output, extract_url_func):
-        """تحميل الملف مع فحص عدم التكرار، ودون حرق المعرّف مسبقاً قبل قبوله من المراجع"""
         random.shuffle(items)
         for item in items:
             url, uid = extract_url_func(item)
@@ -502,7 +500,7 @@ class MediaSources:
 
 
 async def agy_evaluate_scout(media_path, shot, story, source_name, query):
-    if not media_path: return False, 0.0, 0.0, "ملف مفقود"
+    if not media_path: return False, 0.0, 0.0, "الملف غير موجود في المسار"
     cat = shot.get("category", "CINEMATIC")
     
     prompt = f"""You evaluate documentary media suitability.
@@ -524,15 +522,20 @@ Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0,
     try:
         cmd = ["agy", "--model", AGY_REVIEWER_MODEL, "--dangerously-skip-permissions", "-p", prompt]
         res = await asyncio.to_thread(subprocess.run, cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+        
         data = extract_json(res.stdout)
         if data:
             score = float(data.get("score", 0.0))
             is_accepted = (data.get("decision", "").lower() == "accept" and score >= 0.35)
-            return is_accepted, score, 0.0, str(data.get("reason", ""))
+            reason = str(data.get("reason", "لا يوجد سبب"))
+            return is_accepted, score, 0.0, reason
+        else:
+            # إذا فشل التحليل، نجلب الخطأ من Stderr أو Stdout لتوضيح المشكلة
+            error_output = res.stderr.strip() or res.stdout.strip()
+            return False, 0.0, 0.0, f"خطأ من أداة AGY: {error_output[:150]}"
+            
     except Exception as e:
-        return False, 0.0, 0.0, f"Reviewer Error: {e}"
-
-    return False, 0.0, 0.0, "No valid response from reviewer"
+        return False, 0.0, 0.0, f"خطأ برمجي أثناء الاستدعاء: {str(e)[:150]}"
 
 
 async def apply_fallback(shot, story):
@@ -593,7 +596,7 @@ async def run_pipelined_production(shots, story):
 
         await queues[src].put((shot, query))
 
-    log(f"🚀 تشغيل خط الإنتاج الذكي | إجمالي المشاهد: {total_shots} | أقصى محاولات: {MAX_ATTEMPTS_PER_SHOT}")
+    log(f"🚀 تشغيل خط الإنتاج الذكي (وضع الفحص العميق X-Ray) | إجمالي المشاهد: {total_shots} | أقصى محاولات: {MAX_ATTEMPTS_PER_SHOT}")
 
     async def api_worker(src_name):
         while not completion_event.is_set():
@@ -632,15 +635,21 @@ async def run_pipelined_production(shots, story):
             except Exception as e:
                 log(f"⚠️ خطأ جلب {src_name}: {e}", "warning")
             
+            # فحص صارم مع تسجيل سبب الفشل التقني
             valid = False
+            invalid_reason = ""
             if found_file and Path(found_file).exists():
                 output_path = Path(found_file)
                 is_img = output_path.suffix.lower() in (".jpg", ".jpeg", ".png")
                 valid = is_valid_visual(output_path) if is_img else is_valid_media(output_path)
                 if not valid:
+                    invalid_reason = f"الملف المحمل من الموقع تالف أو حجمه صفر أو مدته قصيرة جداً."
                     if output_path.exists(): output_path.unlink()
+            else:
+                invalid_reason = f"لم يعثر محرك البحث على أية نتائج تطابق كلمة '{query}'."
 
-            accepted, res_item = False, None
+            accepted, res_item, reason = False, None, invalid_reason
+            
             if valid:
                 async with REVIEWER_SEMAPHORE:
                     accepted, score, start, reason = await agy_evaluate_scout(output_path, shot, story, src_name, query)
@@ -655,17 +664,20 @@ async def run_pipelined_production(shots, story):
                         "score": score, "start": start, "duration": dur
                     }
                 if accepted:
-                    log(f"🎯 تم قبول المشهد {index} من {src_name} ({cat}) | تقييم: {score:.2f} | {reason[:70]}")
+                    log(f"🎯 تم قبول المشهد {index} من {src_name} ({cat}) | تقييم: {score:.2f} | {reason[:80]}")
                     res_item = {
                         "shot": shot, "path": str(output_path), "source": src_name,
                         "score": score, "start": start, "duration": dur
                     }
                 else:
-                    log(f"⏩ المشهد {index}: رُفض من {src_name} (تقييم: {score:.2f}). تدوير داخل الحلف...")
+                    log(f"⏩ المشهد {index}: رُفض من {src_name} (تقييم: {score:.2f}) | السبب: {reason.strip()}")
+            else:
+                # إذا كان الملف غير صالح، نطبع السبب المباشر
+                log(f"⏩ المشهد {index}: رُفض من {src_name} (تقييم: 0.00) | السبب: {invalid_reason}")
 
             queues[src_name].task_done()
 
-            # إيقاف إجباري لمنع الدوران العشوائي الفائق السرعة في حال الرفض أو الفشل المتكرر
+            # إيقاف إجباري لمنع الدوران العشوائي الفائق السرعة
             await asyncio.sleep(1.5)
 
             async with completed_lock:
@@ -697,7 +709,6 @@ async def run_pipelined_production(shots, story):
                             pool = CINEMATIC_SOURCES
                             vibes = shot.get("visual_vibes", ["mystery"])
                             base_q = vibes[shot['attempts'] % len(vibes)]
-                            # تبسيط الكلمة إذا تجاوز المشهد نصف المحاولات لتوسيع نتائج البحث
                             if shot['attempts'] > (MAX_ATTEMPTS_PER_SHOT // 2):
                                 next_q = base_q
                             else:
