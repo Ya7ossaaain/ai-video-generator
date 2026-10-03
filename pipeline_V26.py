@@ -3,11 +3,12 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V47 - X-RAY LOGS & TRANSPARENT REJECTIONS
+V47 - X-RAY LOGS & TRANSPARENT REJECTIONS (FIXED SPEED & MULTIMODAL)
 
-- Exposes the EXACT reason for rejection (Download fail, Invalid File, AGY Error, or AI Decision).
-- Pure AGY pipeline preserved.
-- Stabilized Queue.
+- Exposes the EXACT reason for rejection.
+- Fixed Missing "-f" flag for Reviewer.
+- Restored original queue speed.
+- Dynamic Effort (High for Pro, Medium for Flash).
 """
 
 import os
@@ -35,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V47-XRAY-LOGS"
+ENGINE_VERSION = "V47-XRAY-LOGS-FAST"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -196,6 +197,7 @@ async def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
 
     try:
         if Path(output_path).exists(): Path(output_path).unlink()
+        # نستخدم medium لتوليد الصور
         cmd_binary = ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", full_prompt]
         res_bin = await asyncio.to_thread(subprocess.run, cmd_binary, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
         
@@ -236,7 +238,8 @@ Create a production-ready investigative documentary plan. Return ONLY valid JSON
 {{"story_type": "investigation", "primary_english_query": "", "part_1": "", "part_2": ""}}
 Requirements: Arabic narration. Total approx 350-450 words. Divide into part_1 and part_2. Serious tone."""
         try:
-            result = run_cmd(["agy", "--model", AGY_SCRIPT_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", prompt])
+            # نستخدم high لنماذج الـ pro
+            result = run_cmd(["agy", "--model", AGY_SCRIPT_MODEL, "--effort", "high", "--dangerously-skip-permissions", "-p", prompt])
             data = extract_json(result.stdout.strip())
             if not data or not data.get("part_1"): raise RuntimeError()
             self.script = data
@@ -266,7 +269,8 @@ ARTISTIC INSTRUCTIONS:
 
 Return ONLY a valid JSON object mapping shot index to the above fields."""
         try:
-            result = run_cmd(["agy", "--model", AGY_SCRIPT_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", prompt], timeout=300)
+            # نستخدم high لنماذج الـ pro
+            result = run_cmd(["agy", "--model", AGY_SCRIPT_MODEL, "--effort", "high", "--dangerously-skip-permissions", "-p", prompt], timeout=300)
             board = extract_json(result.stdout.strip())
             if board and isinstance(board, dict):
                 for shot in shots:
@@ -520,7 +524,8 @@ CRITICAL RULES FOR REVIEW:
 Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0, "reason": "Arabic Reason"}}"""
 
     try:
-        cmd = ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", prompt]
+        # هنا كان الخلل! تم إضافة علم "-f" مع مسار الملف لكي يرى النموذج الفيديو/الصورة قبل تقييمها
+        cmd = ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-f", str(media_path), "-p", prompt]
         res = await asyncio.to_thread(subprocess.run, cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
         
         data = extract_json(res.stdout)
@@ -677,8 +682,7 @@ async def run_pipelined_production(shots, story):
 
             queues[src_name].task_done()
 
-            # إيقاف إجباري لمنع الدوران العشوائي الفائق السرعة
-            await asyncio.sleep(1.5)
+            # تمت إزالة الـ sleep الذي كان يقتل سرعة خط الإنتاج ليعود العمل سريعاً وموازياً
 
             async with completed_lock:
                 if accepted and res_item:
