@@ -3,11 +3,12 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V34 - API SECURITY BYPASS + ROBUST FETCHERS + ENGLISH-ONLY AI FALLBACK
+V35 - ANTI-SPAM (JITTER & BACKOFF) + API SECURITY BYPASS
 
-- Added strict User-Agent headers to bypass 403 Forbidden blocks on Wikipedia & Archive.org.
-- Un-silenced fetcher exceptions to log exact download failures.
-- Fixed AI Image Fallback by using purely English prompts to prevent AGY text-hallucinations.
+- Added Jitter (random delays) to desynchronize the 5 concurrent workers.
+- Added Exponential Backoff specifically for HTTP 429 (Too Many Requests).
+- Workers will now wait and retry instead of skipping files when rate-limited.
+- Strict User-Agent headers to bypass 403 Forbidden.
 - Single Batch Director & Immortal Workers.
 """
 
@@ -36,7 +37,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V34-API-SECURITY-BYPASS"
+ENGINE_VERSION = "V35-ANTI-SPAM-JITTER"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -54,7 +55,6 @@ GROQ_MODEL = "whisper-large-v3"
 
 MAX_MEDIA_SIZE_MB = 120
 
-# هوية متصفح حقيقية لاختراق حمايات APIs (ويكيبيديا والأرشيف)
 GLOBAL_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 DocumentaryBot/1.0",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
@@ -368,7 +368,7 @@ class MasterAudioStudio:
                 raise RuntimeError("الملف الصوتي الناتج غير صالح.")
             except Exception as e:
                 err_msg = str(e).replace('\n', ' ')
-                if "429" in err_msg or "resource_exhausted" in err_msg.lower(): log(f"⚠️ مفتاح #{display_key} واجه ضغطاً (Rate Limit).", "warning")
+                if "429" in err_msg or "resource_exhausted" in err_msg.lower(): log(f"⚠ مفتاح #{display_key} واجه ضغطاً (Rate Limit).", "warning")
                 else: log(f"⚠️ فشل مفتاح #{display_key}: {err_msg[:120]}", "warning")
                 GEMINI_POOL.release(key_index)
                 time.sleep(2)
@@ -410,18 +410,31 @@ class MediaSources:
             with CONFIG.used_media_lock:
                 if uid in CONFIG.used_media_ids: continue
                 CONFIG.used_media_ids.add(uid)
-            try:
-                log(f"📥 محاولة تحميل من: {url[:60]}...", "debug")
-                r = requests.get(url, headers=GLOBAL_HEADERS, stream=True, timeout=60)
-                if r.status_code == 200:
-                    with open(output, "wb") as f:
-                        for chunk in r.iter_content(1024*256):
-                            if chunk: f.write(chunk)
-                    return True
-                else:
-                    log(f"⚠️️ الموقع حجب التحميل (كود {r.status_code}).", "debug")
-            except Exception as e: 
-                log(f"⚠️ خطأ تحميل من {source_name}: {str(e)[:50]}", "debug")
+                
+            # تقنية التمويه (Jitter) لتفادي اصطدام طلبات العمال الخمسة
+            time.sleep(random.uniform(0.5, 1.5))
+            
+            # تقنية التراجع الذكي (Exponential Backoff) لحل مشكلة 429
+            for retry in range(3):
+                try:
+                    log(f"📥 محاولة تحميل من: {url[:60]}... (محاولة {retry+1})", "debug")
+                    r = requests.get(url, headers=GLOBAL_HEADERS, stream=True, timeout=60)
+                    if r.status_code == 200:
+                        with open(output, "wb") as f:
+                            for chunk in r.iter_content(1024*256):
+                                if chunk: f.write(chunk)
+                        return True
+                    elif r.status_code == 429:
+                        wait_time = 4 * (retry + 1)
+                        log(f"⏳ الموقع حجب التحميل (كود 429 - ضغط طلبات). ننتظر {wait_time} ثواني...", "warning")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        log(f"⚠ الموقع حجب التحميل (كود {r.status_code}).", "debug")
+                        break # خطأ آخر، نتجاوز هذا الرابط
+                except Exception as e: 
+                    log(f"⚠️ خطأ تحميل من {source_name}: {str(e)[:50]}", "debug")
+                    break
         return False
 
     @staticmethod
@@ -542,6 +555,9 @@ Return JSON: {{"decision": "accept" or "reject", "score": 0.0, "best_start_secon
 
 
 async def scout_shot_worker(shot, story):
+    # تمويه صغير قبل بدء الفحص لفك تزامن العمال تماماً
+    await asyncio.sleep(random.uniform(0.1, 2.0))
+    
     index = shot["index"]
     base = CONFIG.work_dir / f"shot_{index:03d}"
     video_path, image_path = Path(f"{base}.mp4"), Path(f"{base}.jpg")
@@ -579,6 +595,9 @@ async def scout_shot_worker(shot, story):
         for p in (video_path, image_path): 
             if p.exists(): p.unlink()
 
+        # استراحة بسيطة قبل كل طلب لمنع سبام واجهات البحث
+        await asyncio.sleep(random.uniform(1.0, 2.5))
+
         log(f"🔎 المشهد {index} (م{attempt+1}): جلب من [{source_name}] بكلمة '{query}'...", "info")
         found = await asyncio.to_thread(fetcher, query, output_path)
         
@@ -609,7 +628,6 @@ async def scout_shot_worker(shot, story):
     log(f"🤖 [إنقاذ 2] توليد صورة AI للمشهد {index} كخطة طوارئ...", "warning")
     ai_path = CONFIG.work_dir / f"shot_{index:03d}_ai.jpg"
     
-    # الـ Prompt الإنجليزي الصارم لمنع الهلوسة
     fallback_query = " ".join(entities) if category == "ARCHIVE" else " ".join(vibes)
     ai_prompt = f"Highly detailed photograph of {fallback_query}, cinematic lighting, documentary style."
     
