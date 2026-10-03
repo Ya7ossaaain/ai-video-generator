@@ -6,7 +6,7 @@ UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
 V47 - X-RAY LOGS & TRANSPARENT REJECTIONS (FIXED SPEED & MULTIMODAL)
 
 - Exposes the EXACT reason for rejection.
-- Fixed Missing "-f" flag for Reviewer.
+- Fixed AGY CLI flags (Removed invalid -f).
 - Restored original queue speed.
 - Dynamic Effort (High for Pro, Medium for Flash).
 """
@@ -197,7 +197,6 @@ async def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
 
     try:
         if Path(output_path).exists(): Path(output_path).unlink()
-        # نستخدم medium لتوليد الصور
         cmd_binary = ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", full_prompt]
         res_bin = await asyncio.to_thread(subprocess.run, cmd_binary, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
         
@@ -238,7 +237,6 @@ Create a production-ready investigative documentary plan. Return ONLY valid JSON
 {{"story_type": "investigation", "primary_english_query": "", "part_1": "", "part_2": ""}}
 Requirements: Arabic narration. Total approx 350-450 words. Divide into part_1 and part_2. Serious tone."""
         try:
-            # نستخدم high لنماذج الـ pro
             result = run_cmd(["agy", "--model", AGY_SCRIPT_MODEL, "--effort", "high", "--dangerously-skip-permissions", "-p", prompt])
             data = extract_json(result.stdout.strip())
             if not data or not data.get("part_1"): raise RuntimeError()
@@ -269,7 +267,6 @@ ARTISTIC INSTRUCTIONS:
 
 Return ONLY a valid JSON object mapping shot index to the above fields."""
         try:
-            # نستخدم high لنماذج الـ pro
             result = run_cmd(["agy", "--model", AGY_SCRIPT_MODEL, "--effort", "high", "--dangerously-skip-permissions", "-p", prompt], timeout=300)
             board = extract_json(result.stdout.strip())
             if board and isinstance(board, dict):
@@ -524,8 +521,8 @@ CRITICAL RULES FOR REVIEW:
 Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0, "reason": "Arabic Reason"}}"""
 
     try:
-        # هنا كان الخلل! تم إضافة علم "-f" مع مسار الملف لكي يرى النموذج الفيديو/الصورة قبل تقييمها
-        cmd = ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-f", str(media_path), "-p", prompt]
+        # تمت إزالة الـ '-f' الذي تسبب في المشكلة، مع الاحتفاظ بجهد medium وتخطي الصلاحيات
+        cmd = ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", prompt]
         res = await asyncio.to_thread(subprocess.run, cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
         
         data = extract_json(res.stdout)
@@ -535,7 +532,6 @@ Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0,
             reason = str(data.get("reason", "لا يوجد سبب"))
             return is_accepted, score, 0.0, reason
         else:
-            # إذا فشل التحليل، نجلب الخطأ من Stderr أو Stdout لتوضيح المشكلة
             error_output = res.stderr.strip() or res.stdout.strip()
             return False, 0.0, 0.0, f"خطأ من أداة AGY: {error_output[:150]}"
             
@@ -640,7 +636,6 @@ async def run_pipelined_production(shots, story):
             except Exception as e:
                 log(f"⚠️ خطأ جلب {src_name}: {e}", "warning")
             
-            # فحص صارم مع تسجيل سبب الفشل التقني
             valid = False
             invalid_reason = ""
             if found_file and Path(found_file).exists():
@@ -677,12 +672,9 @@ async def run_pipelined_production(shots, story):
                 else:
                     log(f"⏩ المشهد {index}: رُفض من {src_name} (تقييم: {score:.2f}) | السبب: {reason.strip()}")
             else:
-                # إذا كان الملف غير صالح، نطبع السبب المباشر
                 log(f"⏩ المشهد {index}: رُفض من {src_name} (تقييم: 0.00) | السبب: {invalid_reason}")
 
             queues[src_name].task_done()
-
-            # تمت إزالة الـ sleep الذي كان يقتل سرعة خط الإنتاج ليعود العمل سريعاً وموازياً
 
             async with completed_lock:
                 if accepted and res_item:
