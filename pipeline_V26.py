@@ -3,13 +3,13 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V37 - LEGENDARY CYCLE ARCHITECTURE + BOT WHITELISTING
+V38 - LEGENDARY CYCLE ARCHITECTURE + BOT WHITELISTING + FIXED ARCHIVE ENGINES
 
-- Cycle-based Architecture: One shot per API source per cycle. No API is hit twice in the same cycle.
-- Flat 45-second sleep between cycles to permanently eliminate 429 Rate Limits.
-- Replaced fake Chrome User-Agent with an official 'DocumentaryBot/1.0' to bypass Wikipedia/Archive 403 bans.
-- Each shot retains a 15-attempt lifecycle.
-- Prints cycle analytics and cumulative success rates.
+- Fixed Archive.org: Proper media sorting (descending), handles both videos and high-res documents.
+- Fixed LOC (Library of Congress): Search endpoint corrected to /photos/ and /search/, protocol-relative URLs fixed.
+- Fixed Wikipedia: Integrated Wikimedia Commons for high-yield media queries and high-res fallbacks.
+- Media headers optimized: Clean browser headers for CDN binary downloads to bypass 403 blocks.
+- Smart prompt engineering for archival queries (Proper Nouns enforcement).
 """
 
 import os
@@ -37,7 +37,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V37-LEGENDARY-CYCLES"
+ENGINE_VERSION = "V38-LEGENDARY-CYCLES-FIXED"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -53,10 +53,16 @@ GROQ_MODEL = "whisper-large-v3"
 
 MAX_MEDIA_SIZE_MB = 120
 
-# الحل السحري لاختراق ويكيبيديا والأرشيف: الإفصاح عن هوية الروبوت بدلاً من انتحال صفة متصفح
-GLOBAL_HEADERS = {
+# ترويسات طلبات الـ API النصية
+API_HEADERS = {
     "User-Agent": "InvestigativeDocumentaryBot/1.0 (https://github.com/Ya7ossaaain; contact@example.com)",
     "Accept": "application/json, text/plain, */*"
+}
+
+# ترويسات تحميل الوسائط الثنائية (تمنع حظر الـ CDN والـ 403)
+MEDIA_DOWNLOAD_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "*/*"
 }
 
 class ProTelemetryFormatter(logging.Formatter):
@@ -248,11 +254,14 @@ Requirements: Arabic narration. Total approx 350-450 words. Divide into part_1 a
 Analyze ALL of these shots AT ONCE:
 {shots_summary}
 
-RULES FOR QUERIES: 1 to 2 words MAX. NOUNS ONLY. (e.g. "evidence", "police car").
+RULES FOR SEARCH QUERIES:
+1. "exact_entities" (For ARCHIVE: Wikipedia/FBI/LOC): MUST be 3 real English PROPER NOUNS (Names of specific people, suspects, victims, places, government agencies, operations, or official cases e.g. "John F Kennedy", "Alcatraz", "Dallas Police", "CIA vault"). NEVER use abstract nouns like "evidence", "clue", "paper", or "mystery" because historical archive databases index only real entities.
+2. "visual_vibes" (For CINEMATIC: Pexels/Pixabay): 1 to 2 visual mood nouns (e.g. "police tape", "dark room", "rainy night", "interrogation room").
+
 Output JSON mapping index to:
-1. "category": "ARCHIVE" (facts/documents/old) OR "CINEMATIC" (mood/b-roll).
-2. "exact_entities": Array of 3 exact nouns for Wikipedia/FBI/LOC.
-3. "visual_vibes": Array of 3 basic nouns for Pexels/Pixabay.
+1. "category": "ARCHIVE" (facts/documents/old/names) OR "CINEMATIC" (mood/b-roll).
+2. "exact_entities": Array of 3 exact historical names/entities in English.
+3. "visual_vibes": Array of 3 mood keywords.
 4. "reviewer_context": Strict Arabic instructions.
 
 Return ONLY a valid JSON object covering ALL shots."""
@@ -384,33 +393,97 @@ class MediaSources:
         for item in items:
             url, uid = extract_url_func(item)
             if not url: continue
+            
+            # إصلاح الروابط النسبية في مكتبة الكونغرس وغيرها
+            if url.startswith("//"):
+                url = "https:" + url
+                
             with CONFIG.used_media_lock:
                 if uid in CONFIG.used_media_ids: continue
                 CONFIG.used_media_ids.add(uid)
             try:
-                r = requests.get(url, headers=GLOBAL_HEADERS, stream=True, timeout=30)
+                r = requests.get(url, headers=MEDIA_DOWNLOAD_HEADERS, stream=True, timeout=30)
                 if r.status_code == 200:
                     with open(output, "wb") as f:
                         for chunk in r.iter_content(1024*256):
                             if chunk: f.write(chunk)
-                    return True
+                    return str(output)
             except: pass
-        return False
+        return None
 
     @staticmethod
     def fetch_wikipedia_image(q, o): 
+        q_clean = clean_query(q)
+        if not q_clean: return None
+
+        # 1. البحث في المستودع الميداني الحقيقي: Wikimedia Commons
         try:
-            res = requests.get("https://en.wikipedia.org/w/api.php", headers=GLOBAL_HEADERS, params={"action": "query", "generator": "search", "gsrsearch": q, "prop": "pageimages", "piprop": "original", "format": "json", "gsrlimit": 10}, timeout=20)
-            pages = list(res.json().get("query", {}).get("pages", {}).values())
-            return MediaSources._track_and_save(pages, o, lambda p: (p.get("original", {}).get("source"), str(p.get("pageid"))))
-        except: return False
+            commons_url = "https://commons.wikimedia.org/w/api.php"
+            params = {
+                "action": "query",
+                "generator": "search",
+                "gsrsearch": f"{q_clean}",
+                "gsrnamespace": 6,  # نطاق ملفات الوسائط File:
+                "gsrlimit": 15,
+                "prop": "imageinfo",
+                "iiprop": "url|mime|size",
+                "format": "json"
+            }
+            res = requests.get(commons_url, headers=API_HEADERS, params=params, timeout=20)
+            if res.status_code == 200:
+                pages = list(res.json().get("query", {}).get("pages", {}).values())
+                def extract_commons(p):
+                    info = p.get("imageinfo", [{}])[0]
+                    url = info.get("url")
+                    mime = info.get("mime", "")
+                    if url and ("image" in mime or url.lower().endswith((".jpg", ".jpeg", ".png"))):
+                        return url, str(p.get("pageid"))
+                    return None, None
+                saved = MediaSources._track_and_save(pages, o, extract_commons)
+                if saved: return saved
+        except: pass
+
+        # 2. خطة بديلة: مقالات ويكيبيديا الإنجليزية بدقة عالية
+        try:
+            wiki_url = "https://en.wikipedia.org/w/api.php"
+            params = {
+                "action": "query",
+                "generator": "search",
+                "gsrsearch": q_clean,
+                "gsrlimit": 15,
+                "prop": "pageimages",
+                "piprop": "thumbnail|original",
+                "pithumbsize": 1920,
+                "pilicense": "any",
+                "format": "json"
+            }
+            res = requests.get(wiki_url, headers=API_HEADERS, params=params, timeout=20)
+            if res.status_code == 200:
+                pages = list(res.json().get("query", {}).get("pages", {}).values())
+                def extract_wiki(p):
+                    orig = p.get("original", {}).get("source")
+                    thumb = p.get("thumbnail", {}).get("source")
+                    return (orig or thumb), str(p.get("pageid"))
+                return MediaSources._track_and_save(pages, o, extract_wiki)
+        except: pass
+        return None
 
     @staticmethod
-    def fetch_fbi_archive(q, o):
+    def fetch_fbi_archive(q, base_path):
+        """يبحث في الأرشيف ويختار الملف المناسب سواء كان فيديو أو صورة ويسند له الامتداد المناسب"""
         try:
-            query = f'({q}) AND (mediatype:image OR mediatype:movies)'
-            res = requests.get("https://archive.org/advancedsearch.php", headers=GLOBAL_HEADERS, params={"q": query, "fl[]": ["identifier"], "rows": 15, "output": "json"}, timeout=20)
+            q_clean = clean_query(q)
+            if not q_clean: return None
+
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            query = f'({q_clean}) AND (mediatype:image OR mediatype:movies)'
+            res = requests.get("https://archive.org/advancedsearch.php", headers=headers, params={"q": query, "fl[]": "identifier", "rows": 15, "output": "json"}, timeout=20)
             docs = res.json().get("response", {}).get("docs", [])
+            
+            if not docs:
+                res = requests.get("https://archive.org/advancedsearch.php", headers=headers, params={"q": q_clean, "fl[]": "identifier", "rows": 10, "output": "json"}, timeout=20)
+                docs = res.json().get("response", {}).get("docs", [])
+
             random.shuffle(docs)
             for doc in docs:
                 uid = str(doc.get("identifier"))
@@ -418,44 +491,92 @@ class MediaSources:
                     if uid in CONFIG.used_media_ids: continue
                     CONFIG.used_media_ids.add(uid)
                 try:
-                    files = requests.get(f"https://archive.org/metadata/{uid}", headers=GLOBAL_HEADERS, timeout=20).json().get("files", [])
-                    cands = [(int(i.get("size",0) or 0), str(i.get("name",""))) for i in files if str(i.get("name","")).lower().endswith((".mp4",".mov", ".jpg", ".png")) and int(i.get("size",0) or 0) <= MAX_MEDIA_SIZE_MB*1024*1024]
-                    if cands:
-                        cands.sort(key=lambda x: x[0])
-                        r = requests.get(f"https://archive.org/download/{uid}/{urllib.parse.quote(cands[0][1])}", headers=GLOBAL_HEADERS, stream=True, timeout=40)
+                    meta = requests.get(f"https://archive.org/metadata/{uid}", headers=headers, timeout=20).json()
+                    files = meta.get("files", [])
+                    
+                    # تصفية الفيديوهات الصالحة
+                    videos = [(int(i.get("size",0) or 0), str(i.get("name",""))) for i in files 
+                              if str(i.get("name","")).lower().endswith((".mp4",".mov")) 
+                              and 1024*1024 <= int(i.get("size",0) or 0) <= MAX_MEDIA_SIZE_MB*1024*1024]
+                    
+                    # تصفية الصور والوثائق (تجاهل المصغرات أقل من 40 كيلوبايت)
+                    images = [(int(i.get("size",0) or 0), str(i.get("name",""))) for i in files 
+                              if str(i.get("name","")).lower().endswith((".jpg",".jpeg",".png")) 
+                              and int(i.get("size",0) or 0) >= 40*1024 and "thumb" not in str(i.get("name","")).lower()]
+
+                    target_name = None
+                    is_video = False
+                    
+                    if videos:
+                        videos.sort(key=lambda x: x[0], reverse=True) # اختيار فيديو بجودة ممتازة
+                        target_name = videos[0][1]
+                        is_video = True
+                    elif images:
+                        images.sort(key=lambda x: x[0], reverse=True) # اختيار وثيقة عالية الدقة وليس مصغر
+                        target_name = images[0][1]
+                        is_video = False
+
+                    if target_name:
+                        out_path = base_path.with_suffix(".mp4" if is_video else ".jpg")
+                        file_url = f"https://archive.org/download/{uid}/{urllib.parse.quote(target_name, safe='/')}"
+                        r = requests.get(file_url, headers=MEDIA_DOWNLOAD_HEADERS, stream=True, timeout=40)
                         if r.status_code == 200:
-                            with open(o, "wb") as f:
+                            with open(out_path, "wb") as f:
                                 for chunk in r.iter_content(1024*256):
                                     if chunk: f.write(chunk)
-                            return True
+                            return str(out_path)
                 except: pass
-            return False
-        except: return False
+            return None
+        except: return None
 
     @staticmethod
     def fetch_chronicling_america(q, o):
+        """جلب الوثائق التاريخية من مكتبة الكونغرس LOC"""
         try:
-            res = requests.get(f"https://www.loc.gov/?fo=json&fa=online_format:image&c=15&q={urllib.parse.quote(q)}", headers=GLOBAL_HEADERS, timeout=20).json().get("results", [])
-            return MediaSources._track_and_save(res, o, lambda i: (i.get("image_url", [None])[0] if isinstance(i.get("image_url"), list) else i.get("image_url"), str(i.get("id"))))
-        except: return False
+            q_clean = clean_query(q)
+            if not q_clean: return None
+
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            # تصحيح مسار البحث إلى /photos/ بدلاً من الصفحة الرئيسية
+            url = f"https://www.loc.gov/photos/?fo=json&fa=online_format:image&c=20&q={urllib.parse.quote(q_clean)}"
+            res = requests.get(url, headers=headers, timeout=20)
+            results = res.json().get("results", [])
+            
+            if not results:
+                # محاولة ثانية عبر مسار البحث العام
+                url2 = f"https://www.loc.gov/search/?fo=json&fa=online_format:image&c=20&q={urllib.parse.quote(q_clean)}"
+                res2 = requests.get(url2, headers=headers, timeout=20)
+                results = res2.json().get("results", [])
+
+            if not results: return None
+
+            def extract_loc(i):
+                img_urls = i.get("image_url", [])
+                if isinstance(img_urls, str): img_urls = [img_urls]
+                if not img_urls: return None, None
+                # اختيار الصورة الأخيرة لأنها بأعلى دقة متوفرة (وليست Thumbnail 150px)
+                return img_urls[-1], str(i.get("id", img_urls[-1]))
+
+            return MediaSources._track_and_save(results, o, extract_loc)
+        except: return None
 
     @staticmethod
     def fetch_pixabay_video(q, o):
-        if not CONFIG.pixabay_key: return False
+        if not CONFIG.pixabay_key: return None
         try:
-            res = requests.get("https://pixabay.com/api/videos/", headers=GLOBAL_HEADERS, params={"key": CONFIG.pixabay_key, "q": q, "per_page": 15}, timeout=20).json().get("hits", [])
+            res = requests.get("https://pixabay.com/api/videos/", headers=MEDIA_DOWNLOAD_HEADERS, params={"key": CONFIG.pixabay_key, "q": q, "per_page": 15}, timeout=20).json().get("hits", [])
             return MediaSources._track_and_save(res, o, lambda i: ((i.get("videos", {}).get("large") or i.get("videos", {}).get("medium", {})).get("url"), str(i.get("id"))))
-        except: return False
+        except: return None
 
     @staticmethod
     def fetch_pexels_video(q, o):
-        if not CONFIG.pexels_key: return False
+        if not CONFIG.pexels_key: return None
         try:
-            headers = GLOBAL_HEADERS.copy()
+            headers = MEDIA_DOWNLOAD_HEADERS.copy()
             headers["Authorization"] = CONFIG.pexels_key
             res = requests.get("https://api.pexels.com/videos/search", headers=headers, params={"query": q, "per_page": 15}, timeout=20).json().get("videos", [])
             return MediaSources._track_and_save(res, o, lambda i: (sorted(i.get("video_files", []), key=lambda x: abs((x.get("width") or 0)-TARGET_W))[0].get("link") if i.get("video_files") else None, str(i.get("id"))))
-        except: return False
+        except: return None
 
 
 async def agy_evaluate_scout(media_path, shot, story):
@@ -477,46 +598,55 @@ Return JSON: {{"decision": "accept" or "reject", "score": 0.0, "reason": "Arabic
 
 
 async def process_shot_attempt(shot, story):
-    """ينفذ محاولة واحدة (Attempt) للمشهد ويعيد النتيجة"""
+    """ينفذ محاولة واحدة (Attempt) للمشهد ويعيد النتيجة بشكل ذكي حسب نوع الوسيط"""
     index = shot["index"]
     base = CONFIG.work_dir / f"shot_{index:03d}"
     video_path, image_path = Path(f"{base}.mp4"), Path(f"{base}.jpg")
     
     attempt = shot['attempts']
     source_name, query = shot['combinations'][attempt]
-    
-    FETCHERS = {
-        "PEXELS": (MediaSources.fetch_pexels_video, video_path),
-        "PIXABAY": (MediaSources.fetch_pixabay_video, video_path),
-        "LOC": (MediaSources.fetch_chronicling_america, image_path),
-        "FBI_ARCHIVE": (MediaSources.fetch_fbi_archive, video_path),
-        "WIKIPEDIA": (MediaSources.fetch_wikipedia_image, image_path)
-    }
 
-    if source_name not in FETCHERS: source_name = "PEXELS"
-    fetcher, output_path = FETCHERS[source_name]
-
-    for p in (video_path, image_path): 
+    # مسح أي ملفات قديمة مؤقتة لنفس المشهد
+    for p in (video_path, image_path, Path(f"{base}.png")): 
         if p.exists(): p.unlink()
 
     log(f"🔎 المشهد {index} (م{attempt+1}/15): جلب من [{source_name}] بكلمة '{query}'...", "info")
-    found = await asyncio.to_thread(fetcher, query, output_path)
     
-    valid = is_valid_visual(output_path) if output_path.suffix in (".jpg",".png") else is_valid_media(output_path)
-    if not found or not valid:
+    found_file = None
+    if source_name == "PEXELS":
+        found_file = await asyncio.to_thread(MediaSources.fetch_pexels_video, query, video_path)
+    elif source_name == "PIXABAY":
+        found_file = await asyncio.to_thread(MediaSources.fetch_pixabay_video, query, video_path)
+    elif source_name == "LOC":
+        found_file = await asyncio.to_thread(MediaSources.fetch_chronicling_america, query, image_path)
+    elif source_name == "WIKIPEDIA":
+        found_file = await asyncio.to_thread(MediaSources.fetch_wikipedia_image, query, image_path)
+    elif source_name == "FBI_ARCHIVE":
+        found_file = await asyncio.to_thread(MediaSources.fetch_fbi_archive, query, base)
+
+    if not found_file or not Path(found_file).exists():
+        return shot, False, None
+
+    output_path = Path(found_file)
+    is_img = output_path.suffix.lower() in (".jpg", ".jpeg", ".png")
+    
+    # فحص سلامة الملف بحسب نوعه
+    valid = is_valid_visual(output_path) if is_img else is_valid_media(output_path)
+    if not valid:
         return shot, False, None
 
     accepted, score, start, reason = await agy_evaluate_scout(output_path, shot, story)
+    dur = float(shot.get("duration", 3.0)) if is_img else probe_duration(output_path)
     
     if score > shot['best_score']:
         shot['best_score'] = score
-        best_bak = output_path.with_suffix('.bak')
+        best_bak = output_path.with_name(f"best_{output_path.name}")
         shutil.copy(output_path, best_bak)
-        shot['best_candidate'] = {"shot": shot, "path": str(best_bak), "source": source_name, "score": score, "start": start, "duration": probe_duration(best_bak)}
+        shot['best_candidate'] = {"shot": shot, "path": str(best_bak), "source": source_name, "score": score, "start": start, "duration": dur}
 
     if accepted:
         log(f"✅ قَبل المراجع المشهد {index} من {source_name} | {reason[:100]} | تقييم: {score:.2f}")
-        return shot, True, {"shot": shot, "path": str(output_path), "source": source_name, "score": score, "start": start, "duration": probe_duration(output_path)}
+        return shot, True, {"shot": shot, "path": str(output_path), "source": source_name, "score": score, "start": start, "duration": dur}
     else:
         log(f"❌ رَفض المراجع المشهد {index} من {source_name} | {reason[:100]} | تقييم: {score:.2f}")
         return shot, False, None
@@ -546,7 +676,7 @@ async def apply_fallback(shot, story):
 
 
 async def run_legendary_cycles(shots, story):
-    """نظام الدورات الأسطوري الذي اقترحه المستخدم"""
+    """نظام الدورات الأسطوري"""
     total_shots = len(shots)
     completed_shots = 0
     cycle_number = 1
@@ -556,22 +686,18 @@ async def run_legendary_cycles(shots, story):
         cycle_tasks = []
         used_sources_in_cycle = set()
         
-        # اختيار مشهد واحد لكل موقع (لا يوجد تضارب في السيرفرات أبداً)
         for shot in shots:
             if shot['status'] != 'PENDING': continue
             
             attempt_idx = shot['attempts']
-            if attempt_idx >= 15: continue # تجاوز الحد، سيعالج أدناه
+            if attempt_idx >= 15: continue
                 
             next_source = shot['combinations'][attempt_idx][0]
-            
-            # إذا لم يُستخدم هذا الموقع في هذه الدورة، نضيف المشهد
             if next_source not in used_sources_in_cycle:
                 used_sources_in_cycle.add(next_source)
                 cycle_tasks.append(shot)
 
         if not cycle_tasks:
-            # معالجة المشاهد التي استنفذت 15 محاولة
             for shot in shots:
                 if shot['status'] == 'PENDING' and shot['attempts'] >= 15:
                     res = await apply_fallback(shot, story)
@@ -584,7 +710,6 @@ async def run_legendary_cycles(shots, story):
         log(f"🔄 === بدء الدورة رقم {cycle_number} ===")
         log(f"📌 المشاهد في هذه الدورة تطلب من: {list(used_sources_in_cycle)}")
         
-        # تنفيذ الدورة بالتوازي (كل مشهد يذهب لموقع مختلف)
         cycle_outcomes = await asyncio.gather(*(process_shot_attempt(shot, story) for shot in cycle_tasks))
         
         cycle_successes = 0
@@ -685,7 +810,7 @@ async def main_pipeline():
             t = s['text'].replace("\\", r"\\")
             f.write(f"Dialogue: 0,{h1}:{m1:02d}:{s['start']%60:05.2f},{h2}:{m2:02d}:{s['end']%60:05.2f},Default,,0,0,0,,{{\\fad(120,120)}}{t}\n")
 
-    # تشغيل نظام الدورات الأسطوري
+    # تشغيل نظام الدورات
     media_results = await run_legendary_cycles(shots, story)
 
     assembly = AssemblyEngine()
