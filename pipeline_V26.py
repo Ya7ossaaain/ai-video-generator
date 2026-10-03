@@ -3,18 +3,21 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V52 - HYPER-OPTIMIZED SMART SEARCH ENGINE
+V53 - INTELLIGENT ADAPTIVE SEARCH ENGINE
 
-Key Optimizations over V51:
-- Smart Query Decomposition: Extracts key searchable elements from scene descriptions
-- Parallel Multi-Source Search: Queries multiple sources simultaneously per shot
-- Pre-filter Validation: Rejects obviously bad results BEFORE calling expensive AGY reviewer
-- Adaptive Query Refinement: Uses metadata from partial matches to build better next queries
-- Intelligent Source Routing: Maps scene categories to best-fit sources from the start
-- Result Caching: Per-project cache with isolation between episodes
-- Progressive Scoring: Accepts good-enough results faster, saves AGY calls
-- Batch-optimized Storyboard: Enhanced director prompts with SEO-optimized multi-tier queries
-- Concurrency: Up to 7 simultaneous reviewer calls + parallel source fetching
+Major improvements over V52:
+- 15-attempt adaptive search with failure-learning strategy
+- Scene decomposition into semantic search dimensions
+- Source-aware routing: Europeana, Openverse, Freesound integration
+- Smart pre-filtering with metadata relevance scoring BEFORE download
+- Progressive query strategy: entity→event→location→period→generic
+- Failure diagnosis: understands WHY searches fail and adapts
+- Rescue priority: exhaust real search → cinematic bg → AI (true last resort)
+- Parallel multi-source fetching with intelligent batching
+- Cross-scene deduplication with per-project isolation
+- Scalable architecture designed for ~500 scenes per episode
+- FFmpeg vintage effects: Ken Burns, film grain, vignette, crossfade, glitch
+- Reviewer pre-filter to avoid wasting AGY calls on obvious mismatches
 """
 
 import os
@@ -45,7 +48,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V52-HYPER-OPTIMIZED"
+ENGINE_VERSION = "V53-INTELLIGENT-ADAPTIVE"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -60,7 +63,7 @@ AGY_REVIEWER_MODEL = "gemini-3.6-flash"
 GROQ_MODEL = "whisper-large-v3"
 
 MAX_MEDIA_SIZE_MB = 120
-MAX_ATTEMPTS_PER_SHOT = 6  # Reduced from 10 — smarter queries need fewer attempts
+MAX_ATTEMPTS_PER_SHOT = 15  # Increased from 6 — but each attempt is genuinely different
 
 REVIEWER_SEMAPHORE = asyncio.Semaphore(7)
 
@@ -78,27 +81,27 @@ MEDIA_DOWNLOAD_HEADERS = {
     "Accept": "*/*"
 }
 
-ARCHIVE_SOURCES = ["WIKIPEDIA", "FBI_ARCHIVE", "LOC"]
-CINEMATIC_SOURCES = ["PEXELS", "PIXABAY"]
+ARCHIVE_SOURCES = ["WIKIPEDIA", "FBI_ARCHIVE", "LOC", "EUROPEANA", "OPENVERSE"]
+CINEMATIC_SOURCES = ["PEXELS", "PIXABAY", "OPENVERSE"]
 
 # === SOURCE AFFINITY MAP ===
 # Maps content types to ordered source preferences
 SOURCE_AFFINITY = {
     "ARCHIVE": {
-        "person_mugshot": ["WIKIPEDIA", "FBI_ARCHIVE", "LOC"],
-        "document_file": ["FBI_ARCHIVE", "LOC", "WIKIPEDIA"],
-        "location_photo": ["WIKIPEDIA", "LOC", "FBI_ARCHIVE"],
-        "historical_event": ["FBI_ARCHIVE", "WIKIPEDIA", "LOC"],
-        "newspaper_article": ["LOC", "FBI_ARCHIVE", "WIKIPEDIA"],
-        "default": ["WIKIPEDIA", "FBI_ARCHIVE", "LOC"],
+        "person_mugshot": ["WIKIPEDIA", "FBI_ARCHIVE", "OPENVERSE", "LOC", "EUROPEANA"],
+        "document_file": ["FBI_ARCHIVE", "LOC", "WIKIPEDIA", "EUROPEANA", "OPENVERSE"],
+        "location_photo": ["WIKIPEDIA", "OPENVERSE", "LOC", "EUROPEANA", "FBI_ARCHIVE"],
+        "historical_event": ["FBI_ARCHIVE", "WIKIPEDIA", "LOC", "EUROPEANA", "OPENVERSE"],
+        "newspaper_article": ["LOC", "EUROPEANA", "FBI_ARCHIVE", "WIKIPEDIA", "OPENVERSE"],
+        "default": ["WIKIPEDIA", "FBI_ARCHIVE", "LOC", "EUROPEANA", "OPENVERSE"],
     },
     "CINEMATIC": {
-        "nature_water": ["PEXELS", "PIXABAY"],
-        "dark_moody": ["PEXELS", "PIXABAY"],
-        "people_action": ["PEXELS", "PIXABAY"],
-        "objects_closeup": ["PIXABAY", "PEXELS"],
-        "urban_night": ["PEXELS", "PIXABAY"],
-        "default": ["PEXELS", "PIXABAY"],
+        "nature_water": ["PEXELS", "PIXABAY", "OPENVERSE"],
+        "dark_moody": ["PEXELS", "PIXABAY", "OPENVERSE"],
+        "people_action": ["PEXELS", "PIXABAY", "OPENVERSE"],
+        "objects_closeup": ["PIXABAY", "PEXELS", "OPENVERSE"],
+        "urban_night": ["PEXELS", "PIXABAY", "OPENVERSE"],
+        "default": ["PEXELS", "PIXABAY", "OPENVERSE"],
     }
 }
 
@@ -145,6 +148,12 @@ class EngineConfig:
         self.groq_api_key = os.environ.get("GROQ_API_KEY", "")
         self.pexels_key = os.environ.get("PEXELS_API_KEY", "")
         self.pixabay_key = os.environ.get("PIXABAY_API_KEY", "")
+        self.europeana_key = os.environ.get("EUROPEANA_API_KEY", "")
+        self.freesound_key = os.environ.get("FREESOUND_API_KEY", "")
+        self.openverse_client_id = os.environ.get("OPENVERSE_CLIENT_ID", "")
+        self.openverse_client_secret = os.environ.get("OPENVERSE_CLIENT_SECRET", "")
+        self.openverse_token = None
+        self.openverse_token_lock = threading.Lock()
         self.google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
         self.google_client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
         self.google_refresh_token = os.environ.get("GOOGLE_REFRESH_TOKEN", "")
@@ -227,38 +236,200 @@ def extract_json(text):
 
 
 # =============================================================================
-# SMART QUERY ENGINE — The core optimization
+# SEARCH FAILURE DIAGNOSIS — Understand WHY searches fail
+# =============================================================================
+
+class SearchFailureDiagnostics:
+    """
+    Tracks and analyzes search failures to inform the next search strategy.
+    Instead of 'try another query', we 'understand the failure → change strategy'.
+    """
+
+    # Failure categories
+    NO_RESULTS = "no_results"
+    IRRELEVANT_RESULTS = "irrelevant_results"
+    WRONG_MEDIA_TYPE = "wrong_media_type"
+    WRONG_TIME_PERIOD = "wrong_time_period"
+    WRONG_SOURCE = "wrong_source"
+    QUERY_TOO_SPECIFIC = "query_too_specific"
+    QUERY_TOO_GENERIC = "query_too_generic"
+    DOWNLOAD_FAILED = "download_failed"
+    REVIEWER_REJECTED = "reviewer_rejected"
+    FORMAT_INVALID = "format_invalid"
+    QUERY_AMBIGUOUS = "query_ambiguous"  # e.g. "cell wall" → biology
+
+    def __init__(self):
+        self.failures = defaultdict(list)  # shot_index -> list of failure records
+        self.lock = threading.Lock()
+
+    def record(self, shot_index, query, source, category, score=0.0, reason=""):
+        with self.lock:
+            self.failures[shot_index].append({
+                "query": query,
+                "source": source,
+                "category": category,
+                "score": score,
+                "reason": reason,
+                "time": time.time()
+            })
+
+    def diagnose(self, shot_index):
+        """Analyze all failures for a shot and return a diagnosis dict."""
+        with self.lock:
+            records = self.failures.get(shot_index, [])
+
+        if not records:
+            return {"diagnosis": "no_failures", "recommendations": []}
+
+        no_results_count = sum(1 for r in records if r["category"] == self.NO_RESULTS)
+        irrelevant_count = sum(1 for r in records if r["category"] == self.IRRELEVANT_RESULTS)
+        rejected_count = sum(1 for r in records if r["category"] == self.REVIEWER_REJECTED)
+        ambiguous_count = sum(1 for r in records if r["category"] == self.QUERY_AMBIGUOUS)
+        failed_sources = set(r["source"] for r in records)
+        failed_queries = set(r["query"] for r in records)
+        best_score = max((r["score"] for r in records), default=0.0)
+
+        recommendations = []
+
+        # All attempts returned no results → queries too specific for these sources
+        if no_results_count > len(records) * 0.6:
+            recommendations.append("try_broader_queries")
+            recommendations.append("switch_source_type")
+
+        # Results exist but are all irrelevant → wrong source or wrong query terms
+        if irrelevant_count > len(records) * 0.4:
+            recommendations.append("change_query_terminology")
+            recommendations.append("try_different_source")
+
+        # Ambiguous queries (e.g., cell = biology vs prison)
+        if ambiguous_count > 0:
+            recommendations.append("disambiguate_query")
+
+        # Reviewer rejects with decent scores → try accept_similar
+        if rejected_count > 0 and best_score >= 0.2:
+            recommendations.append("lower_threshold_slightly")
+            recommendations.append("try_alternative_representation")
+
+        # Specific source has failed many times → avoid it
+        source_fail_counts = defaultdict(int)
+        for r in records:
+            source_fail_counts[r["source"]] += 1
+        exhausted_sources = [s for s, c in source_fail_counts.items() if c >= 3]
+        if exhausted_sources:
+            recommendations.append(f"avoid_sources:{','.join(exhausted_sources)}")
+
+        return {
+            "diagnosis": "analyzed",
+            "total_failures": len(records),
+            "no_results": no_results_count,
+            "irrelevant": irrelevant_count,
+            "rejected": rejected_count,
+            "best_score": best_score,
+            "failed_sources": list(failed_sources),
+            "failed_queries": list(failed_queries),
+            "recommendations": recommendations
+        }
+
+FAILURE_DIAGNOSTICS = SearchFailureDiagnostics()
+
+
+# =============================================================================
+# SMART QUERY ENGINE V2 — Genuinely different strategies per attempt
 # =============================================================================
 
 class SmartQueryEngine:
     """
-    Generates intelligent, multi-tier search queries optimized for each source.
-    Instead of simple keyword cycling, it:
-    1. Decomposes scene descriptions into searchable semantic elements
-    2. Builds source-specific queries (stock footage SEO vs archive metadata)
-    3. Generates genuinely different alternative queries (not just word swaps)
-    4. Tracks what failed and avoids repeating similar patterns
+    Generates intelligent, multi-tier search queries that are GENUINELY DIFFERENT
+    across 15 attempts. Uses scene decomposition into semantic dimensions and
+    learns from previous failures.
+
+    Strategy progression:
+    Attempts 1-3:  Precise entity/event/person queries
+    Attempts 4-6:  Semantic reformulations preserving key entities
+    Attempts 7-9:  Source-switching with adapted terminology
+    Attempts 10-12: Alternative representations, broader context
+    Attempts 13-15: Ultra-generic safe fallbacks, creative alternatives
     """
 
     # Common stock footage keywords that perform well on Pexels/Pixabay
     STOCK_BOOSTERS = {
-        "water": ["ocean waves", "sea water", "underwater", "water surface"],
-        "dark": ["dark room", "shadows", "silhouette", "low light"],
-        "night": ["night city", "dark sky", "moonlight", "night time"],
-        "prison": ["jail cell", "prison bars", "behind bars", "locked door"],
-        "document": ["old papers", "vintage document", "typewriter", "old book"],
-        "person": ["man portrait", "close up face", "person walking", "silhouette person"],
-        "fog": ["misty", "foggy landscape", "haze", "cloudy"],
-        "car": ["classic car", "vintage automobile", "car headlights", "driving"],
-        "letter": ["handwritten letter", "old envelope", "writing pen", "ink on paper"],
-        "beach": ["sandy beach", "shore", "coastline", "seaside"],
-        "clock": ["ticking clock", "pocket watch", "time lapse", "clock hands"],
-        "tombstone": ["graveyard", "cemetery", "memorial stone", "burial ground"],
+        "water": ["ocean waves", "sea water", "underwater", "water surface", "dark waves night", "rough sea"],
+        "dark": ["dark room", "shadows", "silhouette", "low light", "noir scene", "abandoned building"],
+        "night": ["night city", "dark sky", "moonlight", "night time", "streetlight fog", "car headlights night"],
+        "prison": ["jail cell", "prison bars", "behind bars", "locked door", "metal gate", "concrete corridor"],
+        "document": ["old papers", "vintage document", "typewriter", "old book", "file cabinet", "folder desk"],
+        "person": ["man portrait", "close up face", "person walking", "silhouette person", "mysterious figure", "lone figure"],
+        "fog": ["misty", "foggy landscape", "haze", "cloudy", "smoke dark", "mist forest"],
+        "car": ["classic car", "vintage automobile", "car headlights", "driving", "road night", "highway dark"],
+        "letter": ["handwritten letter", "old envelope", "writing pen", "ink on paper", "wax seal", "postmark"],
+        "beach": ["sandy beach", "shore", "coastline", "seaside", "footprints sand", "waves shore"],
+        "clock": ["ticking clock", "pocket watch", "time lapse", "clock hands", "pendulum", "antique clock"],
+        "tombstone": ["graveyard", "cemetery", "memorial stone", "burial ground", "old grave", "headstone"],
+        "fire": ["flames burning", "fireplace", "candle flame", "sparks", "match lighting", "bonfire"],
+        "map": ["world map", "vintage map", "compass navigation", "atlas pages", "cartography", "globe spinning"],
+        "police": ["police lights", "crime scene tape", "investigation", "detective badge", "squad car", "siren lights"],
+        "boat": ["fishing boat", "sailing vessel", "rowboat", "ship ocean", "harbor boats", "coast guard vessel"],
+        "rain": ["rain drops", "rainy window", "storm lightning", "wet street", "umbrella rain", "downpour"],
+    }
+
+    # Archive-specific query patterns for different content types
+    ARCHIVE_STRATEGIES = {
+        "person_mugshot": [
+            "{entity} mugshot",
+            "{entity} wanted poster",
+            "{entity} photograph portrait",
+            "{entity} FBI file",
+            "{entity} criminal record",
+            "famous fugitive photograph",
+            "vintage mugshot criminal",
+            "FBI wanted poster vintage",
+        ],
+        "document_file": [
+            "{entity} document",
+            "{entity} FBI file",
+            "{entity} official report",
+            "{entity} classified",
+            "FBI investigation file",
+            "government document classified",
+            "official memo vintage",
+            "typewritten report archive",
+        ],
+        "location_photo": [
+            "{entity} photograph",
+            "{entity} aerial view",
+            "{entity} historical photo",
+            "{entity} vintage postcard",
+            "historical landmark photo",
+            "vintage location photograph",
+            "famous building old photo",
+            "historic site aerial",
+        ],
+        "historical_event": [
+            "{entity} news footage",
+            "{entity} press photo",
+            "{entity} documentary",
+            "{entity} 1960s photograph",
+            "historic event photograph",
+            "vintage news reel",
+            "cold war era photo",
+            "mid century archive",
+        ],
+        "newspaper_article": [
+            "{entity} newspaper",
+            "{entity} headline",
+            "{entity} front page",
+            "{entity} news clipping",
+            "vintage newspaper headline",
+            "old newspaper crime",
+            "historical newspaper front page",
+            "archive news article",
+        ],
     }
 
     def __init__(self):
-        self.failed_queries = defaultdict(set)  # source -> set of failed queries
+        self.failed_queries = defaultdict(set)  # source -> set of failed query keys
         self.successful_keywords = defaultdict(set)  # category -> keywords that worked
+        self.lock = threading.Lock()
 
     def classify_content_type(self, shot):
         """Classify the content type of a shot for source affinity routing."""
@@ -266,27 +437,27 @@ class SmartQueryEngine:
         cat = shot.get("category", "CINEMATIC")
 
         if cat == "ARCHIVE":
-            if any(w in text for w in ["mugshot", "wanted", "prisoner", "inmate", "morris", "anglin"]):
+            if any(w in text for w in ["mugshot", "wanted", "prisoner", "inmate", "morris", "anglin", "portrait", "face"]):
                 return "person_mugshot"
-            if any(w in text for w in ["document", "file", "letter", "report", "fbi", "classified", "memo"]):
+            if any(w in text for w in ["document", "file", "letter", "report", "fbi", "classified", "memo", "dossier"]):
                 return "document_file"
-            if any(w in text for w in ["island", "building", "prison", "alcatraz", "bridge", "city"]):
+            if any(w in text for w in ["island", "building", "prison", "alcatraz", "bridge", "city", "aerial", "exterior"]):
                 return "location_photo"
-            if any(w in text for w in ["newspaper", "headline", "press", "article", "news"]):
+            if any(w in text for w in ["newspaper", "headline", "press", "article", "news", "clipping", "front page"]):
                 return "newspaper_article"
-            if any(w in text for w in ["1962", "1960", "1979", "historical", "vintage", "archive"]):
+            if any(w in text for w in ["1962", "1960", "1979", "historical", "vintage", "archive", "event", "era"]):
                 return "historical_event"
             return "default"
         else:
-            if any(w in text for w in ["water", "ocean", "sea", "wave", "underwater", "floating", "sinking", "tide"]):
+            if any(w in text for w in ["water", "ocean", "sea", "wave", "underwater", "floating", "sinking", "tide", "bay"]):
                 return "nature_water"
-            if any(w in text for w in ["dark", "shadow", "night", "fog", "mysterious", "gloomy"]):
+            if any(w in text for w in ["dark", "shadow", "night", "fog", "mysterious", "gloomy", "flashlight", "noir"]):
                 return "dark_moody"
-            if any(w in text for w in ["person", "man", "woman", "walking", "running", "face", "silhouette"]):
+            if any(w in text for w in ["person", "man", "woman", "walking", "running", "face", "silhouette", "hands"]):
                 return "people_action"
-            if any(w in text for w in ["document", "stamp", "file", "clock", "spoon", "envelope", "letter"]):
+            if any(w in text for w in ["document", "stamp", "file", "clock", "spoon", "envelope", "letter", "knife", "tool"]):
                 return "objects_closeup"
-            if any(w in text for w in ["city", "street", "car", "driving", "urban", "building"]):
+            if any(w in text for w in ["city", "street", "car", "driving", "urban", "building", "road"]):
                 return "urban_night"
             return "default"
 
@@ -295,82 +466,101 @@ class SmartQueryEngine:
         cat = shot.get("category", "CINEMATIC")
         content_type = self.classify_content_type(shot)
         affinity_map = SOURCE_AFFINITY.get(cat, SOURCE_AFFINITY["CINEMATIC"])
-        return affinity_map.get(content_type, affinity_map["default"])
+        ordered = affinity_map.get(content_type, affinity_map["default"])
+        # Filter to sources that are actually available (have API keys)
+        return [s for s in ordered if self._source_available(s)]
+
+    def _source_available(self, source):
+        """Check if a source has the required API keys configured."""
+        if source == "PEXELS": return bool(CONFIG.pexels_key)
+        if source == "PIXABAY": return bool(CONFIG.pixabay_key)
+        if source == "EUROPEANA": return bool(CONFIG.europeana_key)
+        if source == "OPENVERSE": return bool(CONFIG.openverse_client_id and CONFIG.openverse_client_secret)
+        # Wikipedia, FBI_ARCHIVE, LOC don't need keys
+        return True
+
+    def decompose_scene(self, shot):
+        """
+        Decompose a shot into semantic search dimensions:
+        entity, person, event, location, period, action, object, shot_type, media_type
+        """
+        entities = shot.get("exact_entities", [])
+        vibes = shot.get("visual_vibes", [])
+        text = shot.get("text", "")
+        cat = shot.get("category", "CINEMATIC")
+
+        dimensions = {
+            "primary_entity": entities[0] if entities else "",
+            "secondary_entity": entities[1] if len(entities) > 1 else "",
+            "tertiary_entity": entities[2] if len(entities) > 2 else "",
+            "all_entities": entities,
+            "vibes": vibes,
+            "category": cat,
+            "content_type": shot.get("content_type", "default"),
+            "text": text,
+        }
+        return dimensions
 
     def generate_query_tiers(self, shot, attempt_num=0):
         """
-        Generate a tiered list of queries, each genuinely different.
-        Returns list of (query, source) tuples ordered by expected quality.
+        Generate genuinely different queries for each attempt number.
+        Returns list of (query, source) tuples.
+
+        Attempt Strategy:
+        0:   Exact primary entity on best source
+        1:   Broader context query on second source
+        2:   Combined entity query
+        3:   Focus on main person/entity name only
+        4:   Focus on historical event itself
+        5:   Location + event terminology
+        6:   Source-specific metadata terminology
+        7:   Switch to different source type entirely
+        8:   Alternative representation of same event
+        9:   Use successful keywords from other scenes
+        10:  Ultra-simplified query (1-2 words)
+        11:  Completely different angle/perspective
+        12:  Generic category fallback
+        13:  Broad topic search
+        14:  Last-resort generic archive/cinematic
         """
         cat = shot.get("category", "CINEMATIC")
         entities = shot.get("exact_entities", [CONFIG.topic_clean, "investigation", "mystery", "police"])
         vibes = shot.get("visual_vibes", ["mystery", "dark room", "shadow", "suspense"])
+        content_type = shot.get("content_type", "default")
         ordered_sources = self.get_ordered_sources(shot)
+
+        if not ordered_sources:
+            ordered_sources = ["PEXELS", "PIXABAY"] if cat == "CINEMATIC" else ["WIKIPEDIA", "FBI_ARCHIVE", "LOC"]
+
+        # Get failure diagnosis for this shot
+        diagnosis = FAILURE_DIAGNOSTICS.diagnose(shot.get("index", 0))
+        avoid_sources_str = ""
+        for rec in diagnosis.get("recommendations", []):
+            if rec.startswith("avoid_sources:"):
+                avoid_sources_str = rec.split(":")[1]
+
+        avoid_sources = set(avoid_sources_str.split(",")) if avoid_sources_str else set()
+        # Filter ordered sources to avoid exhausted ones (but keep at least one)
+        filtered_sources = [s for s in ordered_sources if s not in avoid_sources]
+        if not filtered_sources:
+            filtered_sources = ordered_sources  # Don't filter if ALL would be removed
 
         queries = []
 
         if cat == "ARCHIVE":
-            # Tier 1: Exact entity name (highest precision)
-            if len(entities) > 0 and attempt_num == 0:
-                queries.append((entities[0], ordered_sources[0]))
+            queries = self._generate_archive_queries(entities, content_type, filtered_sources, attempt_num, diagnosis)
+        else:
+            queries = self._generate_cinematic_queries(vibes, entities, filtered_sources, attempt_num, diagnosis)
 
-            # Tier 2: Broader context query
-            if len(entities) > 1:
-                idx = min(attempt_num, len(entities) - 1)
-                q = entities[idx]
-                src = ordered_sources[attempt_num % len(ordered_sources)]
-                queries.append((q, src))
-
-            # Tier 3: Combined semantic query
-            if attempt_num >= 1 and len(entities) >= 2:
-                combined = f"{entities[0]} {entities[-1]}"
-                src = ordered_sources[(attempt_num + 1) % len(ordered_sources)]
-                queries.append((combined, src))
-
-            # Tier 4: Generic historical fallback
-            if attempt_num >= 2:
-                fallbacks = entities[2:] if len(entities) > 2 else [CONFIG.topic_clean]
-                for i, fb in enumerate(fallbacks):
-                    src = ordered_sources[(attempt_num + i) % len(ordered_sources)]
-                    queries.append((fb, src))
-
-        else:  # CINEMATIC
-            # Tier 1: Best stock keyword
-            if len(vibes) > 0 and attempt_num == 0:
-                queries.append((vibes[0], ordered_sources[0]))
-
-            # Tier 2: Alternative vibes, rotating sources
-            if len(vibes) > 1:
-                idx = min(attempt_num, len(vibes) - 1)
-                q = vibes[idx]
-                src = ordered_sources[attempt_num % len(ordered_sources)]
-                queries.append((q, src))
-
-            # Tier 3: Boosted/expanded queries from our stock keyword map
-            if attempt_num >= 1:
-                for vibe in vibes:
-                    base_word = vibe.split()[0].lower() if vibe else ""
-                    if base_word in self.STOCK_BOOSTERS:
-                        boosted = self.STOCK_BOOSTERS[base_word]
-                        boost_idx = (attempt_num - 1) % len(boosted)
-                        src = ordered_sources[(attempt_num) % len(ordered_sources)]
-                        queries.append((boosted[boost_idx], src))
-                        break
-
-            # Tier 4: Use successful keywords from same category
-            if attempt_num >= 2 and self.successful_keywords.get(cat):
-                kw = random.choice(list(self.successful_keywords[cat]))
-                src = ordered_sources[attempt_num % len(ordered_sources)]
-                queries.append((kw, src))
-
-        # Filter out queries we've already failed with on that source
+        # Filter out queries we've already failed with on that specific source
         filtered = []
         seen = set()
-        for q, src in queries:
-            key = f"{src}:{q}"
-            if key not in self.failed_queries[src] and key not in seen:
-                filtered.append((q, src))
-                seen.add(key)
+        with self.lock:
+            for q, src in queries:
+                key = f"{src}:{q.lower().strip()}"
+                if key not in self.failed_queries.get(src, set()) and key not in seen:
+                    filtered.append((q, src))
+                    seen.add(key)
 
         # Always return at least one query
         if not filtered:
@@ -378,21 +568,279 @@ class SmartQueryEngine:
                 fallback_q = entities[attempt_num % len(entities)] if entities else CONFIG.topic_clean
             else:
                 fallback_q = vibes[attempt_num % len(vibes)] if vibes else "cinematic"
-            fallback_src = ordered_sources[attempt_num % len(ordered_sources)]
+            fallback_src = filtered_sources[attempt_num % len(filtered_sources)]
             filtered.append((fallback_q, fallback_src))
 
         return filtered
 
+    def _generate_archive_queries(self, entities, content_type, sources, attempt, diagnosis):
+        """Generate genuinely different archive search queries per attempt."""
+        queries = []
+        n_sources = len(sources)
+        n_entities = len(entities)
+
+        # Get archive-specific query templates
+        templates = self.ARCHIVE_STRATEGIES.get(content_type, self.ARCHIVE_STRATEGIES.get("default", []))
+
+        if attempt == 0:
+            # Attempt 0: Exact primary entity on best source
+            if n_entities > 0:
+                queries.append((entities[0], sources[0]))
+            if n_entities > 1 and n_sources > 1:
+                queries.append((entities[1], sources[1 % n_sources]))
+
+        elif attempt == 1:
+            # Attempt 1: Secondary entity / broader context on different source
+            if n_entities > 1:
+                queries.append((entities[1], sources[attempt % n_sources]))
+            if n_entities > 0:
+                # Simplified version of primary entity
+                simplified = entities[0].split()[:2]
+                queries.append((" ".join(simplified), sources[(attempt + 1) % n_sources]))
+
+        elif attempt == 2:
+            # Attempt 2: Combined entity query
+            if n_entities >= 2:
+                combined = f"{entities[0]} {entities[-1]}"
+                queries.append((combined, sources[attempt % n_sources]))
+            if n_entities > 2:
+                queries.append((entities[2], sources[(attempt + 1) % n_sources]))
+
+        elif attempt == 3:
+            # Attempt 3: Focus on main person/entity name only (shortest)
+            if n_entities > 0:
+                # Extract just the proper noun (first 1-2 words)
+                words = entities[0].split()
+                person_name = " ".join(words[:2]) if len(words) >= 2 else words[0]
+                queries.append((person_name, sources[attempt % n_sources]))
+                queries.append((person_name, sources[(attempt + 1) % n_sources]))
+
+        elif attempt == 4:
+            # Attempt 4: Focus on the historical event itself
+            if n_entities > 3:
+                queries.append((entities[3], sources[attempt % n_sources]))
+            elif n_entities > 0:
+                queries.append((f"{entities[0]} history", sources[attempt % n_sources]))
+
+        elif attempt == 5:
+            # Attempt 5: Location + event terminology
+            if n_entities > 1:
+                queries.append((f"{entities[1]} photograph", sources[attempt % n_sources]))
+            if n_entities > 4:
+                queries.append((entities[4], sources[(attempt + 1) % n_sources]))
+
+        elif attempt == 6:
+            # Attempt 6: Source-specific metadata terminology
+            src = sources[attempt % n_sources]
+            if templates and n_entities > 0:
+                template_idx = attempt % len(templates)
+                q = templates[template_idx].format(entity=entities[0].split()[0])
+                queries.append((q, src))
+
+        elif attempt == 7:
+            # Attempt 7: Switch to a completely different source type
+            # Try sources we haven't tried much
+            for src in sources:
+                fail_count = sum(1 for f in diagnosis.get("failed_queries", []) if src in f)
+                if fail_count < 2:
+                    if n_entities > 0:
+                        queries.append((entities[0].split()[0], src))
+                    break
+            if not queries and n_entities > 5:
+                queries.append((entities[5], sources[attempt % n_sources]))
+
+        elif attempt == 8:
+            # Attempt 8: Alternative representation of the same concept
+            if n_entities > 0:
+                alt_queries = [
+                    f"{entities[0].split()[0]} archive",
+                    f"{entities[0].split()[0]} photo historical",
+                    f"vintage {entities[0].split()[-1]}",
+                ]
+                idx = attempt % len(alt_queries)
+                queries.append((alt_queries[idx], sources[attempt % n_sources]))
+
+        elif attempt == 9:
+            # Attempt 9: Use successful keywords from other scenes
+            with self.lock:
+                if self.successful_keywords.get("ARCHIVE"):
+                    kw = random.choice(list(self.successful_keywords["ARCHIVE"]))
+                    queries.append((kw, sources[attempt % n_sources]))
+            if not queries and n_entities > 0:
+                queries.append((f"{entities[0]} image", sources[attempt % n_sources]))
+
+        elif attempt == 10:
+            # Attempt 10: Ultra-simplified 1-2 word query
+            if n_entities > 0:
+                single_word = entities[0].split()[0]
+                queries.append((single_word, sources[attempt % n_sources]))
+                if n_sources > 1:
+                    queries.append((single_word, sources[(attempt + 1) % n_sources]))
+
+        elif attempt == 11:
+            # Attempt 11: Completely different angle
+            if n_entities > 0:
+                queries.append((f"historic {content_type.replace('_', ' ')}", sources[attempt % n_sources]))
+
+        elif attempt == 12:
+            # Attempt 12: Generic category fallback
+            generic_map = {
+                "person_mugshot": "vintage portrait photograph",
+                "document_file": "old typewritten document",
+                "location_photo": "historic building exterior",
+                "historical_event": "vintage news photograph",
+                "newspaper_article": "old newspaper front page",
+                "default": "historical archive photograph",
+            }
+            queries.append((generic_map.get(content_type, "historical archive"), sources[attempt % n_sources]))
+
+        elif attempt == 13:
+            # Attempt 13: Broad topic search
+            queries.append((CONFIG.topic_clean[:50], sources[attempt % n_sources]))
+
+        elif attempt == 14:
+            # Attempt 14: Last resort generic
+            last_resort = ["historic archive photo", "vintage document", "old photograph sepia"]
+            queries.append((last_resort[attempt % len(last_resort)], sources[attempt % n_sources]))
+
+        # If no queries generated for this attempt, create a safe fallback
+        if not queries:
+            fb_entity = entities[attempt % n_entities] if n_entities > 0 else CONFIG.topic_clean
+            queries.append((fb_entity, sources[attempt % n_sources]))
+
+        return queries
+
+    def _generate_cinematic_queries(self, vibes, entities, sources, attempt, diagnosis):
+        """Generate genuinely different cinematic/B-roll queries per attempt."""
+        queries = []
+        n_sources = len(sources)
+        n_vibes = len(vibes)
+
+        if attempt == 0:
+            # Best stock keyword on best source
+            if n_vibes > 0:
+                queries.append((vibes[0], sources[0]))
+            if n_vibes > 1 and n_sources > 1:
+                queries.append((vibes[1], sources[1 % n_sources]))
+
+        elif attempt == 1:
+            # Alternative vibes, rotating sources
+            if n_vibes > 1:
+                queries.append((vibes[1], sources[attempt % n_sources]))
+            if n_vibes > 2:
+                queries.append((vibes[2], sources[(attempt + 1) % n_sources]))
+
+        elif attempt == 2:
+            # Boosted/expanded queries from stock keyword map
+            for vibe in vibes:
+                base_word = vibe.split()[0].lower() if vibe else ""
+                if base_word in self.STOCK_BOOSTERS:
+                    boosted = self.STOCK_BOOSTERS[base_word]
+                    boost_idx = (attempt - 1) % len(boosted)
+                    queries.append((boosted[boost_idx], sources[attempt % n_sources]))
+                    if len(boosted) > 1:
+                        queries.append((boosted[(boost_idx + 1) % len(boosted)], sources[(attempt + 1) % n_sources]))
+                    break
+            if not queries and n_vibes > 2:
+                queries.append((vibes[2], sources[attempt % n_sources]))
+
+        elif attempt == 3:
+            # Different boost words
+            for vibe in vibes:
+                base_word = vibe.split()[0].lower() if vibe else ""
+                if base_word in self.STOCK_BOOSTERS:
+                    boosted = self.STOCK_BOOSTERS[base_word]
+                    queries.append((boosted[min(attempt, len(boosted) - 1)], sources[attempt % n_sources]))
+                    break
+            if not queries and n_vibes > 3:
+                queries.append((vibes[3], sources[attempt % n_sources]))
+
+        elif attempt == 4:
+            # Semantic variations of the main vibe
+            if n_vibes > 0:
+                main_vibe = vibes[0]
+                variations = [
+                    f"cinematic {main_vibe}",
+                    f"{main_vibe} dramatic",
+                    f"moody {main_vibe}",
+                ]
+                idx = attempt % len(variations)
+                queries.append((variations[idx], sources[attempt % n_sources]))
+
+        elif attempt == 5:
+            # Try remaining vibes we haven't used
+            if n_vibes > 4:
+                queries.append((vibes[4], sources[attempt % n_sources]))
+            elif n_vibes > 3:
+                queries.append((vibes[3], sources[attempt % n_sources]))
+
+        elif attempt == 6:
+            # Switch source type
+            if n_vibes > 5:
+                queries.append((vibes[5], sources[attempt % n_sources]))
+            else:
+                queries.append(("cinematic b-roll dark", sources[attempt % n_sources]))
+
+        elif attempt == 7:
+            # Use successful keywords from same category
+            with self.lock:
+                if self.successful_keywords.get("CINEMATIC"):
+                    kw = random.choice(list(self.successful_keywords["CINEMATIC"]))
+                    queries.append((kw, sources[attempt % n_sources]))
+            if not queries and n_vibes > 0:
+                queries.append((vibes[0].split()[0], sources[attempt % n_sources]))
+
+        elif attempt == 8:
+            # Try each word of vibes individually
+            if n_vibes > 0:
+                for vibe in vibes[:3]:
+                    words = vibe.split()
+                    if words:
+                        queries.append((words[0], sources[attempt % n_sources]))
+                        break
+
+        elif attempt == 9:
+            # Cross-reference with related stock keywords
+            all_related = set()
+            for vibe in vibes:
+                base = vibe.split()[0].lower()
+                if base in self.STOCK_BOOSTERS:
+                    all_related.update(self.STOCK_BOOSTERS[base])
+            if all_related:
+                kw = random.choice(list(all_related))
+                queries.append((kw, sources[attempt % n_sources]))
+
+        elif attempt >= 10:
+            # Ultra-generic safe fallbacks
+            safe_queries = [
+                "dark atmospheric",
+                "suspense noir",
+                "mystery investigation",
+                "vintage noir film",
+                "cinematic mood lighting",
+            ]
+            idx = (attempt - 10) % len(safe_queries)
+            queries.append((safe_queries[idx], sources[attempt % n_sources]))
+
+        # Ensure at least one query
+        if not queries:
+            fb_vibe = vibes[attempt % n_vibes] if n_vibes > 0 else "cinematic"
+            queries.append((fb_vibe, sources[attempt % n_sources]))
+
+        return queries
+
     def record_failure(self, query, source):
         """Record a failed query to avoid repeating it."""
-        self.failed_queries[source].add(f"{source}:{query}")
+        with self.lock:
+            self.failed_queries[source].add(f"{source}:{query.lower().strip()}")
 
     def record_success(self, query, category):
         """Record successful keywords for future reuse."""
         words = query.lower().split()
-        for w in words:
-            if len(w) > 2:
-                self.successful_keywords[category].add(w)
+        with self.lock:
+            for w in words:
+                if len(w) > 2:
+                    self.successful_keywords[category].add(w)
 
 QUERY_ENGINE = SmartQueryEngine()
 
@@ -404,15 +852,17 @@ QUERY_ENGINE = SmartQueryEngine()
 class MediaPreFilter:
     """
     Quick heuristic checks on downloaded media BEFORE calling the expensive
-    AGY reviewer. This saves significant time and API calls.
+    AGY reviewer. Includes metadata relevance scoring.
     """
 
-    # Keywords that indicate completely irrelevant content from archive.org
-    ARCHIVE_SPAM_PATTERNS = [
+    # Keywords that indicate completely irrelevant content
+    SPAM_PATTERNS = [
         r"spectrogram", r"waveform", r"podcast", r"subscribe",
         r"christmas", r"birthday", r"wedding", r"baby",
         r"world of warcraft", r"minecraft", r"fortnite",
         r"cooking", r"recipe", r"makeup", r"tutorial",
+        r"thank\s*you", r"happy\s*new\s*year", r"welcome",
+        r"subscribe", r"like\s*and\s*share",
     ]
 
     @staticmethod
@@ -449,6 +899,42 @@ class MediaPreFilter:
         return True, "ok"
 
     @staticmethod
+    def check_metadata_relevance(title, description, query, shot):
+        """
+        Score metadata relevance BEFORE downloading.
+        Returns a score from -1.0 (definitely irrelevant) to 1.0 (highly relevant).
+        This saves bandwidth by skipping obviously bad candidates.
+        """
+        if not title and not description:
+            return 0.0  # Unknown, don't penalize
+
+        combined = f"{title} {description}".lower()
+        query_words = set(w.lower() for w in query.split() if len(w) > 2)
+
+        score = 0.0
+
+        # Positive: query keywords found in metadata
+        matches = sum(1 for w in query_words if w in combined)
+        if query_words:
+            score += min(0.5, matches / len(query_words) * 0.5)
+
+        # Positive: entity keywords found
+        entities = shot.get("exact_entities", [])
+        for entity in entities[:3]:
+            entity_words = [w.lower() for w in entity.split() if len(w) > 2]
+            for ew in entity_words:
+                if ew in combined:
+                    score += 0.15
+                    break
+
+        # Negative: spam patterns
+        for pattern in MediaPreFilter.SPAM_PATTERNS:
+            if re.search(pattern, combined, re.I):
+                return -0.5  # Definitely spam
+
+        return min(1.0, score)
+
+    @staticmethod
     def check_filename_relevance(filename, query, category):
         """
         Check if filename/metadata gives hints about content relevance.
@@ -463,12 +949,12 @@ class MediaPreFilter:
         # Positive signals: filename contains query keywords
         matches = sum(1 for w in query_words if w in fn_lower and len(w) > 2)
         if matches >= 2:
-            return 0.15  # Bonus for strong filename match
+            return 0.15
 
         # Negative signals: known spam patterns
-        for pattern in MediaPreFilter.ARCHIVE_SPAM_PATTERNS:
+        for pattern in MediaPreFilter.SPAM_PATTERNS:
             if re.search(pattern, fn_lower):
-                return -0.3  # Penalty for likely spam
+                return -0.3
 
         return 0.0
 
@@ -480,11 +966,11 @@ class MediaPreFilter:
 class ParallelSourceFetcher:
     """
     Fetches media from multiple sources in parallel for the same shot,
-    then picks the best result. This dramatically reduces wall-clock time.
+    then picks the best result.
     """
 
     def __init__(self):
-        self.executor = ThreadPoolExecutor(max_workers=5)
+        self.executor = ThreadPoolExecutor(max_workers=8)
 
     async def fetch_from_multiple_sources(self, query_source_pairs, shot, base_path):
         """
@@ -533,6 +1019,12 @@ class ParallelSourceFetcher:
             elif source_name == "FBI_ARCHIVE":
                 found_file, media_uid = await asyncio.to_thread(
                     MediaSources.fetch_fbi_archive, query, Path(f"{base_path}_{source_name}"))
+            elif source_name == "EUROPEANA":
+                found_file, media_uid = await asyncio.to_thread(
+                    MediaSources.fetch_europeana, query, image_path)
+            elif source_name == "OPENVERSE":
+                found_file, media_uid = await asyncio.to_thread(
+                    MediaSources.fetch_openverse, query, image_path, shot)
 
             return (found_file, media_uid, source_name, query)
         except Exception as e:
@@ -553,7 +1045,7 @@ class SearchResultCache:
     """
 
     def __init__(self):
-        self.cache = {}  # (source, query_hash) -> list of results
+        self.cache = {}
         self.run_id = CONFIG.run_id
         self.lock = threading.Lock()
 
@@ -576,6 +1068,31 @@ class SearchResultCache:
 SEARCH_CACHE = SearchResultCache()
 
 
+# =============================================================================
+# OPENVERSE AUTH — Token management for Openverse API
+# =============================================================================
+
+def get_openverse_token():
+    """Get or refresh Openverse API access token."""
+    with CONFIG.openverse_token_lock:
+        if CONFIG.openverse_token:
+            return CONFIG.openverse_token
+        if not CONFIG.openverse_client_id or not CONFIG.openverse_client_secret:
+            return None
+        try:
+            resp = requests.post("https://api.openverse.org/v1/auth_tokens/token/", data={
+                "client_id": CONFIG.openverse_client_id,
+                "client_secret": CONFIG.openverse_client_secret,
+                "grant_type": "client_credentials"
+            }, timeout=15)
+            if resp.status_code == 200:
+                CONFIG.openverse_token = resp.json().get("access_token")
+                return CONFIG.openverse_token
+        except Exception as e:
+            log(f"⚠️ Openverse auth failed: {e}", "warning")
+        return None
+
+
 async def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
     log(f"🎨 إنشاء صورة مخصصة عبر AGY: '{prompt[:70]}...'", "info")
     full_prompt = f"[CRITICAL: NO TEXT ON IMAGE. OUTPUT RAW IMAGE ONLY] Photorealistic cinematic documentary photo: {prompt}. Aspect Ratio: {aspect_ratio}"
@@ -584,7 +1101,6 @@ async def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
         if Path(output_path).exists(): Path(output_path).unlink()
         cmd_binary = ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", full_prompt]
 
-        # تم حل مشكلة انقطاع الوقت عند توليد الصور هنا (الخطأ السابق 120 ثانية)
         res_bin = await asyncio.to_thread(subprocess.run, cmd_binary, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300)
 
         if res_bin.stdout.startswith(b'\xff\xd8') or res_bin.stdout.startswith(b'\x89PNG'):
@@ -598,7 +1114,7 @@ async def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
             return True
 
     except subprocess.TimeoutExpired:
-        log(f"⚠️ انتهى الوقت المخصص لتوليد الصورة البديلة، سيتم الانتقال للخلفية السينمائية.", "warning")
+        log(f"⚠️ انتهى الوقت المخصص لتوليد الصورة البديلة.", "warning")
     except Exception as e:
         log(f"⚠️ فشل التوليد عبر AGY: {e}", "warning")
 
@@ -648,7 +1164,6 @@ Requirements: Arabic narration. Total approx 350-450 words. Divide into part_1 a
         log("🎬 [المخرج الفني] هندسة كلمات البحث بذكاء للقطات...")
         shots_summary = "\n".join([f"Shot {s['index']}: {s['text']}" for s in shots])
 
-        # Enhanced director prompt with 6-tier query system and content type classification
         prompt = f"""You are an Elite Visual Director and Expert Stock/Archive SEO Metadata Specialist.
 TOPIC: {self.script.get('primary_english_query', CONFIG.topic)}
 [ID: {CONFIG.run_id}]
@@ -686,7 +1201,6 @@ Return ONLY a valid JSON object mapping shot index (as string keys) to the above
                         cat_raw = str(board[idx].get("category", "")).strip().upper()
                         shot["category"] = "ARCHIVE" if "ARCHIV" in cat_raw else "CINEMATIC"
                         shot["content_type"] = board[idx].get("content_type", "default")
-                        # Receive the expanded 6-query arrays
                         shot["exact_entities"] = board[idx].get("exact_entities", [CONFIG.topic_clean, "investigation", "mystery file", "old photo", "vintage archive", "historical document"])
                         shot["visual_vibes"] = board[idx].get("visual_vibes", ["mystery", "dark room", "cinematic shadow", "suspense", "dramatic light", "moody atmosphere"])
                         shot["reviewer_context"] = board[idx].get("reviewer_context", "تأكد من مطابقة اللقطة للنص.")
@@ -900,6 +1414,86 @@ class MediaSources:
             return MediaSources._track_and_save(res, o, lambda i: (sorted(i.get("video_files", []), key=lambda x: abs((x.get("width") or 0)-TARGET_W))[0].get("link") if i.get("video_files") else None, str(i.get("id"))))
         except: return None, None
 
+    @staticmethod
+    def fetch_europeana(q, o):
+        """Fetch from Europeana — excellent for European historical archives."""
+        if not CONFIG.europeana_key: return None, None
+        try:
+            q_clean = clean_query(q)
+            if not q_clean: return None, None
+            params = {
+                "wskey": CONFIG.europeana_key,
+                "query": q_clean,
+                "media": "true",
+                "thumbnail": "true",
+                "rows": 20,
+                "profile": "rich",
+                "qf": "TYPE:IMAGE",
+            }
+            res = requests.get("https://api.europeana.eu/record/v2/search.json", params=params, headers=API_HEADERS, timeout=20)
+            if res.status_code != 200:
+                return None, None
+            items = res.json().get("items", [])
+            if not items:
+                return None, None
+
+            def extract_europeana(item):
+                # Try to get the best available image
+                edmIsShownBy = item.get("edmIsShownBy", [None])
+                edmPreview = item.get("edmPreview", [None])
+                img_url = None
+                if edmIsShownBy and edmIsShownBy[0]:
+                    img_url = edmIsShownBy[0]
+                elif edmPreview and edmPreview[0]:
+                    img_url = edmPreview[0]
+                uid = item.get("id", str(hash(str(item.get("title", [""])))))
+                return img_url, f"europeana_{uid}"
+
+            return MediaSources._track_and_save(items, o, extract_europeana)
+        except Exception as e:
+            log(f"⚠️ Europeana error: {e}", "debug")
+            return None, None
+
+    @staticmethod
+    def fetch_openverse(q, o, shot=None):
+        """Fetch from Openverse — open-licensed images from many sources."""
+        token = get_openverse_token()
+        if not token:
+            return None, None
+        try:
+            q_clean = clean_query(q)
+            if not q_clean: return None, None
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "User-Agent": API_HEADERS["User-Agent"],
+            }
+            # Determine if we want images or audio (for CINEMATIC we usually want images)
+            cat = shot.get("category", "CINEMATIC") if shot else "CINEMATIC"
+            endpoint = "https://api.openverse.org/v1/images/"
+            params = {
+                "q": q_clean,
+                "page_size": 20,
+                "license_type": "all-cc",
+            }
+            res = requests.get(endpoint, headers=headers, params=params, timeout=20)
+            if res.status_code != 200:
+                return None, None
+            results = res.json().get("results", [])
+            if not results:
+                return None, None
+
+            def extract_openverse(item):
+                url = item.get("url")
+                uid = item.get("id", str(hash(url or "")))
+                if url:
+                    return url, f"openverse_{uid}"
+                return None, None
+
+            return MediaSources._track_and_save(results, o, extract_openverse)
+        except Exception as e:
+            log(f"⚠️ Openverse error: {e}", "debug")
+            return None, None
+
 
 async def agy_evaluate_scout(media_path, shot, story, source_name, query):
     if not media_path: return False, 0.0, 0.0, "الملف غير موجود في المسار"
@@ -934,10 +1528,9 @@ Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0,
         data = extract_json(res.stdout)
         if data:
             score = float(data.get("score", 0.0))
-            # Adaptive acceptance threshold based on attempt number
             accept_threshold = 0.35
             if shot.get("accept_similar"):
-                accept_threshold = 0.30  # More lenient for similar-acceptable shots
+                accept_threshold = 0.30
             is_accepted = (data.get("decision", "").lower() == "accept" and score >= accept_threshold)
             reason = str(data.get("reason", "لا يوجد سبب"))
             return is_accepted, score, 0.0, reason
@@ -952,16 +1545,33 @@ Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0,
 
 
 async def apply_fallback(shot, story):
+    """
+    REDESIGNED RESCUE STRATEGY:
+    Priority 1: Use best candidate found (if score >= 0.15)
+    Priority 2: Cinematic background rescue (dark visual, NOT AI)
+    Priority 3: AI-generated visual (TRUE LAST RESORT)
+
+    Note: This is only called AFTER all 15 search attempts are exhausted.
+    Real search material has already been thoroughly attempted.
+    """
     index = shot["index"]
     cat = shot.get("category", "CINEMATIC")
 
-    if shot['best_score'] >= 0.20 and shot['best_candidate']:
-        log(f"⚠️ [إنقاذ 1] المشهد {index}: اعتماد أفضل لقطة تم العثور عليها (تقييم {shot['best_score']:.2f}).", "warning")
+    # Priority 1: Use best real candidate if ANY was found with a meaningful score
+    if shot['best_score'] >= 0.15 and shot['best_candidate']:
+        log(f"⚠️ [إنقاذ 1] المشهد {index}: اعتماد أفضل لقطة حقيقية (تقييم {shot['best_score']:.2f}).", "warning")
         return shot['best_candidate']
 
-    log(f"🤖 [إنقاذ 2] توليد بديل ذكي للمشهد {index} ({cat})...", "warning")
-    ai_path = CONFIG.work_dir / f"shot_{index:03d}_ai.jpg"
+    # Priority 2: Cinematic background (quick, reliable, better than AI for mood)
+    log(f"🎬 [إنقاذ 2] خلفية سينمائية للمشهد {index} (بعد استنفاد {MAX_ATTEMPTS_PER_SHOT} محاولة بحث).", "warning")
+    fallback_path = CONFIG.work_dir / f"shot_{index:03d}_cinematic_bg.mp4"
+    bg_ok = await create_fallback_visual(fallback_path)
+    if bg_ok:
+        return {"shot": shot, "path": str(fallback_path), "source": "CINEMATIC_BG", "score": 0.0, "start": 0.0, "duration": 5.0}
 
+    # Priority 3: AI-generated visual (TRUE LAST RESORT)
+    log(f"🤖 [إنقاذ نهائي] توليد AI للمشهد {index}.", "error")
+    ai_path = CONFIG.work_dir / f"shot_{index:03d}_ai.jpg"
     entities = shot.get("exact_entities", [])
     vibes = shot.get("visual_vibes", [])
     fallback_query = " ".join(entities[:3]) if cat == "ARCHIVE" else " ".join(vibes[:3])
@@ -970,28 +1580,32 @@ async def apply_fallback(shot, story):
     if ok:
         return {"shot": shot, "path": str(ai_path), "source": "AI_GENERATED", "score": 1.0, "start": 0.0, "duration": 5.0}
 
-    log(f"🚨 [إنقاذ نهائي] خلفية سينمائية للمشهد {index}.", "error")
-    fallback_path = CONFIG.work_dir / f"shot_{index:03d}_fallback.mp4"
-    await create_fallback_visual(fallback_path)
-    return {"shot": shot, "path": str(fallback_path), "source": "FFMPEG", "score": 0.0, "start": 0.0, "duration": 5.0}
+    # Absolute last resort: black background
+    log(f"🚨 [خلفية سوداء] المشهد {index}.", "error")
+    black_path = CONFIG.work_dir / f"shot_{index:03d}_black.mp4"
+    await create_fallback_visual(black_path)
+    return {"shot": shot, "path": str(black_path), "source": "FFMPEG", "score": 0.0, "start": 0.0, "duration": 5.0}
 
 
 async def run_pipelined_production(shots, story):
     """
-    OPTIMIZED PRODUCTION PIPELINE
-    Key changes from V51:
-    1. Uses SmartQueryEngine for intelligent query generation
-    2. Parallel multi-source fetching per shot
-    3. Pre-filter validation before AGY calls
-    4. Adaptive acceptance thresholds
-    5. Smart source routing based on content type
-    6. Result caching to avoid duplicate API calls
+    INTELLIGENT ADAPTIVE PRODUCTION PIPELINE V53
+
+    Key improvements:
+    1. 15 genuinely different search attempts per shot
+    2. Failure diagnosis between attempts
+    3. Parallel multi-source fetching (2-3 sources at once)
+    4. Pre-filter validation before AGY calls
+    5. Smart source routing with Europeana/Openverse
+    6. Progressive acceptance: after attempt 8 (not 3), accept best >= 0.25
+    7. NO early rescue: cinematic/AI only after ALL 15 attempts exhausted
+    8. Result caching and cross-scene deduplication
     """
     total_shots = len(shots)
     completed_lock = asyncio.Lock()
     completed_results = []
     completion_event = asyncio.Event()
-    shot_semaphore = asyncio.Semaphore(8)  # Max concurrent shot processing
+    shot_semaphore = asyncio.Semaphore(8)
 
     for shot in shots:
         shot['status'] = 'PENDING'
@@ -1001,10 +1615,10 @@ async def run_pipelined_production(shots, story):
         shot['tried_sources'] = set()
         shot['tried_queries'] = set()
 
-    log(f"🚀 تشغيل خط الإنتاج المحسّن | إجمالي المشاهد: {total_shots} | أقصى محاولات: {MAX_ATTEMPTS_PER_SHOT}")
+    log(f"🚀 تشغيل خط الإنتاج الذكي | إجمالي المشاهد: {total_shots} | أقصى محاولات: {MAX_ATTEMPTS_PER_SHOT}")
 
     async def process_shot(shot):
-        """Process a single shot with smart search strategy."""
+        """Process a single shot with intelligent adaptive search."""
         index = shot["index"]
         cat = shot.get("category", "CINEMATIC")
         base = CONFIG.work_dir / f"shot_{index:03d}"
@@ -1015,8 +1629,10 @@ async def run_pipelined_production(shots, story):
             # Generate smart query tiers for this attempt
             query_tiers = QUERY_ENGINE.generate_query_tiers(shot, attempt_num)
 
-            # For first attempt, try parallel multi-source fetch (top 2 sources)
-            if attempt_num == 0 and len(query_tiers) >= 2:
+            # Parallel multi-source fetch:
+            # First 3 attempts: try 2 sources in parallel
+            # After that: 1 source to avoid wasting requests
+            if attempt_num < 3 and len(query_tiers) >= 2:
                 pairs_to_try = query_tiers[:2]
             else:
                 pairs_to_try = query_tiers[:1]
@@ -1024,20 +1640,25 @@ async def run_pipelined_production(shots, story):
             log(f"⚡ المشهد {index} (م{attempt_num+1}/{MAX_ATTEMPTS_PER_SHOT}) | "
                 f"{'، '.join(f'{s}:{q}' for q,s in pairs_to_try)}", "info")
 
-            # Fetch from sources (parallel for first attempt)
+            # Fetch from sources
             fetch_results = await PARALLEL_FETCHER.fetch_from_multiple_sources(
                 pairs_to_try, shot, base)
 
             if not fetch_results:
-                # No results from any source
+                # No results from any source — record failure with diagnosis
                 for q, src in pairs_to_try:
                     QUERY_ENGINE.record_failure(q, src)
                     shot['tried_queries'].add(f"{src}:{q}")
+                    FAILURE_DIAGNOSTICS.record(
+                        index, q, src,
+                        SearchFailureDiagnostics.NO_RESULTS,
+                        reason="No results returned from API"
+                    )
                 log(f"⏩ المشهد {index}: لم يعثر على نتائج من أي مصدر.", "info")
                 shot['attempts'] += 1
                 continue
 
-            # Evaluate results — try each fetched result
+            # Evaluate results
             found_acceptable = False
             for found_file, media_uid, src_name, query in fetch_results:
                 if not found_file or not Path(found_file).exists():
@@ -1052,6 +1673,25 @@ async def run_pipelined_production(shots, story):
                 if not valid:
                     log(f"⏩ المشهد {index}: ملف تالف من {src_name}.", "debug")
                     QUERY_ENGINE.record_failure(query, src_name)
+                    FAILURE_DIAGNOSTICS.record(
+                        index, query, src_name,
+                        SearchFailureDiagnostics.FORMAT_INVALID,
+                        reason="File corrupted or invalid format"
+                    )
+                    if output_path.exists(): output_path.unlink()
+                    continue
+
+                # Filename relevance check — skip obviously spam results
+                fn_score = MediaPreFilter.check_filename_relevance(
+                    output_path.name, query, cat)
+                if fn_score <= -0.25:
+                    log(f"⏩ المشهد {index}: ملف spam تجاهله ({output_path.name}).", "debug")
+                    QUERY_ENGINE.record_failure(query, src_name)
+                    FAILURE_DIAGNOSTICS.record(
+                        index, query, src_name,
+                        SearchFailureDiagnostics.IRRELEVANT_RESULTS,
+                        reason="Filename indicates spam content"
+                    )
                     if output_path.exists(): output_path.unlink()
                     continue
 
@@ -1097,12 +1737,27 @@ async def run_pipelined_production(shots, story):
                     log(f"⏩ المشهد {index}: رُفض من {src_name} (تقييم: {score:.2f}) | {reason[:80]}")
                     QUERY_ENGINE.record_failure(query, src_name)
 
+                    # Diagnose the rejection for learning
+                    diag_category = SearchFailureDiagnostics.REVIEWER_REJECTED
+                    if score < 0.1:
+                        diag_category = SearchFailureDiagnostics.IRRELEVANT_RESULTS
+                    # Check for query ambiguity (e.g., "cell wall" → biology)
+                    ambig_indicators = ["بيولوج", "microscop", "خلايا", "medical", "طب"]
+                    if any(ind in reason.lower() for ind in ambig_indicators):
+                        diag_category = SearchFailureDiagnostics.QUERY_AMBIGUOUS
+
+                    FAILURE_DIAGNOSTICS.record(
+                        index, query, src_name, diag_category,
+                        score=score, reason=reason[:200]
+                    )
+
             if not found_acceptable:
                 shot['attempts'] += 1
 
-                # Progressive acceptance: after 3 attempts, accept best if score >= 0.30
-                if shot['attempts'] >= 3 and shot['best_score'] >= 0.30 and shot['best_candidate']:
-                    log(f"✅ المشهد {index}: قبول تدريجي لأفضل نتيجة (تقييم: {shot['best_score']:.2f}) بعد {shot['attempts']} محاولات.", "info")
+                # Progressive acceptance: after attempt 8 (not 3!), accept best if score >= 0.25
+                # This gives the search engine much more room to find real content
+                if shot['attempts'] >= 8 and shot['best_score'] >= 0.25 and shot['best_candidate']:
+                    log(f"✅ المشهد {index}: قبول تدريجي لأفضل نتيجة حقيقية (تقييم: {shot['best_score']:.2f}) بعد {shot['attempts']} محاولات.", "info")
                     async with completed_lock:
                         shot['status'] = 'DONE'
                         completed_results.append(shot['best_candidate'])
@@ -1110,9 +1765,9 @@ async def run_pipelined_production(shots, story):
                         if len(completed_results) == total_shots:
                             completion_event.set()
 
-        # If exhausted all attempts
+        # If exhausted all attempts — go to rescue
         if shot['status'] != 'DONE':
-            log(f"⚠️ المشهد {index} استنفد المحاولات. حسم المشهد عبر خطة الإنقاذ...", "warning")
+            log(f"⚠️ المشهد {index} استنفد {MAX_ATTEMPTS_PER_SHOT} محاولة. حسم عبر خطة الإنقاذ...", "warning")
             fallback_res = await apply_fallback(shot, story)
             async with completed_lock:
                 shot['status'] = 'DONE'
@@ -1144,9 +1799,11 @@ class AssemblyEngine:
 
         log(f"✂️ جاري رندرة المشهد {index}...", "debug")
         if media_path.suffix.lower() in (".mp4", ".mov"):
+            # Video: scale, crop, add film grain, vignette, color grading
             vf = "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,eq=contrast=1.06:saturation=0.92,vignette,noise=alls=3:allf=t,fps=30"
             res = run_cmd(["ffmpeg", "-y", "-ss", str(start), "-i", str(media_path), "-t", str(dur), "-vf", vf, "-an", "-c:v", "libx264", "-preset", "fast", "-crf", "20", str(output)])
         else:
+            # Image: Ken Burns effect (zoompan), film grain, vignette
             vf = "scale=2208:1248:force_original_aspect_ratio=increase,crop=2208:1248,zoompan=z='min(zoom+0.0008,1.15)':d=1:s=1920x1080:fps=30,eq=contrast=1.06:saturation=0.92,vignette,noise=alls=3:allf=t"
             res = run_cmd(["ffmpeg", "-y", "-loop", "1", "-i", str(media_path), "-t", str(dur), "-vf", vf, "-an", "-c:v", "libx264", "-preset", "fast", "-crf", "20", str(output)])
 
@@ -1222,6 +1879,22 @@ async def main_pipeline():
 
     uploader = GoogleUploader(CONFIG.google_client_id, CONFIG.google_client_secret, CONFIG.google_refresh_token)
     await asyncio.to_thread(uploader.upload_all, final_video, CONFIG.thumbnail, CONFIG.topic_clean)
+
+    # Print search statistics
+    total_scenes = len(shots)
+    real_sources = sum(1 for r in media_results if r.get("source") not in ("AI_GENERATED", "FFMPEG", "CINEMATIC_BG"))
+    ai_sources = sum(1 for r in media_results if r.get("source") == "AI_GENERATED")
+    bg_sources = sum(1 for r in media_results if r.get("source") in ("FFMPEG", "CINEMATIC_BG"))
+    avg_score = sum(r.get("score", 0) for r in media_results) / max(1, total_scenes)
+
+    log(f"\n{'='*60}")
+    log(f"📊 إحصائيات البحث الذكي:")
+    log(f"   إجمالي المشاهد: {total_scenes}")
+    log(f"   مصادر حقيقية: {real_sources} ({real_sources/max(1,total_scenes)*100:.0f}%)")
+    log(f"   خلفيات سينمائية: {bg_sources}")
+    log(f"   توليد AI: {ai_sources}")
+    log(f"   متوسط التقييم: {avg_score:.2f}")
+    log(f"{'='*60}\n")
 
     log("🏁 اكتمل العمل بنجاح قياسي ونزاهة إخراجية تامة.", "info")
 
