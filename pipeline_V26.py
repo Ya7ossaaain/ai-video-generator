@@ -196,7 +196,7 @@ async def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
 
     try:
         if Path(output_path).exists(): Path(output_path).unlink()
-        cmd_binary = ["agy", "--model", AGY_REVIEWER_MODEL, "--dangerously-skip-permissions", "-p", full_prompt]
+        cmd_binary = ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", full_prompt]
         res_bin = await asyncio.to_thread(subprocess.run, cmd_binary, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
         
         if res_bin.stdout.startswith(b'\xff\xd8') or res_bin.stdout.startswith(b'\x89PNG'):
@@ -236,7 +236,7 @@ Create a production-ready investigative documentary plan. Return ONLY valid JSON
 {{"story_type": "investigation", "primary_english_query": "", "part_1": "", "part_2": ""}}
 Requirements: Arabic narration. Total approx 350-450 words. Divide into part_1 and part_2. Serious tone."""
         try:
-            result = run_cmd(["agy", "--model", AGY_SCRIPT_MODEL, "--effort", "high", "--dangerously-skip-permissions", "-p", prompt])
+            result = run_cmd(["agy", "--model", AGY_SCRIPT_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", prompt])
             data = extract_json(result.stdout.strip())
             if not data or not data.get("part_1"): raise RuntimeError()
             self.script = data
@@ -266,7 +266,7 @@ ARTISTIC INSTRUCTIONS:
 
 Return ONLY a valid JSON object mapping shot index to the above fields."""
         try:
-            result = run_cmd(["agy", "--model", AGY_SCRIPT_MODEL, "--effort", "high", "--dangerously-skip-permissions", "-p", prompt], timeout=300)
+            result = run_cmd(["agy", "--model", AGY_SCRIPT_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", prompt], timeout=300)
             board = extract_json(result.stdout.strip())
             if board and isinstance(board, dict):
                 for shot in shots:
@@ -520,7 +520,7 @@ CRITICAL RULES FOR REVIEW:
 Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0, "reason": "Arabic Reason"}}"""
 
     try:
-        cmd = ["agy", "--model", AGY_REVIEWER_MODEL, "--dangerously-skip-permissions", "-p", prompt]
+        cmd = ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", prompt]
         res = await asyncio.to_thread(subprocess.run, cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
         
         data = extract_json(res.stdout)
@@ -590,7 +590,7 @@ async def run_pipelined_production(shots, story):
             arch_cursor += 1
             query = shot.get("exact_entities", [CONFIG.topic_clean])[0]
         else:
-            src = CINEMATIC_SOURCES[cine_cursor % len(CINEMATIC_SOURCES)]
+            src = CINEMATIC_SOURCES[CINEMATIC_SOURCES.index(src) if 'src' in locals() and src in CINEMATIC_SOURCES else cine_cursor % len(CINEMATIC_SOURCES)]
             cine_cursor += 1
             query = shot.get("visual_vibes", ["mystery"])[0]
 
