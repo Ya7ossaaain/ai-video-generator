@@ -3,12 +3,11 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V35 - ANTI-SPAM (JITTER & BACKOFF) + API SECURITY BYPASS
+V36 - TRAFFIC CONTROLLER + SAFE FETCHERS + STRICT RATE LIMITING
 
-- Added Jitter (random delays) to desynchronize the 5 concurrent workers.
-- Added Exponential Backoff specifically for HTTP 429 (Too Many Requests).
-- Workers will now wait and retry instead of skipping files when rate-limited.
-- Strict User-Agent headers to bypass 403 Forbidden.
+- Implemented Global API Traffic Controller to enforce strict delays between requests per domain.
+- Wikipedia: 45s delay | Archives: 30s delay | Pexels/Pixabay: 10s delay.
+- Replaced raw requests with safe_get() that natively handles 429/403 by sleeping and retrying.
 - Single Batch Director & Immortal Workers.
 """
 
@@ -37,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V35-ANTI-SPAM-JITTER"
+ENGINE_VERSION = "V36-TRAFFIC-CONTROLLER"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -118,6 +117,50 @@ class EngineConfig:
         self.google_refresh_token = os.environ.get("GOOGLE_REFRESH_TOKEN", "")
 
 CONFIG = EngineConfig()
+
+
+# ==========================================
+# نظام إشارات المرور للتحكم بطلبات السيرفرات
+# ==========================================
+class APITrafficController:
+    def __init__(self):
+        self.locks = {
+            "WIKIPEDIA": asyncio.Lock(),
+            "FBI_ARCHIVE": asyncio.Lock(),
+            "LOC": asyncio.Lock(),
+            "PEXELS": asyncio.Lock(),
+            "PIXABAY": asyncio.Lock(),
+            "NASA": asyncio.Lock(),
+            "OPENVERSE": asyncio.Lock()
+        }
+        self.last_called = {k: 0.0 for k in self.locks.keys()}
+        
+        # التأخير الزمني الإجباري بالثواني لكل موقع (كما طلب المستخدم)
+        self.delays = {
+            "WIKIPEDIA": 45.0,
+            "FBI_ARCHIVE": 30.0,
+            "LOC": 30.0,
+            "PEXELS": 10.0,
+            "PIXABAY": 10.0,
+            "NASA": 15.0,
+            "OPENVERSE": 15.0
+        }
+
+    async def wait_for_green_light(self, source_name):
+        lock = self.locks.get(source_name)
+        if not lock: return
+        async with lock:
+            now = time.time()
+            elapsed = now - self.last_called[source_name]
+            delay = self.delays.get(source_name, 10.0)
+            if elapsed < delay:
+                wait_time = delay - elapsed
+                log(f"🚦 إشارة حمراء: إيقاف العامل مؤقتاً لمدة {wait_time:.1f} ثانية قبل طلب '{source_name}' لتفادي الحظر...", "debug")
+                await asyncio.sleep(wait_time)
+            self.last_called[source_name] = time.time()
+
+TRAFFIC_CONTROLLER = APITrafficController()
+# ==========================================
 
 
 def prepare_fresh_workspace():
@@ -213,7 +256,7 @@ def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
             if data and isinstance(data, dict) and "image" in data:
                 with open(output_path, "wb") as f: f.write(base64.b64decode(data["image"]))
             else:
-                log(f"❌ فشل توليد الصورة. الرد: {res_bin.stdout.decode('utf-8', errors='ignore')[:100]}", "error")
+                log(f"❌ فشل توليد الصورة. الرد غير متوقع.", "debug")
                 return False
 
         if is_valid_visual(output_path):
@@ -335,7 +378,7 @@ class MasterAudioStudio:
         full_narration = f"{script['part_1']}\n\n{script['part_2']}".strip()
         out_wav = CONFIG.master_audio
         total_keys = len(CONFIG.gemini_keys)
-        log(f"🎙️ بدء إنتاج التعليق الصوتي الماستر (إجمالي المفاتيح: {total_keys})...")
+        log(f"🎙️️ بدء إنتاج التعليق الصوتي الماستر (إجمالي المفاتيح: {total_keys})...")
 
         attempted = set()
         for attempt in range(total_keys):
@@ -402,6 +445,27 @@ class WordSyncSlicer:
 
 class MediaSources:
     @staticmethod
+    def safe_get(url, headers=None, params=None, stream=False, timeout=40):
+        """دالة بحث مدرعة تعالج أخطاء 429 و 403 بالتراجع الذكي بدلاً من الفشل"""
+        if not headers: headers = GLOBAL_HEADERS
+        for retry in range(3):
+            try:
+                r = requests.get(url, headers=headers, params=params, stream=stream, timeout=timeout)
+                if r.status_code == 200:
+                    return r
+                elif r.status_code in (429, 403):
+                    wait = 15 * (retry + 1)
+                    log(f"🚧 الموقع حظر الطلب (كود {r.status_code}). ننتظر {wait} ثواني للتبريد (محاولة {retry+1}/3)...", "warning")
+                    time.sleep(wait)
+                else:
+                    log(f"⚠️ خطأ {r.status_code} من الخادم.", "debug")
+                    break
+            except Exception as e:
+                log(f"⚠️ خطأ اتصال أثناء البحث: {str(e)[:50]}", "debug")
+                time.sleep(5)
+        return None
+
+    @staticmethod
     def _track_and_save(items, output, extract_url_func, source_name):
         random.shuffle(items)
         for item in items:
@@ -410,40 +474,25 @@ class MediaSources:
             with CONFIG.used_media_lock:
                 if uid in CONFIG.used_media_ids: continue
                 CONFIG.used_media_ids.add(uid)
-                
-            # تقنية التمويه (Jitter) لتفادي اصطدام طلبات العمال الخمسة
-            time.sleep(random.uniform(0.5, 1.5))
-            
-            # تقنية التراجع الذكي (Exponential Backoff) لحل مشكلة 429
-            for retry in range(3):
-                try:
-                    log(f"📥 محاولة تحميل من: {url[:60]}... (محاولة {retry+1})", "debug")
-                    r = requests.get(url, headers=GLOBAL_HEADERS, stream=True, timeout=60)
-                    if r.status_code == 200:
-                        with open(output, "wb") as f:
-                            for chunk in r.iter_content(1024*256):
-                                if chunk: f.write(chunk)
-                        return True
-                    elif r.status_code == 429:
-                        wait_time = 4 * (retry + 1)
-                        log(f"⏳ الموقع حجب التحميل (كود 429 - ضغط طلبات). ننتظر {wait_time} ثواني...", "warning")
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        log(f"⚠ الموقع حجب التحميل (كود {r.status_code}).", "debug")
-                        break # خطأ آخر، نتجاوز هذا الرابط
-                except Exception as e: 
-                    log(f"⚠️ خطأ تحميل من {source_name}: {str(e)[:50]}", "debug")
-                    break
+            try:
+                # نستخدم دالة safe_get أيضاً عند التحميل الفعلي للملف
+                r = MediaSources.safe_get(url, headers=GLOBAL_HEADERS, stream=True, timeout=60)
+                if r and r.status_code == 200:
+                    with open(output, "wb") as f:
+                        for chunk in r.iter_content(1024*256):
+                            if chunk: f.write(chunk)
+                    return True
+            except: pass
         return False
 
     @staticmethod
     def fetch_wikipedia_image(q, o): 
         try:
-            res = requests.get("https://en.wikipedia.org/w/api.php", headers=GLOBAL_HEADERS, params={
+            res = MediaSources.safe_get("https://en.wikipedia.org/w/api.php", params={
                 "action": "query", "generator": "search", "gsrsearch": q, 
                 "prop": "pageimages", "piprop": "original", "format": "json", "gsrlimit": 20
-            }, timeout=30)
+            })
+            if not res: return False
             pages = list(res.json().get("query", {}).get("pages", {}).values())
             
             def get_url(page):
@@ -452,14 +501,14 @@ class MediaSources:
                 
             return MediaSources._track_and_save(pages, o, get_url, "WIKIPEDIA")
         except Exception as e: 
-            log(f"⚠️ API Error (WIKIPEDIA): {e}", "debug")
             return False
 
     @staticmethod
     def fetch_fbi_archive(q, o):
         try:
             query = f'({q}) AND (mediatype:image OR mediatype:movies)'
-            res = requests.get("https://archive.org/advancedsearch.php", headers=GLOBAL_HEADERS, params={"q": query, "fl[]": ["identifier"], "rows": 30, "output": "json"}, timeout=40)
+            res = MediaSources.safe_get("https://archive.org/advancedsearch.php", params={"q": query, "fl[]": ["identifier"], "rows": 30, "output": "json"})
+            if not res: return False
             docs = res.json().get("response", {}).get("docs", [])
             random.shuffle(docs)
             for doc in docs:
@@ -468,12 +517,14 @@ class MediaSources:
                     if uid in CONFIG.used_media_ids: continue
                     CONFIG.used_media_ids.add(uid)
                 try:
-                    files = requests.get(f"https://archive.org/metadata/{uid}", headers=GLOBAL_HEADERS, timeout=30).json().get("files", [])
+                    files_res = MediaSources.safe_get(f"https://archive.org/metadata/{uid}")
+                    if not files_res: continue
+                    files = files_res.json().get("files", [])
                     cands = [(int(i.get("size",0) or 0), str(i.get("name",""))) for i in files if str(i.get("name","")).lower().endswith((".mp4",".mov", ".jpg", ".png", ".jpeg")) and int(i.get("size",0) or 0) <= MAX_MEDIA_SIZE_MB*1024*1024]
                     if cands:
                         cands.sort(key=lambda x: x[0])
-                        r = requests.get(f"https://archive.org/download/{uid}/{urllib.parse.quote(cands[0][1])}", headers=GLOBAL_HEADERS, stream=True, timeout=90)
-                        if r.status_code == 200:
+                        r = MediaSources.safe_get(f"https://archive.org/download/{uid}/{urllib.parse.quote(cands[0][1])}", stream=True)
+                        if r and r.status_code == 200:
                             with open(o, "wb") as f:
                                 for chunk in r.iter_content(1024*256):
                                     if chunk: f.write(chunk)
@@ -481,39 +532,44 @@ class MediaSources:
                 except: pass
             return False
         except Exception as e: 
-            log(f"⚠️ API Error (FBI_ARCHIVE): {e}", "debug")
             return False
 
     @staticmethod
     def fetch_chronicling_america(q, o):
         try:
-            res = requests.get(f"https://www.loc.gov/?fo=json&fa=online_format:image&c=20&q={urllib.parse.quote(q)}", headers=GLOBAL_HEADERS, timeout=40).json().get("results", [])
-            return MediaSources._track_and_save(res, o, lambda i: (i.get("image_url", [None])[0] if isinstance(i.get("image_url"), list) else i.get("image_url"), str(i.get("id"))), "LOC")
+            res = MediaSources.safe_get(f"https://www.loc.gov/?fo=json&fa=online_format:image&c=20&q={urllib.parse.quote(q)}")
+            if not res: return False
+            items = res.json().get("results", [])
+            return MediaSources._track_and_save(items, o, lambda i: (i.get("image_url", [None])[0] if isinstance(i.get("image_url"), list) else i.get("image_url"), str(i.get("id"))), "LOC")
         except Exception as e: 
-            log(f"⚠️ API Error (LOC): {e}", "debug")
             return False
 
     @staticmethod
     def fetch_openverse_image(q, o):
         try:
-            res = requests.get("https://api.openverse.org/v1/images/", headers=GLOBAL_HEADERS, params={"q": q, "page_size": 20}, timeout=30).json().get("results", [])
-            return MediaSources._track_and_save(res, o, lambda i: (i.get("thumbnail") or i.get("url"), str(i.get("id"))), "OPENVERSE")
+            res = MediaSources.safe_get("https://api.openverse.org/v1/images/", params={"q": q, "page_size": 20})
+            if not res: return False
+            items = res.json().get("results", [])
+            return MediaSources._track_and_save(items, o, lambda i: (i.get("thumbnail") or i.get("url"), str(i.get("id"))), "OPENVERSE")
         except: return False
 
     @staticmethod
     def fetch_nasa_media(q, o):
         try:
-            res = requests.get("https://images-api.nasa.gov/search", headers=GLOBAL_HEADERS, params={"q": q, "media_type": "image"}, timeout=30).json().get("collection", {}).get("items", [])
-            return MediaSources._track_and_save(res, o, lambda i: (i.get("links", [{}])[0].get("href"), str(i.get("data", [{}])[0].get("nasa_id"))), "NASA")
+            res = MediaSources.safe_get("https://images-api.nasa.gov/search", params={"q": q, "media_type": "image"})
+            if not res: return False
+            items = res.json().get("collection", {}).get("items", [])
+            return MediaSources._track_and_save(items, o, lambda i: (i.get("links", [{}])[0].get("href"), str(i.get("data", [{}])[0].get("nasa_id"))), "NASA")
         except: return False
 
     @staticmethod
     def fetch_pixabay_video(q, o):
         if not CONFIG.pixabay_key: return False
         try:
-            headers = GLOBAL_HEADERS.copy()
-            res = requests.get("https://pixabay.com/api/videos/", headers=headers, params={"key": CONFIG.pixabay_key, "q": q, "per_page": 20}, timeout=30).json().get("hits", [])
-            return MediaSources._track_and_save(res, o, lambda i: ((i.get("videos", {}).get("large") or i.get("videos", {}).get("medium", {})).get("url"), str(i.get("id"))), "PIXABAY")
+            res = MediaSources.safe_get("https://pixabay.com/api/videos/", params={"key": CONFIG.pixabay_key, "q": q, "per_page": 20})
+            if not res: return False
+            items = res.json().get("hits", [])
+            return MediaSources._track_and_save(items, o, lambda i: ((i.get("videos", {}).get("large") or i.get("videos", {}).get("medium", {})).get("url"), str(i.get("id"))), "PIXABAY")
         except: return False
 
     @staticmethod
@@ -522,8 +578,10 @@ class MediaSources:
         try:
             headers = GLOBAL_HEADERS.copy()
             headers["Authorization"] = CONFIG.pexels_key
-            res = requests.get("https://api.pexels.com/videos/search", headers=headers, params={"query": q, "per_page": 20}, timeout=30).json().get("videos", [])
-            return MediaSources._track_and_save(res, o, lambda i: (sorted(i.get("video_files", []), key=lambda x: abs((x.get("width") or 0)-TARGET_W))[0].get("link") if i.get("video_files") else None, str(i.get("id"))), "PEXELS")
+            res = MediaSources.safe_get("https://api.pexels.com/videos/search", headers=headers, params={"query": q, "per_page": 20})
+            if not res: return False
+            items = res.json().get("videos", [])
+            return MediaSources._track_and_save(items, o, lambda i: (sorted(i.get("video_files", []), key=lambda x: abs((x.get("width") or 0)-TARGET_W))[0].get("link") if i.get("video_files") else None, str(i.get("id"))), "PEXELS")
         except: return False
 
 
@@ -555,9 +613,6 @@ Return JSON: {{"decision": "accept" or "reject", "score": 0.0, "best_start_secon
 
 
 async def scout_shot_worker(shot, story):
-    # تمويه صغير قبل بدء الفحص لفك تزامن العمال تماماً
-    await asyncio.sleep(random.uniform(0.1, 2.0))
-    
     index = shot["index"]
     base = CONFIG.work_dir / f"shot_{index:03d}"
     video_path, image_path = Path(f"{base}.mp4"), Path(f"{base}.jpg")
@@ -583,7 +638,11 @@ async def scout_shot_worker(shot, story):
         query = query_pool[q_idx % len(query_pool)]
         for src in source_pool:
             if len(combinations) >= 15: break
-            combinations.append((src, query))
+            if category == "CINEMATIC" and random.choice([True, False]):
+                mod = random.choice(["dark", "mystery", "cinematic", ""])
+                combinations.append((src, f"{query} {mod}".strip()))
+            else:
+                combinations.append((src, query))
         q_idx += 1
 
     log(f"🎬 المشهد {index} ({category}) دخل غرفة البحث (المصادر: {source_pool})...")
@@ -595,8 +654,8 @@ async def scout_shot_worker(shot, story):
         for p in (video_path, image_path): 
             if p.exists(): p.unlink()
 
-        # استراحة بسيطة قبل كل طلب لمنع سبام واجهات البحث
-        await asyncio.sleep(random.uniform(1.0, 2.5))
+        # أخذ الإذن من نظام المرور قبل الهجوم على الموقع (لتفادي حظر 429 و 403)
+        await TRAFFIC_CONTROLLER.wait_for_green_light(source_name)
 
         log(f"🔎 المشهد {index} (م{attempt+1}): جلب من [{source_name}] بكلمة '{query}'...", "info")
         found = await asyncio.to_thread(fetcher, query, output_path)
@@ -607,8 +666,6 @@ async def scout_shot_worker(shot, story):
 
         accepted, score, start, reason = await agy_evaluate_scout(output_path, shot, story)
         
-        await asyncio.sleep(2)
-
         if score > best_score:
             best_score = score
             best_bak = output_path.with_suffix('.bak')
@@ -655,7 +712,7 @@ async def queue_worker(name, queue, story, results):
             queue.task_done()
 
 async def scout_all_media(shots, story):
-    log(f"🔍 بدء الطابور ({CONCURRENT_WORKERS} عمال) لمعالجة {len(shots)} مشهد بالتناوب...")
+    log(f"🔍 بدء الطابور ({CONCURRENT_WORKERS} عمال) لمعالجة {len(shots)} مشهد بالتناوب والتحكم المروري...")
     queue = asyncio.Queue()
     for s in shots: queue.put_nowait(s)
     
