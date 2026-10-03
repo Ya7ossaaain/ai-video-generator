@@ -3,12 +3,12 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V50 - THE DIRECTOR'S CUT (MAX CONCURRENCY: 7)
+V51 - SMART SEARCH & MAX CONCURRENCY
 
+- Smart SEO-optimized search queries (Saves time & reduces API calls).
+- Fixed AI Image Generator Timeout.
 - Exposes Generated Script & Director's Storyboard.
-- Strict Category Routing (Archive stays Archive, Cinematic stays Cinematic).
-- Aggressive Concurrency (7 AGY Requests).
-- Increased Timeout (300s) for actual video evaluation.
+- Strict Category Routing & 7-Request Concurrency.
 """
 
 import os
@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V50-MAX-CONCURRENCY"
+ENGINE_VERSION = "V51-SMART-SEARCH"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -53,7 +53,6 @@ GROQ_MODEL = "whisper-large-v3"
 MAX_MEDIA_SIZE_MB = 120
 MAX_ATTEMPTS_PER_SHOT = 10
 
-# تم رفع الصمام إلى 7 بناءً على طلبك لمعالجة 7 مشاهد في نفس اللحظة
 REVIEWER_SEMAPHORE = asyncio.Semaphore(7)
 
 API_HEADERS = {
@@ -199,7 +198,9 @@ async def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
     try:
         if Path(output_path).exists(): Path(output_path).unlink()
         cmd_binary = ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", full_prompt]
-        res_bin = await asyncio.to_thread(subprocess.run, cmd_binary, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+        
+        # تم حل مشكلة انقطاع الوقت عند توليد الصور هنا (الخطأ السابق 120 ثانية)
+        res_bin = await asyncio.to_thread(subprocess.run, cmd_binary, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300)
         
         if res_bin.stdout.startswith(b'\xff\xd8') or res_bin.stdout.startswith(b'\x89PNG'):
             with open(output_path, "wb") as f: f.write(res_bin.stdout)
@@ -210,6 +211,9 @@ async def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
 
         if is_valid_visual(output_path):
             return True
+            
+    except subprocess.TimeoutExpired:
+        log(f"⚠️ انتهى الوقت المخصص لتوليد الصورة البديلة، سيتم الانتقال للخلفية السينمائية.", "warning")
     except Exception as e:
         log(f"⚠️ فشل التوليد عبر AGY: {e}", "warning")
 
@@ -256,21 +260,29 @@ Requirements: Arabic narration. Total approx 350-450 words. Divide into part_1 a
             return fallback
 
     def direct_storyboard(self, shots):
-        log("🎬 [المخرج الفني] يقرأ السيناريو والمشاهد لتقرير الفئة الأنسب لكل لقطة...")
+        log("🎬 [المخرج الفني] هندسة كلمات البحث بذكاء للقطات...")
         shots_summary = "\n".join([f"Shot {s['index']}: {s['text']}" for s in shots])
         
-        prompt = f"""You are the Elite Lead Visual Director. Focus purely on visual context. TOPIC: {self.script.get('primary_english_query', CONFIG.topic)}
+        # التعديل الرئيسي لزيادة ذكاء البحث: توجيه صارم للمخرج بأسلوب SEO لمحركات الفيديو
+        prompt = f"""You are an Elite Visual Director and Expert Stock/Archive SEO Metadata Specialist. 
+TOPIC: {self.script.get('primary_english_query', CONFIG.topic)}
 [ID: {CONFIG.run_id}]
 Analyze ALL of these shots contextually based on the story:
 {shots_summary}
 
-CRITICAL ARTISTIC DECISION:
-1. "category": Must be STRICTLY either "ARCHIVE" OR "CINEMATIC".
-   - Use "ARCHIVE" ONLY if the shot mentions specific real-world evidence, names, dates, historical events, documents, or exact locations.
-   - Use "CINEMATIC" for mood, suspense, transitions, generic descriptions, theories, or atmospheric build-ups.
-2. "exact_entities" (For ARCHIVE): 3 DISTINCT real English PROPER NOUNS (e.g. "Alcatraz Island", "JFK", "FBI HQ").
-3. "visual_vibes" (For CINEMATIC): 2 specific visual mood nouns (e.g. "dark rainy window", "police tape nighttime").
-4. "reviewer_context": Strict, specific Arabic instructions for the QA Reviewer on what to look for in the footage.
+CRITICAL RULES FOR SEARCH QUERIES (This dictates if we find the video!):
+1. "category": "ARCHIVE" (real evidence/history) OR "CINEMATIC" (mood/B-roll).
+2. "exact_entities" (For ARCHIVE): Array of 4 English search terms.
+   - Index 0: Exact proper noun (e.g., "Alcatraz Island").
+   - Index 1: Broader location or event (e.g., "San Francisco Bay 1960").
+   - Index 2: Related physical object/document (e.g., "Vintage police file").
+   - Index 3: Generic historical fallback (e.g., "Old prison cell").
+3. "visual_vibes" (For CINEMATIC): Array of 4 highly effective stock-footage keywords (1-3 words max).
+   - Stock sites HATE complex sentences. Use BROAD, popular concepts.
+   - GOOD: "flashing police lights", "dark rainy street", "hacker typing", "dusty documents".
+   - BAD: "police car driving slowly down a dark rainy street".
+   - Index 0: Best match. Index 1 to 3: Great generic alternatives.
+4. "reviewer_context": Strict Arabic instructions for the QA Reviewer.
 
 Return ONLY a valid JSON object mapping shot index (as string keys) to the above fields."""
         try:
@@ -284,25 +296,26 @@ Return ONLY a valid JSON object mapping shot index (as string keys) to the above
                     if idx in board:
                         cat_raw = str(board[idx].get("category", "")).strip().upper()
                         shot["category"] = "ARCHIVE" if "ARCHIV" in cat_raw else "CINEMATIC"
-                        shot["exact_entities"] = board[idx].get("exact_entities", [CONFIG.topic_clean])
-                        shot["visual_vibes"] = board[idx].get("visual_vibes", ["mystery"])
+                        # استلام المصفوفات الذكية الكاملة المكونة من 4 خيارات
+                        shot["exact_entities"] = board[idx].get("exact_entities", [CONFIG.topic_clean, "investigation", "mystery file", "old photo"])
+                        shot["visual_vibes"] = board[idx].get("visual_vibes", ["mystery", "dark room", "cinematic shadow", "suspense"])
                         shot["reviewer_context"] = board[idx].get("reviewer_context", "تأكد من مطابقة اللقطة للنص.")
                     else:
                         shot["category"] = "CINEMATIC"
-                        shot["exact_entities"] = [CONFIG.topic_clean]
-                        shot["visual_vibes"] = ["mystery"]
+                        shot["exact_entities"] = [CONFIG.topic_clean, "investigation", "mystery", "police"]
+                        shot["visual_vibes"] = ["mystery", "dark room", "shadow", "suspense"]
                         shot["reviewer_context"] = "اعتمد على النص."
                     
                     query_used = shot['exact_entities'][0] if shot['category'] == 'ARCHIVE' else shot['visual_vibes'][0]
-                    log(f"📌 المشهد {shot['index']:02d} | الفئة: {shot['category']} | الكلمة: '{query_used}' | التوجيه: {shot['reviewer_context']}")
+                    log(f"📌 المشهد {shot['index']:02d} | الفئة: {shot['category']} | الخيار الأول: '{query_used}' | التوجيه: {shot['reviewer_context']}")
             else: 
                 raise RuntimeError()
             log("🎥 "*40 + "\n")
         except:
             for shot in shots:
                 shot["category"] = "CINEMATIC"
-                shot["exact_entities"] = [CONFIG.topic_clean]
-                shot["visual_vibes"] = ["mystery"]
+                shot["exact_entities"] = [CONFIG.topic_clean, "investigation", "mystery", "police"]
+                shot["visual_vibes"] = ["mystery", "dark room", "shadow", "suspense"]
                 shot["reviewer_context"] = "تأكد من ملاءمة اللقطة للنص."
         
         return shots
@@ -667,15 +680,17 @@ async def run_pipelined_production(shots, story):
                         log(f"📊 الإنجاز: {len(completed_results)}/{total_shots}")
                         if len(completed_results) == total_shots: completion_event.set()
                     else:
+                        # الدوران أصبح أذكى: استخدام القوائم الجاهزة التي صممها المخرج بدلاً من إضافة كلمات عشوائية
                         if cat == "ARCHIVE":
                             pool = ARCHIVE_SOURCES
                             entities = shot.get("exact_entities", [CONFIG.topic_clean])
+                            # يتنقل بين الكلمات الدقيقة والأوسع فالأوسع (من المصفوفة الذكية)
                             next_q = entities[shot['attempts'] % len(entities)]
                         else:
                             pool = CINEMATIC_SOURCES
                             vibes = shot.get("visual_vibes", ["mystery"])
-                            base_q = vibes[shot['attempts'] % len(vibes)]
-                            next_q = base_q if shot['attempts'] > (MAX_ATTEMPTS_PER_SHOT // 2) else f"{base_q} {random.choice(['dark', 'mystery'])}".strip()
+                            # يتنقل بين الكلمات البديلة القصيرة التي وضعها المخرج
+                            next_q = vibes[shot['attempts'] % len(vibes)]
 
                         curr_idx = pool.index(src_name) if src_name in pool else 0
                         next_src = pool[(curr_idx + 1) % len(pool)]
