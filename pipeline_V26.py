@@ -3,12 +3,12 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V48 - THE DIRECTOR'S CUT (MAX SPEED & TRANSPARENCY)
+V50 - THE DIRECTOR'S CUT (MAX CONCURRENCY: 7)
 
 - Exposes Generated Script & Director's Storyboard.
 - Strict Category Routing (Archive stays Archive, Cinematic stays Cinematic).
-- Max Concurrency (5 AGY Requests simultaneously).
-- Deep Context Reviewer.
+- Aggressive Concurrency (7 AGY Requests).
+- Increased Timeout (300s) for actual video evaluation.
 """
 
 import os
@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V48-DIRECTORS-CUT"
+ENGINE_VERSION = "V50-MAX-CONCURRENCY"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -53,8 +53,8 @@ GROQ_MODEL = "whisper-large-v3"
 MAX_MEDIA_SIZE_MB = 120
 MAX_ATTEMPTS_PER_SHOT = 10
 
-# صمام التحكم السحري: يسمح بـ 5 طلبات تقييم لـ AGY في نفس اللحظة
-REVIEWER_SEMAPHORE = asyncio.Semaphore(5)
+# تم رفع الصمام إلى 7 بناءً على طلبك لمعالجة 7 مشاهد في نفس اللحظة
+REVIEWER_SEMAPHORE = asyncio.Semaphore(7)
 
 API_HEADERS = {
     "User-Agent": "InvestigativeDocumentaryBot/1.0 (https://github.com/Ya7ossaaain; contact@example.com)",
@@ -68,7 +68,6 @@ MEDIA_DOWNLOAD_HEADERS = {
 
 ARCHIVE_SOURCES = ["WIKIPEDIA", "FBI_ARCHIVE", "LOC"]
 CINEMATIC_SOURCES = ["PEXELS", "PIXABAY"]
-# يمكنك إضافة YARN لاحقاً في قائمة منفصلة إذا رغبت بدمج الـ API الخاص به
 
 class ProTelemetryFormatter(logging.Formatter):
     def format(self, record):
@@ -243,7 +242,6 @@ Requirements: Arabic narration. Total approx 350-450 words. Divide into part_1 a
             if not data or not data.get("part_1"): raise RuntimeError()
             self.script = data
             
-            # عرض السيناريو المولد للشفافية
             log("\n" + "="*60)
             log("📜 [السيناريو المولد - الجزء الأول]:")
             log(data['part_1'])
@@ -295,7 +293,6 @@ Return ONLY a valid JSON object mapping shot index (as string keys) to the above
                         shot["visual_vibes"] = ["mystery"]
                         shot["reviewer_context"] = "اعتمد على النص."
                     
-                    # عرض قرارات المخرج
                     query_used = shot['exact_entities'][0] if shot['category'] == 'ARCHIVE' else shot['visual_vibes'][0]
                     log(f"📌 المشهد {shot['index']:02d} | الفئة: {shot['category']} | الكلمة: '{query_used}' | التوجيه: {shot['reviewer_context']}")
             else: 
@@ -499,7 +496,6 @@ class MediaSources:
 async def agy_evaluate_scout(media_path, shot, story, source_name, query):
     if not media_path: return False, 0.0, 0.0, "الملف غير موجود في المسار"
     
-    # تغذية المراجع بالسياق الكامل والصارم
     prompt = f"""You evaluate documentary media suitability strictly based on the context.
 [ID: {CONFIG.run_id}_{time.time()}]
 TOPIC: {story.get("primary_english_query", CONFIG.topic)}
@@ -518,7 +514,7 @@ Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0,
 
     try:
         cmd = ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", "medium", "--dangerously-skip-permissions", "-p", prompt]
-        res = await asyncio.to_thread(subprocess.run, cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+        res = await asyncio.to_thread(subprocess.run, cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
         
         data = extract_json(res.stdout)
         if data:
@@ -530,6 +526,8 @@ Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0,
             error_output = res.stderr.strip() or res.stdout.strip()
             return False, 0.0, 0.0, f"خطأ من أداة AGY: {error_output[:150]}"
             
+    except subprocess.TimeoutExpired:
+        return False, 0.0, 0.0, "خطأ: انتهى الوقت (Timeout) المخصص لتقييم المقطع (استغرق أكثر من 5 دقائق)."
     except Exception as e:
         return False, 0.0, 0.0, f"خطأ برمجي أثناء الاستدعاء: {str(e)[:150]}"
 
@@ -574,8 +572,6 @@ async def run_pipelined_production(shots, story):
         shot['best_candidate'] = None
 
         cat = shot.get("category", "CINEMATIC")
-        
-        # التوجيه الحرفي الصارم: الأرشيف يذهب لمحركات الأرشيف فقط، والسينمائي للسينمائي فقط
         if cat == "ARCHIVE":
             src = random.choice(ARCHIVE_SOURCES)
             query = shot.get("exact_entities", [CONFIG.topic_clean])[0]
@@ -585,7 +581,7 @@ async def run_pipelined_production(shots, story):
 
         await queues[src].put((shot, query))
 
-    log(f"🚀 تشغيل خط الإنتاج الذكي (Max Concurrency: 5) | إجمالي المشاهد: {total_shots} | أقصى محاولات: {MAX_ATTEMPTS_PER_SHOT}")
+    log(f"🚀 تشغيل خط الإنتاج الذكي | إجمالي المشاهد: {total_shots} | أقصى محاولات: {MAX_ATTEMPTS_PER_SHOT}")
 
     async def api_worker(src_name):
         while not completion_event.is_set():
@@ -633,7 +629,6 @@ async def run_pipelined_production(shots, story):
             accepted, res_item, reason = False, None, invalid_reason
             
             if valid:
-                # نستخدم الصمام للسماح بـ 5 طلبات فحص في نفس الوقت فقط لضمان استقرار AGY
                 async with REVIEWER_SEMAPHORE:
                     accepted, score, start, reason = await agy_evaluate_scout(output_path, shot, story, src_name, query)
                 
@@ -672,7 +667,6 @@ async def run_pipelined_production(shots, story):
                         log(f"📊 الإنجاز: {len(completed_results)}/{total_shots}")
                         if len(completed_results) == total_shots: completion_event.set()
                     else:
-                        # التدوير الذكي ضمن نفس الفئة التي قررها المخرج
                         if cat == "ARCHIVE":
                             pool = ARCHIVE_SOURCES
                             entities = shot.get("exact_entities", [CONFIG.topic_clean])
@@ -687,7 +681,6 @@ async def run_pipelined_production(shots, story):
                         next_src = pool[(curr_idx + 1) % len(pool)]
                         await queues[next_src].put((shot, next_q))
 
-    # إطلاق جيش من العمال (3 عمال لكل محرك) لضمان سرعة فائقة تملأ صمام الـ 5 طلبات
     workers = []
     for name in queues.keys():
         for _ in range(3): 
