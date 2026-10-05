@@ -11,7 +11,7 @@ on:
 jobs:
   production:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 360
     env:
       VIDEO_TOPIC: ${{ inputs.topic }}
       GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }} # لدعم تدوير المفاتيح المتعددة (افصل بينها بفاصلة)
