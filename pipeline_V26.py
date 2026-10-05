@@ -2034,18 +2034,35 @@ async def main_pipeline():
             t = s['text'].replace("\\", r"\\")
             f.write(f"Dialogue: 0,{h1}:{m1:02d}:{s['start']%60:05.2f},{h2}:{m2:02d}:{s['end']%60:05.2f},Default,,0,0,0,,{{\\fad(120,120)}}{t}\n")
 
-    media_results = await run_pipelined_production(shots, story)
-
     assembly = AssemblyEngine()
-
     all_rendered = []
-    total_batches = max(1, (len(media_results) + RENDER_BATCH_SIZE - 1) // RENDER_BATCH_SIZE)
+    media_results = []
+    
+    # Process incrementally in batches to prevent accumulating all 292 raw clips
+    total_batches = max(1, (len(shots) + RENDER_BATCH_SIZE - 1) // RENDER_BATCH_SIZE)
+    
     for batch_idx in range(total_batches):
         start = batch_idx * RENDER_BATCH_SIZE
-        end = min(start + RENDER_BATCH_SIZE, len(media_results))
-        batch_items = media_results[start:end]
+        end = min(start + RENDER_BATCH_SIZE, len(shots))
+        
+        # 1. Fetch and evaluate only a chunk of scenes
+        batch_shots = shots[start:end]
+        batch_items = await run_pipelined_production(batch_shots, story)
+        media_results.extend(batch_items)
+        
+        # 2. Immediately render (merge) this batch 
         batch_rendered = assembly.render_batch(batch_items, batch_idx + 1, total_batches)
         all_rendered.extend(batch_rendered)
+        
+        # 3. Explicit incremental cleanup: Use os.remove to delete heavy raw source clips 
+        # and temporary buffers immediately after the batch is merged.
+        for item in batch_items:
+            try:
+                raw_path = item.get("path")
+                if raw_path and os.path.exists(raw_path):
+                    os.remove(raw_path)
+            except Exception:
+                pass
 
     final_video = assembly.assemble_final_cut(all_rendered, sub_path)
 
