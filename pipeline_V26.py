@@ -419,11 +419,56 @@ class SmartQueryEngine:
     }
 
     ARCHIVE_STRATEGIES = {
-        "person_mugshot": ["{entity} mugshot", "{entity} wanted poster", "{entity} photograph portrait", "{entity} FBI file", "{entity} criminal record", "famous fugitive photograph", "vintage mugshot criminal", "FBI wanted poster vintage"],
-        "document_file": ["{entity} document", "{entity} FBI file", "{entity} official report", "{entity} classified", "FBI investigation file", "government document classified", "official memo vintage", "typewritten report archive"],
-        "location_photo": ["{entity} photograph", "{entity} aerial view", "{entity} historical photo", "{entity} vintage postcard", "historical landmark photo", "vintage location photograph", "famous building old photo", "historic site aerial"],
-        "historical_event": ["{entity} news footage", "{entity} press photo", "{entity} documentary", "{entity} 1960s photograph", "historic event photograph", "vintage news reel", "cold war era photo", "mid century archive"],
-        "newspaper_article": ["{entity} newspaper", "{entity} headline", "{entity} front page", "{entity} news clipping", "vintage newspaper headline", "old newspaper crime", "historical newspaper front page", "archive news article"],
+        "person_mugshot": [
+            "{entity} mugshot",
+            "{entity} wanted poster",
+            "{entity} photograph portrait",
+            "{entity} FBI file",
+            "{entity} criminal record",
+            "famous fugitive photograph",
+            "vintage mugshot criminal",
+            "FBI wanted poster vintage",
+        ],
+        "document_file": [
+            "{entity} document",
+            "{entity} FBI file",
+            "{entity} official report",
+            "{entity} classified",
+            "FBI investigation file",
+            "government document classified",
+            "official memo vintage",
+            "typewritten report archive",
+        ],
+        "location_photo": [
+            "{entity} photograph",
+            "{entity} aerial view",
+            "{entity} historical photo",
+            "{entity} vintage postcard",
+            "historical landmark photo",
+            "vintage location photograph",
+            "famous building old photo",
+            "historic site aerial",
+        ],
+        "historical_event": [
+            "{entity} news footage",
+            "{entity} press photo",
+            "{entity} documentary",
+            "{entity} 1960s photograph",
+            "historic event photograph",
+            "vintage news reel",
+            "cold war era photo",
+            "mid century archive",
+        ],
+        "newspaper_article": [
+            "{entity} newspaper",
+            "{entity} headline",
+            "{entity} front page",
+            "{entity} news clipping",
+            "vintage newspaper headline",
+            "old newspaper crime",
+            "historical newspaper front page",
+            "archive news article",
+        ],
     }
 
     def __init__(self):
@@ -434,19 +479,30 @@ class SmartQueryEngine:
     def classify_content_type(self, shot):
         text = (shot.get("text", "") + " " + " ".join(shot.get("exact_entities", []))).lower()
         cat = shot.get("category", "CINEMATIC")
+
         if cat == "ARCHIVE":
-            if any(w in text for w in ["mugshot", "wanted", "prisoner", "inmate", "portrait", "face"]): return "person_mugshot"
-            if any(w in text for w in ["document", "file", "letter", "report", "fbi", "classified", "memo", "dossier"]): return "document_file"
-            if any(w in text for w in ["island", "building", "prison", "bridge", "city", "aerial", "exterior"]): return "location_photo"
-            if any(w in text for w in ["newspaper", "headline", "press", "article", "news", "clipping", "front page"]): return "newspaper_article"
-            if any(w in text for w in ["historical", "vintage", "archive", "event", "era", "1960", "1970"]): return "historical_event"
+            if any(w in text for w in ["mugshot", "wanted", "prisoner", "inmate", "morris", "anglin", "portrait", "face"]):
+                return "person_mugshot"
+            if any(w in text for w in ["document", "file", "letter", "report", "fbi", "classified", "memo", "dossier"]):
+                return "document_file"
+            if any(w in text for w in ["island", "building", "prison", "alcatraz", "bridge", "city", "aerial", "exterior"]):
+                return "location_photo"
+            if any(w in text for w in ["newspaper", "headline", "press", "article", "news", "clipping", "front page"]):
+                return "newspaper_article"
+            if any(w in text for w in ["1962", "1960", "1979", "historical", "vintage", "archive", "event", "era"]):
+                return "historical_event"
             return "default"
         else:
-            if any(w in text for w in ["water", "ocean", "sea", "wave", "underwater", "floating", "sinking", "tide", "bay"]): return "nature_water"
-            if any(w in text for w in ["dark", "shadow", "night", "fog", "mysterious", "gloomy", "flashlight", "noir"]): return "dark_moody"
-            if any(w in text for w in ["person", "man", "woman", "walking", "running", "face", "silhouette", "hands"]): return "people_action"
-            if any(w in text for w in ["document", "stamp", "file", "clock", "spoon", "envelope", "letter", "knife", "tool"]): return "objects_closeup"
-            if any(w in text for w in ["city", "street", "car", "driving", "urban", "building", "road"]): return "urban_night"
+            if any(w in text for w in ["water", "ocean", "sea", "wave", "underwater", "floating", "sinking", "tide", "bay"]):
+                return "nature_water"
+            if any(w in text for w in ["dark", "shadow", "night", "fog", "mysterious", "gloomy", "flashlight", "noir"]):
+                return "dark_moody"
+            if any(w in text for w in ["person", "man", "woman", "walking", "running", "face", "silhouette", "hands"]):
+                return "people_action"
+            if any(w in text for w in ["document", "stamp", "file", "clock", "spoon", "envelope", "letter", "knife", "tool"]):
+                return "objects_closeup"
+            if any(w in text for w in ["city", "street", "car", "driving", "urban", "building", "road"]):
+                return "urban_night"
             return "default"
 
     def get_ordered_sources(self, shot):
@@ -463,12 +519,30 @@ class SmartQueryEngine:
         if source == "OPENVERSE": return bool(CONFIG.openverse_client_id and CONFIG.openverse_client_secret)
         return True
 
+    def decompose_scene(self, shot):
+        entities = shot.get("exact_entities", [])
+        vibes = shot.get("visual_vibes", [])
+        text = shot.get("text", "")
+        cat = shot.get("category", "CINEMATIC")
+
+        return {
+            "primary_entity": entities[0] if entities else "",
+            "secondary_entity": entities[1] if len(entities) > 1 else "",
+            "tertiary_entity": entities[2] if len(entities) > 2 else "",
+            "all_entities": entities,
+            "vibes": vibes,
+            "category": cat,
+            "content_type": shot.get("content_type", "default"),
+            "text": text,
+        }
+
     def generate_query_tiers(self, shot, attempt_num=0):
         cat = shot.get("category", "CINEMATIC")
         entities = shot.get("exact_entities", [CONFIG.topic_clean, "investigation", "mystery", "police"])
         vibes = shot.get("visual_vibes", ["mystery", "dark room", "shadow", "suspense"])
         content_type = shot.get("content_type", "default")
         ordered_sources = self.get_ordered_sources(shot)
+
         if not ordered_sources:
             ordered_sources = ["PEXELS", "PIXABAY"] if cat == "CINEMATIC" else ["WIKIPEDIA", "FBI_ARCHIVE", "LOC"]
 
@@ -479,7 +553,9 @@ class SmartQueryEngine:
                 avoid_sources_str = rec.split(":")[1]
 
         avoid_sources = set(avoid_sources_str.split(",")) if avoid_sources_str else set()
-        filtered_sources = [s for s in ordered_sources if s not in avoid_sources] or ordered_sources
+        filtered_sources = [s for s in ordered_sources if s not in avoid_sources]
+        if not filtered_sources:
+            filtered_sources = ordered_sources
 
         queries = []
         if cat == "ARCHIVE":
@@ -497,8 +573,10 @@ class SmartQueryEngine:
                     seen.add(key)
 
         if not filtered:
-            fallback_q = (entities[attempt_num % len(entities)] if cat == "ARCHIVE" and entities 
-                          else vibes[attempt_num % len(vibes)] if vibes else "cinematic")
+            if cat == "ARCHIVE":
+                fallback_q = entities[attempt_num % len(entities)] if entities else CONFIG.topic_clean
+            else:
+                fallback_q = vibes[attempt_num % len(vibes)] if vibes else "cinematic"
             fallback_src = filtered_sources[attempt_num % len(filtered_sources)]
             filtered.append((fallback_q, fallback_src))
 
@@ -515,26 +593,81 @@ class SmartQueryEngine:
             if n_entities > 1 and n_sources > 1: queries.append((entities[1], sources[1 % n_sources]))
         elif attempt == 1:
             if n_entities > 1: queries.append((entities[1], sources[attempt % n_sources]))
-            if n_entities > 0: queries.append((" ".join(entities[0].split()[:2]), sources[(attempt + 1) % n_sources]))
+            if n_entities > 0:
+                simplified = entities[0].split()[:2]
+                queries.append((" ".join(simplified), sources[(attempt + 1) % n_sources]))
         elif attempt == 2:
-            if n_entities >= 2: queries.append((f"{entities[0]} {entities[-1]}", sources[attempt % n_sources]))
+            if n_entities >= 2:
+                combined = f"{entities[0]} {entities[-1]}"
+                queries.append((combined, sources[attempt % n_sources]))
             if n_entities > 2: queries.append((entities[2], sources[(attempt + 1) % n_sources]))
         elif attempt == 3:
             if n_entities > 0:
-                name = " ".join(entities[0].split()[:2])
-                queries.append((name, sources[attempt % n_sources]))
-                queries.append((name, sources[(attempt + 1) % n_sources]))
+                words = entities[0].split()
+                person_name = " ".join(words[:2]) if len(words) >= 2 else words[0]
+                queries.append((person_name, sources[attempt % n_sources]))
+                queries.append((person_name, sources[(attempt + 1) % n_sources]))
         elif attempt == 4:
             if n_entities > 3: queries.append((entities[3], sources[attempt % n_sources]))
             elif n_entities > 0: queries.append((f"{entities[0]} history", sources[attempt % n_sources]))
-        elif attempt >= 5:
+        elif attempt == 5:
+            if n_entities > 1: queries.append((f"{entities[1]} photograph", sources[attempt % n_sources]))
+            if n_entities > 4: queries.append((entities[4], sources[(attempt + 1) % n_sources]))
+        elif attempt == 6:
             src = sources[attempt % n_sources]
             if templates and n_entities > 0:
                 template_idx = attempt % len(templates)
                 q = templates[template_idx].format(entity=entities[0].split()[0])
                 queries.append((q, src))
-            else:
-                queries.append((CONFIG.topic_clean[:50], src))
+        elif attempt == 7:
+            for src in sources:
+                fail_count = sum(1 for f in diagnosis.get("failed_queries", []) if src in f)
+                if fail_count < 2:
+                    if n_entities > 0: queries.append((entities[0].split()[0], src))
+                    break
+            if not queries and n_entities > 5: queries.append((entities[5], sources[attempt % n_sources]))
+        elif attempt == 8:
+            if n_entities > 0:
+                alt_queries = [
+                    f"{entities[0].split()[0]} archive",
+                    f"{entities[0].split()[0]} photo historical",
+                    f"vintage {entities[0].split()[-1]}",
+                ]
+                idx = attempt % len(alt_queries)
+                queries.append((alt_queries[idx], sources[attempt % n_sources]))
+        elif attempt == 9:
+            with self.lock:
+                if self.successful_keywords.get("ARCHIVE"):
+                    kw = random.choice(list(self.successful_keywords["ARCHIVE"]))
+                    queries.append((kw, sources[attempt % n_sources]))
+            if not queries and n_entities > 0: queries.append((f"{entities[0]} image", sources[attempt % n_sources]))
+        elif attempt == 10:
+            if n_entities > 0:
+                single_word = entities[0].split()[0]
+                queries.append((single_word, sources[attempt % n_sources]))
+                if n_sources > 1: queries.append((single_word, sources[(attempt + 1) % n_sources]))
+        elif attempt == 11:
+            if n_entities > 0: queries.append((f"historic {content_type.replace('_', ' ')}", sources[attempt % n_sources]))
+        elif attempt == 12:
+            generic_map = {
+                "person_mugshot": "vintage portrait photograph",
+                "document_file": "old typewritten document",
+                "location_photo": "historic building exterior",
+                "historical_event": "vintage news photograph",
+                "newspaper_article": "old newspaper front page",
+                "default": "historical archive photograph",
+            }
+            queries.append((generic_map.get(content_type, "historical archive"), sources[attempt % n_sources]))
+        elif attempt == 13:
+            queries.append((CONFIG.topic_clean[:50], sources[attempt % n_sources]))
+        elif attempt == 14:
+            last_resort = ["historic archive photo", "vintage document", "old photograph sepia"]
+            queries.append((last_resort[attempt % len(last_resort)], sources[attempt % n_sources]))
+
+        if not queries:
+            fb_entity = entities[attempt % n_entities] if n_entities > 0 else CONFIG.topic_clean
+            queries.append((fb_entity, sources[attempt % n_sources]))
+
         return queries
 
     def _generate_cinematic_queries(self, vibes, entities, sources, attempt, diagnosis):
@@ -555,12 +688,66 @@ class SmartQueryEngine:
                     boosted = self.STOCK_BOOSTERS[base_word]
                     boost_idx = (attempt - 1) % len(boosted)
                     queries.append((boosted[boost_idx], sources[attempt % n_sources]))
+                    if len(boosted) > 1:
+                        queries.append((boosted[(boost_idx + 1) % len(boosted)], sources[(attempt + 1) % n_sources]))
                     break
             if not queries and n_vibes > 2: queries.append((vibes[2], sources[attempt % n_sources]))
-        elif attempt >= 3:
-            safe_queries = ["dark atmospheric", "suspense noir", "mystery investigation", "vintage noir film", "cinematic mood lighting"]
-            idx = attempt % len(safe_queries)
+        elif attempt == 3:
+            for vibe in vibes:
+                base_word = vibe.split()[0].lower() if vibe else ""
+                if base_word in self.STOCK_BOOSTERS:
+                    boosted = self.STOCK_BOOSTERS[base_word]
+                    queries.append((boosted[min(attempt, len(boosted) - 1)], sources[attempt % n_sources]))
+                    break
+            if not queries and n_vibes > 3: queries.append((vibes[3], sources[attempt % n_sources]))
+        elif attempt == 4:
+            if n_vibes > 0:
+                main_vibe = vibes[0]
+                variations = [f"cinematic {main_vibe}", f"{main_vibe} dramatic", f"moody {main_vibe}"]
+                idx = attempt % len(variations)
+                queries.append((variations[idx], sources[attempt % n_sources]))
+        elif attempt == 5:
+            if n_vibes > 4: queries.append((vibes[4], sources[attempt % n_sources]))
+            elif n_vibes > 3: queries.append((vibes[3], sources[attempt % n_sources]))
+        elif attempt == 6:
+            if n_vibes > 5: queries.append((vibes[5], sources[attempt % n_sources]))
+            else: queries.append(("cinematic b-roll dark", sources[attempt % n_sources]))
+        elif attempt == 7:
+            with self.lock:
+                if self.successful_keywords.get("CINEMATIC"):
+                    kw = random.choice(list(self.successful_keywords["CINEMATIC"]))
+                    queries.append((kw, sources[attempt % n_sources]))
+            if not queries and n_vibes > 0: queries.append((vibes[0].split()[0], sources[attempt % n_sources]))
+        elif attempt == 8:
+            if n_vibes > 0:
+                for vibe in vibes[:3]:
+                    words = vibe.split()
+                    if words:
+                        queries.append((words[0], sources[attempt % n_sources]))
+                        break
+        elif attempt == 9:
+            all_related = set()
+            for vibe in vibes:
+                base = vibe.split()[0].lower()
+                if base in self.STOCK_BOOSTERS: all_related.update(self.STOCK_BOOSTERS[base])
+            if all_related:
+                kw = random.choice(list(all_related))
+                queries.append((kw, sources[attempt % n_sources]))
+        elif attempt >= 10:
+            safe_queries = [
+                "dark atmospheric",
+                "suspense noir",
+                "mystery investigation",
+                "vintage noir film",
+                "cinematic mood lighting",
+            ]
+            idx = (attempt - 10) % len(safe_queries)
             queries.append((safe_queries[idx], sources[attempt % n_sources]))
+
+        if not queries:
+            fb_vibe = vibes[attempt % n_vibes] if n_vibes > 0 else "cinematic"
+            queries.append((fb_vibe, sources[attempt % n_sources]))
+
         return queries
 
     def record_failure(self, query, source):
@@ -571,7 +758,8 @@ class SmartQueryEngine:
         words = query.lower().split()
         with self.lock:
             for w in words:
-                if len(w) > 2: self.successful_keywords[category].add(w)
+                if len(w) > 2:
+                    self.successful_keywords[category].add(w)
 
 QUERY_ENGINE = SmartQueryEngine()
 
@@ -1367,7 +1555,11 @@ async def run_pipelined_production(shots, story):
 
         FAILURE_DIAGNOSTICS.clear_shot(shot.get("index", 0))
 
-    tasks = [asyncio.create_task(process_shot(s)) for s in shots]
+    async def throttled_process(shot):
+        async with shot_semaphore:
+            await process_shot(shot)
+
+    tasks = [asyncio.create_task(throttled_process(shot)) for shot in shots]
     await asyncio.gather(*tasks)
     if not completion_event.is_set(): completion_event.set()
     gc.collect()
