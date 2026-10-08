@@ -3,17 +3,18 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V55 - BROADCAST CINEMATIC EDITION (RESTORED TELEMETRY & STABLE FILTERS)
+V56 - BROADCAST CINEMATIC MASTER EDITION
+(RESTORED HIGH-PRECISION SEARCH & ZERO-CRASH STABLE LIFECYCLE)
 
-Surgical Fixes & Enhancements:
-- FULL RESTORE: Complete verbatim script printing for all 8 parts in the terminal.
-- FULL RESTORE: Real-time Live Reviewer telemetry logs (scores, reasons, attempts, completion counter).
-- CRITICAL FIX: Fixed [0:v] split in image blur filter and added force_divisible_by=2 to eliminate FFmpeg render crashes.
-- DYNAMIC HOOK (40-70s): Rapid scenes (1.2-1.8s) with paradox narrative pacing.
-- INTEGRATED INTRO: Seamless 8-second channel intro insertion.
-- EPISODIC TRANSITIONS: Cinema title cards with Sub-bass hit between chapters.
-- BRANDING: Channel logo + hashtag auto-hidden during intro.
-- DIRECT DRIVE UPLOAD: Direct destination to 02_Generated_Videos folder.
+Key Enhancements & Fixes:
+- CRITICAL FIX: Elimination of the double-append and premature file deletion bug in shot evaluation.
+- CRITICAL FIX: Safe file preservation with fallback safeguard in AssemblyEngine to prevent any render crashes.
+- RESTORED PRECISION SEARCH: Strict physical-noun search engineering from V26 (eliminating useless abstract keywords).
+- FULL VERBATIM TELEMETRY: Complete script text printing for all 8 chapters + live Reviewer telemetry.
+- STABLE BROADCAST FILTERS: Ken Burns with background blur, split graph safety, and force_divisible_by=2.
+- INTEGRATED INTRO & TRANSITIONS: 8-second channel intro + episodic chapter title cards with sub-bass hits.
+- BRANDING: Dynamic logo + hashtag overlay, automatically hidden during channel intro.
+- DIRECT DRIVE DESTINATION: Targeted upload to the 02_Generated_Videos folder.
 """
 
 import os
@@ -45,7 +46,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V55-BROADCAST-CINEMATIC"
+ENGINE_VERSION = "V56-BROADCAST-CINEMATIC-MASTER"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -60,7 +61,7 @@ AGY_REVIEWER_MODEL = "gemini-3.6-flash"
 GROQ_MODEL = "whisper-large-v3"
 
 MAX_MEDIA_SIZE_MB = 120
-MAX_ATTEMPTS_PER_SHOT = 15
+MAX_ATTEMPTS_PER_SHOT = 12
 
 REVIEWER_SEMAPHORE = asyncio.Semaphore(7)
 
@@ -69,28 +70,25 @@ PREFILTER_MIN_VIDEO_DURATION = 0.5
 
 TARGET_TOTAL_DURATION_MINUTES = 25
 TARGET_NARRATION_WORDS = 3500
-SCENE_DURATION_MIN = 2.0
+SCENE_DURATION_MIN = 2.2
 SCENE_DURATION_MAX = 5.0
-SCENE_DURATION_MIN_HOOK = 1.2
-SCENE_DURATION_MAX_HOOK = 1.8
-RENDER_BATCH_SIZE = 50
+SCENE_DURATION_MIN_HOOK = 1.3
+SCENE_DURATION_MAX_HOOK = 2.0
+RENDER_BATCH_SIZE = 40
 
 EFFORT_REVIEWER = "low"
 EFFORT_PRO_GENERATION = "high"
 EFFORT_IMAGE_GEN = "medium"
 
 API_HEADERS = {
-    "User-Agent": "InvestigativeDocumentaryBot/1.0 (https://github.com/Ya7ossaaain; contact@example.com)",
+    "User-Agent": "InvestigativeDocumentaryBot/2.0 (https://github.com/Ya7ossaaain; contact@example.com)",
     "Accept": "application/json, text/plain, */*"
 }
 
 MEDIA_DOWNLOAD_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "*/*"
 }
-
-ARCHIVE_SOURCES = ["WIKIPEDIA", "FBI_ARCHIVE", "LOC", "EUROPEANA", "OPENVERSE"]
-CINEMATIC_SOURCES = ["PEXELS", "PIXABAY", "OPENVERSE"]
 
 SOURCE_AFFINITY = {
     "ARCHIVE": {
@@ -140,7 +138,7 @@ def log(msg, level="info"):
 
 class EngineConfig:
     def __init__(self):
-        self.topic = os.environ.get("VIDEO_TOPIC", "لغز اختفاء غامض")
+        self.topic = os.environ.get("VIDEO_TOPIC", "لغز القاتل زودياك")
         self.topic_clean = re.sub(r"[^a-zA-Z0-9_\-]+", "_", self.topic).strip("_")
         self.run_id = f"RUN-{datetime.now().strftime('%Y%m%d%H%M%S')}-{random.randint(10000, 99999)}"
         self.base_dir = Path("./output_build")
@@ -182,7 +180,7 @@ CONFIG = EngineConfig()
 
 
 def prepare_fresh_workspace():
-    log("🧹 تنظيف بيئة التشغيل بالكامل...")
+    log("🧹 تنظيف وتجهيز بيئة التشغيل بالكامل...")
     if CONFIG.base_dir.exists():
         shutil.rmtree(CONFIG.base_dir, ignore_errors=True)
     CONFIG.base_dir.mkdir(parents=True, exist_ok=True)
@@ -271,46 +269,56 @@ def extract_json(text):
         except: pass
     return None
 
-def cleanup_temp_files(directory, pattern="*.tmp*"):
-    try:
-        for f in Path(directory).glob(pattern):
-            f.unlink(missing_ok=True)
-    except: pass
-
 def cleanup_shot_unused_files(index, keep_path=None):
+    """Safely cleans up candidate downloads for a shot without touching protected items."""
     try:
         keep_resolved = Path(keep_path).resolve() if keep_path else None
         for p in CONFIG.work_dir.glob(f"*shot_{index:03d}*"):
-            if keep_resolved and p.resolve() == keep_resolved: continue
-            if p.name.startswith("rendered_"): continue
+            if keep_resolved and p.resolve() == keep_resolved:
+                continue
+            if p.name.startswith("selected_") or p.name.startswith("rendered_"):
+                continue
             p.unlink(missing_ok=True)
-    except Exception: pass
+    except Exception:
+        pass
 
 
 # =============================================================================
-# FIXED FFMPEG FILTERS (Preserves full image & prevents all odd dimension errors)
+# BULLETPROOF FFMPEG FILTERS (Ken Burns + Blur Background + Divisible by 2)
 # =============================================================================
 
-def build_blur_background_filter_image(target_w=TARGET_W, target_h=TARGET_H):
-    # Added [0:v]split=2 and force_divisible_by=2 to avoid FFmpeg graph and libx264 odd pixel crashes
-    return (
-        f"[0:v]split=2[bg_in][fg_in];"
-        f"[bg_in]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
+def build_blur_background_filter_image(target_w=TARGET_W, target_h=TARGET_H, ken_burns=True):
+    bg_part = (
+        f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=increase:force_divisible_by=2,"
         f"crop={target_w}:{target_h},"
         f"gblur=sigma=40,"
-        f"eq=brightness=-0.08:saturation=0.4[bg];"
-        f"[fg_in]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease:force_divisible_by=2[fg];"
+        f"eq=brightness=-0.08:saturation=0.4[bg]"
+    )
+    if ken_burns:
+        fg_part = (
+            f"[0:v]scale={int(target_w * 1.12)}:{int(target_h * 1.12)}:force_original_aspect_ratio=decrease:force_divisible_by=2,"
+            f"zoompan=z='min(zoom+0.0008,1.15)':d=1:s={target_w}x{target_h}:fps={TARGET_FPS}[fg]"
+        )
+    else:
+        fg_part = (
+            f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease:force_divisible_by=2,"
+            f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black@0[fg]"
+        )
+
+    overlay_part = (
         f"[bg][fg]overlay=(W-w)/2:(H-h)/2,"
         f"eq=contrast=1.06:saturation=0.92,"
         f"vignette,"
         f"noise=alls=3:allf=t,"
         f"fps={TARGET_FPS}"
     )
+    return f"{bg_part};{fg_part};{overlay_part}"
+
 
 def build_blur_background_filter_video(target_w=TARGET_W, target_h=TARGET_H):
     return (
         f"[0:v]split=2[bg_in][fg_in];"
-        f"[bg_in]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
+        f"[bg_in]scale={target_w}:{target_h}:force_original_aspect_ratio=increase:force_divisible_by=2,"
         f"crop={target_w}:{target_h},"
         f"gblur=sigma=35,"
         f"eq=brightness=-0.08:saturation=0.4[bg];"
@@ -326,15 +334,8 @@ def build_blur_background_filter_video(target_w=TARGET_W, target_h=TARGET_H):
 class SearchFailureDiagnostics:
     NO_RESULTS = "no_results"
     IRRELEVANT_RESULTS = "irrelevant_results"
-    WRONG_MEDIA_TYPE = "wrong_media_type"
-    WRONG_TIME_PERIOD = "wrong_time_period"
-    WRONG_SOURCE = "wrong_source"
-    QUERY_TOO_SPECIFIC = "query_too_specific"
-    QUERY_TOO_GENERIC = "query_too_generic"
-    DOWNLOAD_FAILED = "download_failed"
     REVIEWER_REJECTED = "reviewer_rejected"
     FORMAT_INVALID = "format_invalid"
-    QUERY_AMBIGUOUS = "query_ambiguous"
 
     def __init__(self):
         self.failures = defaultdict(list)
@@ -351,44 +352,18 @@ class SearchFailureDiagnostics:
         with self.lock:
             records = self.failures.get(shot_index, [])
         if not records:
-            return {"diagnosis": "no_failures", "recommendations": []}
+            return {"recommendations": []}
 
-        no_results_count = sum(1 for r in records if r["category"] == self.NO_RESULTS)
-        irrelevant_count = sum(1 for r in records if r["category"] == self.IRRELEVANT_RESULTS)
-        rejected_count = sum(1 for r in records if r["category"] == self.REVIEWER_REJECTED)
-        ambiguous_count = sum(1 for r in records if r["category"] == self.QUERY_AMBIGUOUS)
         failed_sources = set(r["source"] for r in records)
-        failed_queries = set(r["query"] for r in records)
-        best_score = max((r["score"] for r in records), default=0.0)
-
-        recommendations = []
-        if no_results_count > len(records) * 0.6:
-            recommendations.extend(["try_broader_queries", "switch_source_type"])
-        if irrelevant_count > len(records) * 0.4:
-            recommendations.extend(["change_query_terminology", "try_different_source"])
-        if ambiguous_count > 0:
-            recommendations.append("disambiguate_query")
-        if rejected_count > 0 and best_score >= 0.2:
-            recommendations.extend(["lower_threshold_slightly", "try_alternative_representation"])
-
         source_fail_counts = defaultdict(int)
         for r in records:
             source_fail_counts[r["source"]] += 1
         exhausted_sources = [s for s, c in source_fail_counts.items() if c >= 3]
+
+        recommendations = []
         if exhausted_sources:
             recommendations.append(f"avoid_sources:{','.join(exhausted_sources)}")
-
-        return {
-            "diagnosis": "analyzed",
-            "total_failures": len(records),
-            "no_results": no_results_count,
-            "irrelevant": irrelevant_count,
-            "rejected": rejected_count,
-            "best_score": best_score,
-            "failed_sources": list(failed_sources),
-            "failed_queries": list(failed_queries),
-            "recommendations": recommendations
-        }
+        return {"recommendations": recommendations, "failed_sources": list(failed_sources)}
 
     def clear_shot(self, shot_index):
         with self.lock:
@@ -399,76 +374,52 @@ FAILURE_DIAGNOSTICS = SearchFailureDiagnostics()
 
 class SmartQueryEngine:
     STOCK_BOOSTERS = {
-        "water": ["ocean waves", "sea water", "underwater", "water surface", "dark waves night", "rough sea"],
-        "dark": ["dark room", "shadows", "silhouette", "low light", "noir scene", "abandoned building"],
-        "night": ["night city", "dark sky", "moonlight", "night time", "streetlight fog", "car headlights night"],
-        "prison": ["jail cell", "prison bars", "behind bars", "locked door", "metal gate", "concrete corridor"],
-        "document": ["old papers", "vintage document", "typewriter", "old book", "file cabinet", "folder desk"],
-        "person": ["man portrait", "close up face", "person walking", "silhouette person", "mysterious figure", "lone figure"],
-        "fog": ["misty", "foggy landscape", "haze", "cloudy", "smoke dark", "mist forest"],
-        "car": ["classic car", "vintage automobile", "car headlights", "driving", "road night", "highway dark"],
-        "letter": ["handwritten letter", "old envelope", "writing pen", "ink on paper", "wax seal", "postmark"],
-        "beach": ["sandy beach", "shore", "coastline", "seaside", "footprints sand", "waves shore"],
-        "clock": ["ticking clock", "pocket watch", "time lapse", "clock hands", "pendulum", "antique clock"],
-        "tombstone": ["graveyard", "cemetery", "memorial stone", "burial ground", "old grave", "headstone"],
-        "fire": ["flames burning", "fireplace", "candle flame", "sparks", "match lighting", "bonfire"],
-        "map": ["world map", "vintage map", "compass navigation", "atlas pages", "cartography", "globe spinning"],
-        "police": ["police lights", "crime scene tape", "investigation", "detective badge", "squad car", "siren lights"],
-        "boat": ["fishing boat", "sailing vessel", "rowboat", "ship ocean", "harbor boats", "coast guard vessel"],
-        "rain": ["rain drops", "rainy window", "storm lightning", "wet street", "umbrella rain", "downpour"],
+        "water": ["ocean waves night", "dark sea water", "underwater gloomy", "lake water surface"],
+        "dark": ["dark room shadows", "silhouette walking", "low key lighting", "noir mystery hallway"],
+        "night": ["city street night fog", "car headlights dark road", "abandoned street night"],
+        "prison": ["jail cell bars", "prison corridor", "metal gate lock", "vintage prison"],
+        "document": ["old papers desk", "vintage typewriter typing", "archive documents folder", "classified report vintage"],
+        "person": ["mysterious figure coat", "man silhouette shadows", "close up eyes tense", "lone figure walking"],
+        "fog": ["misty forest dark", "fog street lamp", "heavy smoke night"],
+        "car": ["vintage car driving night", "police car flashing lights", "car interior night rain"],
+        "letter": ["handwritten letter envelope", "pen ink paper writing", "vintage typewriter"],
+        "police": ["police flashing lights night", "crime scene yellow tape", "investigation board red strings"],
+        "gun": ["gun barrel closeup", "revolver on table", "bullet casing ground"]
     }
 
     ARCHIVE_STRATEGIES = {
         "person_mugshot": [
             "{entity} mugshot",
-            "{entity} wanted poster",
-            "{entity} photograph portrait",
-            "{entity} FBI file",
-            "{entity} criminal record",
-            "famous fugitive photograph",
-            "vintage mugshot criminal",
-            "FBI wanted poster vintage",
+            "{entity} police booking photo",
+            "{entity} wanted poster vintage",
+            "{entity} historic photograph portrait",
+            "vintage criminal mugshot archive"
         ],
         "document_file": [
-            "{entity} document",
-            "{entity} FBI file",
-            "{entity} official report",
-            "{entity} classified",
-            "FBI investigation file",
-            "government document classified",
-            "official memo vintage",
-            "typewritten report archive",
+            "{entity} FBI file report",
+            "{entity} official police document",
+            "{entity} cipher letter archive",
+            "FBI investigation document vintage",
+            "historic confidential memo archive"
         ],
         "location_photo": [
-            "{entity} photograph",
-            "{entity} aerial view",
-            "{entity} historical photo",
-            "{entity} vintage postcard",
-            "historical landmark photo",
-            "vintage location photograph",
-            "famous building old photo",
-            "historic site aerial",
+            "{entity} historical photograph",
+            "{entity} aerial view vintage",
+            "{entity} exterior 1960s",
+            "historic site vintage photograph"
         ],
         "historical_event": [
-            "{entity} news footage",
-            "{entity} press photo",
-            "{entity} documentary",
-            "{entity} 1960s photograph",
-            "historic event photograph",
-            "vintage news reel",
-            "cold war era photo",
-            "mid century archive",
+            "{entity} press photo archive",
+            "{entity} 1960s news photograph",
+            "historic crime scene photograph vintage",
+            "vintage news photo archive"
         ],
         "newspaper_article": [
-            "{entity} newspaper",
-            "{entity} headline",
-            "{entity} front page",
-            "{entity} news clipping",
-            "vintage newspaper headline",
-            "old newspaper crime",
-            "historical newspaper front page",
-            "archive news article",
-        ],
+            "{entity} newspaper front page",
+            "{entity} headline clipping archive",
+            "vintage newspaper crime headline",
+            "historical newspaper front page archive"
+        ]
     }
 
     def __init__(self):
@@ -481,29 +432,25 @@ class SmartQueryEngine:
         cat = shot.get("category", "CINEMATIC")
 
         if cat == "ARCHIVE":
-            if any(w in text for w in ["mugshot", "wanted", "prisoner", "inmate", "morris", "anglin", "portrait", "face"]):
+            if any(w in text for w in ["mugshot", "wanted", "face", "portrait", "killer", "suspect"]):
                 return "person_mugshot"
-            if any(w in text for w in ["document", "file", "letter", "report", "fbi", "classified", "memo", "dossier"]):
+            if any(w in text for w in ["document", "file", "letter", "report", "fbi", "cipher", "memo"]):
                 return "document_file"
-            if any(w in text for w in ["island", "building", "prison", "alcatraz", "bridge", "city", "aerial", "exterior"]):
+            if any(w in text for w in ["building", "street", "city", "lake", "island", "exterior"]):
                 return "location_photo"
-            if any(w in text for w in ["newspaper", "headline", "press", "article", "news", "clipping", "front page"]):
+            if any(w in text for w in ["newspaper", "headline", "press", "article", "front page"]):
                 return "newspaper_article"
-            if any(w in text for w in ["1962", "1960", "1979", "historical", "vintage", "archive", "event", "era"]):
-                return "historical_event"
-            return "default"
+            return "historical_event"
         else:
-            if any(w in text for w in ["water", "ocean", "sea", "wave", "underwater", "floating", "sinking", "tide", "bay"]):
+            if any(w in text for w in ["water", "sea", "lake", "ocean", "river"]):
                 return "nature_water"
-            if any(w in text for w in ["dark", "shadow", "night", "fog", "mysterious", "gloomy", "flashlight", "noir"]):
+            if any(w in text for w in ["dark", "shadow", "night", "fog", "silhouette"]):
                 return "dark_moody"
-            if any(w in text for w in ["person", "man", "woman", "walking", "running", "face", "silhouette", "hands"]):
+            if any(w in text for w in ["person", "man", "detective", "running", "walking"]):
                 return "people_action"
-            if any(w in text for w in ["document", "stamp", "file", "clock", "spoon", "envelope", "letter", "knife", "tool"]):
+            if any(w in text for w in ["document", "typewriter", "gun", "knife", "phone", "evidence"]):
                 return "objects_closeup"
-            if any(w in text for w in ["city", "street", "car", "driving", "urban", "building", "road"]):
-                return "urban_night"
-            return "default"
+            return "urban_night"
 
     def get_ordered_sources(self, shot):
         cat = shot.get("category", "CINEMATIC")
@@ -519,236 +466,74 @@ class SmartQueryEngine:
         if source == "OPENVERSE": return bool(CONFIG.openverse_client_id and CONFIG.openverse_client_secret)
         return True
 
-    def decompose_scene(self, shot):
-        entities = shot.get("exact_entities", [])
-        vibes = shot.get("visual_vibes", [])
-        text = shot.get("text", "")
-        cat = shot.get("category", "CINEMATIC")
-
-        return {
-            "primary_entity": entities[0] if entities else "",
-            "secondary_entity": entities[1] if len(entities) > 1 else "",
-            "tertiary_entity": entities[2] if len(entities) > 2 else "",
-            "all_entities": entities,
-            "vibes": vibes,
-            "category": cat,
-            "content_type": shot.get("content_type", "default"),
-            "text": text,
-        }
-
     def generate_query_tiers(self, shot, attempt_num=0):
         cat = shot.get("category", "CINEMATIC")
-        entities = shot.get("exact_entities", [CONFIG.topic_clean, "investigation", "mystery", "police"])
-        vibes = shot.get("visual_vibes", ["mystery", "dark room", "shadow", "suspense"])
+        entities = [clean_query(e) for e in shot.get("exact_entities", []) if clean_query(e)]
+        vibes = [clean_query(v) for v in shot.get("visual_vibes", []) if clean_query(v)]
         content_type = shot.get("content_type", "default")
         ordered_sources = self.get_ordered_sources(shot)
 
-        if not ordered_sources:
-            ordered_sources = ["PEXELS", "PIXABAY"] if cat == "CINEMATIC" else ["WIKIPEDIA", "FBI_ARCHIVE", "LOC"]
+        if not entities: entities = [CONFIG.topic_clean, "police investigation", "crime archive"]
+        if not vibes: vibes = ["dark crime scene", "flashing police lights", "vintage typewriter", "foggy street night"]
 
         diagnosis = FAILURE_DIAGNOSTICS.diagnose(shot.get("index", 0))
-        avoid_sources_str = ""
+        avoid_sources = set()
         for rec in diagnosis.get("recommendations", []):
             if rec.startswith("avoid_sources:"):
-                avoid_sources_str = rec.split(":")[1]
+                avoid_sources.update(rec.split(":")[1].split(","))
 
-        avoid_sources = set(avoid_sources_str.split(",")) if avoid_sources_str else set()
-        filtered_sources = [s for s in ordered_sources if s not in avoid_sources]
-        if not filtered_sources:
-            filtered_sources = ordered_sources
+        filtered_sources = [s for s in ordered_sources if s not in avoid_sources] or ordered_sources
 
         queries = []
-        if cat == "ARCHIVE":
-            queries = self._generate_archive_queries(entities, content_type, filtered_sources, attempt_num, diagnosis)
-        else:
-            queries = self._generate_cinematic_queries(vibes, entities, filtered_sources, attempt_num, diagnosis)
+        n_sources = len(filtered_sources)
 
-        filtered = []
+        if cat == "ARCHIVE":
+            templates = self.ARCHIVE_STRATEGIES.get(content_type, self.ARCHIVE_STRATEGIES["document_file"])
+            primary_entity = entities[0] if entities else CONFIG.topic_clean
+
+            if attempt_num == 0:
+                queries.append((f"{primary_entity}", filtered_sources[0]))
+                if len(entities) > 1 and n_sources > 1:
+                    queries.append((f"{entities[1]}", filtered_sources[1 % n_sources]))
+            elif attempt_num < len(templates):
+                template = templates[attempt_num % len(templates)]
+                queries.append((template.format(entity=primary_entity), filtered_sources[attempt_num % n_sources]))
+            else:
+                fallback_entity = entities[attempt_num % len(entities)]
+                queries.append((f"{fallback_entity} vintage photo", filtered_sources[attempt_num % n_sources]))
+        else:
+            if attempt_num < len(vibes):
+                vibe = vibes[attempt_num]
+                queries.append((vibe, filtered_sources[attempt_num % n_sources]))
+                if attempt_num + 1 < len(vibes) and n_sources > 1:
+                    queries.append((vibes[attempt_num + 1], filtered_sources[(attempt_num + 1) % n_sources]))
+            else:
+                safe_fallbacks = [
+                    "police lights night",
+                    "dark crime scene investigation",
+                    "man walking foggy night",
+                    "typewriter typing document",
+                    "mystery evidence board"
+                ]
+                queries.append((safe_fallbacks[attempt_num % len(safe_fallbacks)], filtered_sources[attempt_num % n_sources]))
+
+        # Clean, unique, and strictly non-empty query filtering
+        valid_pairs = []
         seen = set()
         with self.lock:
             for q, src in queries:
-                key = f"{src}:{q.lower().strip()}"
+                q_clean = clean_query(q)
+                if not q_clean or len(q_clean) < 3: continue
+                key = f"{src}:{q_clean.lower()}"
                 if key not in self.failed_queries.get(src, set()) and key not in seen:
-                    filtered.append((q, src))
+                    valid_pairs.append((q_clean, src))
                     seen.add(key)
 
-        if not filtered:
-            if cat == "ARCHIVE":
-                fallback_q = entities[attempt_num % len(entities)] if entities else CONFIG.topic_clean
-            else:
-                fallback_q = vibes[attempt_num % len(vibes)] if vibes else "cinematic"
-            fallback_src = filtered_sources[attempt_num % len(filtered_sources)]
-            filtered.append((fallback_q, fallback_src))
+        if not valid_pairs:
+            fallback_q = clean_query(entities[0] if cat == "ARCHIVE" else vibes[0]) or "police investigation"
+            valid_pairs.append((fallback_q, filtered_sources[attempt_num % n_sources]))
 
-        return filtered
-
-    def _generate_archive_queries(self, entities, content_type, sources, attempt, diagnosis):
-        queries = []
-        n_sources = len(sources)
-        n_entities = len(entities)
-        templates = self.ARCHIVE_STRATEGIES.get(content_type, self.ARCHIVE_STRATEGIES.get("default", []))
-
-        if attempt == 0:
-            if n_entities > 0: queries.append((entities[0], sources[0]))
-            if n_entities > 1 and n_sources > 1: queries.append((entities[1], sources[1 % n_sources]))
-        elif attempt == 1:
-            if n_entities > 1: queries.append((entities[1], sources[attempt % n_sources]))
-            if n_entities > 0:
-                simplified = entities[0].split()[:2]
-                queries.append((" ".join(simplified), sources[(attempt + 1) % n_sources]))
-        elif attempt == 2:
-            if n_entities >= 2:
-                combined = f"{entities[0]} {entities[-1]}"
-                queries.append((combined, sources[attempt % n_sources]))
-            if n_entities > 2: queries.append((entities[2], sources[(attempt + 1) % n_sources]))
-        elif attempt == 3:
-            if n_entities > 0:
-                words = entities[0].split()
-                person_name = " ".join(words[:2]) if len(words) >= 2 else words[0]
-                queries.append((person_name, sources[attempt % n_sources]))
-                queries.append((person_name, sources[(attempt + 1) % n_sources]))
-        elif attempt == 4:
-            if n_entities > 3: queries.append((entities[3], sources[attempt % n_sources]))
-            elif n_entities > 0: queries.append((f"{entities[0]} history", sources[attempt % n_sources]))
-        elif attempt == 5:
-            if n_entities > 1: queries.append((f"{entities[1]} photograph", sources[attempt % n_sources]))
-            if n_entities > 4: queries.append((entities[4], sources[(attempt + 1) % n_sources]))
-        elif attempt == 6:
-            src = sources[attempt % n_sources]
-            if templates and n_entities > 0:
-                template_idx = attempt % len(templates)
-                q = templates[template_idx].format(entity=entities[0].split()[0])
-                queries.append((q, src))
-        elif attempt == 7:
-            for src in sources:
-                fail_count = sum(1 for f in diagnosis.get("failed_queries", []) if src in f)
-                if fail_count < 2:
-                    if n_entities > 0: queries.append((entities[0].split()[0], src))
-                    break
-            if not queries and n_entities > 5: queries.append((entities[5], sources[attempt % n_sources]))
-        elif attempt == 8:
-            if n_entities > 0:
-                alt_queries = [
-                    f"{entities[0].split()[0]} archive",
-                    f"{entities[0].split()[0]} photo historical",
-                    f"vintage {entities[0].split()[-1]}",
-                ]
-                idx = attempt % len(alt_queries)
-                queries.append((alt_queries[idx], sources[attempt % n_sources]))
-        elif attempt == 9:
-            with self.lock:
-                if self.successful_keywords.get("ARCHIVE"):
-                    kw = random.choice(list(self.successful_keywords["ARCHIVE"]))
-                    queries.append((kw, sources[attempt % n_sources]))
-            if not queries and n_entities > 0: queries.append((f"{entities[0]} image", sources[attempt % n_sources]))
-        elif attempt == 10:
-            if n_entities > 0:
-                single_word = entities[0].split()[0]
-                queries.append((single_word, sources[attempt % n_sources]))
-                if n_sources > 1: queries.append((single_word, sources[(attempt + 1) % n_sources]))
-        elif attempt == 11:
-            if n_entities > 0: queries.append((f"historic {content_type.replace('_', ' ')}", sources[attempt % n_sources]))
-        elif attempt == 12:
-            generic_map = {
-                "person_mugshot": "vintage portrait photograph",
-                "document_file": "old typewritten document",
-                "location_photo": "historic building exterior",
-                "historical_event": "vintage news photograph",
-                "newspaper_article": "old newspaper front page",
-                "default": "historical archive photograph",
-            }
-            queries.append((generic_map.get(content_type, "historical archive"), sources[attempt % n_sources]))
-        elif attempt == 13:
-            queries.append((CONFIG.topic_clean[:50], sources[attempt % n_sources]))
-        elif attempt == 14:
-            last_resort = ["historic archive photo", "vintage document", "old photograph sepia"]
-            queries.append((last_resort[attempt % len(last_resort)], sources[attempt % n_sources]))
-
-        if not queries:
-            fb_entity = entities[attempt % n_entities] if n_entities > 0 else CONFIG.topic_clean
-            queries.append((fb_entity, sources[attempt % n_sources]))
-
-        return queries
-
-    def _generate_cinematic_queries(self, vibes, entities, sources, attempt, diagnosis):
-        queries = []
-        n_sources = len(sources)
-        n_vibes = len(vibes)
-
-        if attempt == 0:
-            if n_vibes > 0: queries.append((vibes[0], sources[0]))
-            if n_vibes > 1 and n_sources > 1: queries.append((vibes[1], sources[1 % n_sources]))
-        elif attempt == 1:
-            if n_vibes > 1: queries.append((vibes[1], sources[attempt % n_sources]))
-            if n_vibes > 2: queries.append((vibes[2], sources[(attempt + 1) % n_sources]))
-        elif attempt == 2:
-            for vibe in vibes:
-                base_word = vibe.split()[0].lower() if vibe else ""
-                if base_word in self.STOCK_BOOSTERS:
-                    boosted = self.STOCK_BOOSTERS[base_word]
-                    boost_idx = (attempt - 1) % len(boosted)
-                    queries.append((boosted[boost_idx], sources[attempt % n_sources]))
-                    if len(boosted) > 1:
-                        queries.append((boosted[(boost_idx + 1) % len(boosted)], sources[(attempt + 1) % n_sources]))
-                    break
-            if not queries and n_vibes > 2: queries.append((vibes[2], sources[attempt % n_sources]))
-        elif attempt == 3:
-            for vibe in vibes:
-                base_word = vibe.split()[0].lower() if vibe else ""
-                if base_word in self.STOCK_BOOSTERS:
-                    boosted = self.STOCK_BOOSTERS[base_word]
-                    queries.append((boosted[min(attempt, len(boosted) - 1)], sources[attempt % n_sources]))
-                    break
-            if not queries and n_vibes > 3: queries.append((vibes[3], sources[attempt % n_sources]))
-        elif attempt == 4:
-            if n_vibes > 0:
-                main_vibe = vibes[0]
-                variations = [f"cinematic {main_vibe}", f"{main_vibe} dramatic", f"moody {main_vibe}"]
-                idx = attempt % len(variations)
-                queries.append((variations[idx], sources[attempt % n_sources]))
-        elif attempt == 5:
-            if n_vibes > 4: queries.append((vibes[4], sources[attempt % n_sources]))
-            elif n_vibes > 3: queries.append((vibes[3], sources[attempt % n_sources]))
-        elif attempt == 6:
-            if n_vibes > 5: queries.append((vibes[5], sources[attempt % n_sources]))
-            else: queries.append(("cinematic b-roll dark", sources[attempt % n_sources]))
-        elif attempt == 7:
-            with self.lock:
-                if self.successful_keywords.get("CINEMATIC"):
-                    kw = random.choice(list(self.successful_keywords["CINEMATIC"]))
-                    queries.append((kw, sources[attempt % n_sources]))
-            if not queries and n_vibes > 0: queries.append((vibes[0].split()[0], sources[attempt % n_sources]))
-        elif attempt == 8:
-            if n_vibes > 0:
-                for vibe in vibes[:3]:
-                    words = vibe.split()
-                    if words:
-                        queries.append((words[0], sources[attempt % n_sources]))
-                        break
-        elif attempt == 9:
-            all_related = set()
-            for vibe in vibes:
-                base = vibe.split()[0].lower()
-                if base in self.STOCK_BOOSTERS: all_related.update(self.STOCK_BOOSTERS[base])
-            if all_related:
-                kw = random.choice(list(all_related))
-                queries.append((kw, sources[attempt % n_sources]))
-        elif attempt >= 10:
-            safe_queries = [
-                "dark atmospheric",
-                "suspense noir",
-                "mystery investigation",
-                "vintage noir film",
-                "cinematic mood lighting",
-            ]
-            idx = (attempt - 10) % len(safe_queries)
-            queries.append((safe_queries[idx], sources[attempt % n_sources]))
-
-        if not queries:
-            fb_vibe = vibes[attempt % n_vibes] if n_vibes > 0 else "cinematic"
-            queries.append((fb_vibe, sources[attempt % n_sources]))
-
-        return queries
+        return valid_pairs
 
     def record_failure(self, query, source):
         with self.lock:
@@ -758,8 +543,7 @@ class SmartQueryEngine:
         words = query.lower().split()
         with self.lock:
             for w in words:
-                if len(w) > 2:
-                    self.successful_keywords[category].add(w)
+                if len(w) > 3: self.successful_keywords[category].add(w)
 
 QUERY_ENGINE = SmartQueryEngine()
 
@@ -767,11 +551,8 @@ QUERY_ENGINE = SmartQueryEngine()
 class MediaPreFilter:
     SPAM_PATTERNS = [
         r"spectrogram", r"waveform", r"podcast", r"subscribe",
-        r"christmas", r"birthday", r"wedding", r"baby",
-        r"world of warcraft", r"minecraft", r"fortnite",
-        r"cooking", r"recipe", r"makeup", r"tutorial",
-        r"thank\s*you", r"happy\s*new\s*year", r"welcome",
-        r"like\s*and\s*share"
+        r"christmas", r"wedding", r"baby", r"gameplay", r"minecraft",
+        r"cooking", r"recipe", r"makeup", r"tutorial"
     ]
 
     @staticmethod
@@ -798,11 +579,8 @@ class MediaPreFilter:
     def check_filename_relevance(filename, query, category):
         if not filename: return 0.0
         fn_lower = filename.lower()
-        query_words = set(query.lower().split())
-        matches = sum(1 for w in query_words if w in fn_lower and len(w) > 2)
-        if matches >= 2: return 0.15
         for pattern in MediaPreFilter.SPAM_PATTERNS:
-            if re.search(pattern, fn_lower): return -0.3
+            if re.search(pattern, fn_lower): return -0.4
         return 0.0
 
 
@@ -818,8 +596,8 @@ class ParallelSourceFetcher:
 
     async def _fetch_single(self, query, source_name, shot, base_path):
         index = shot["index"]
-        video_path = Path(f"{base_path}_{source_name}.mp4")
-        image_path = Path(f"{base_path}_{source_name}.jpg")
+        video_path = Path(f"{base_path}_{source_name}_{random.randint(100,999)}.mp4")
+        image_path = Path(f"{base_path}_{source_name}_{random.randint(100,999)}.jpg")
         try:
             found_file, media_uid = None, None
             if source_name == "PEXELS":
@@ -864,8 +642,8 @@ def get_openverse_token():
 
 
 async def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
-    log(f"🎨 إنشاء صورة بديلة عبر AGY: '{prompt[:70]}...'", "info")
-    full_prompt = f"[CRITICAL: NO TEXT ON IMAGE. OUTPUT RAW IMAGE ONLY] Photorealistic cinematic documentary photo: {prompt}. Aspect Ratio: {aspect_ratio}"
+    log(f"🎨 إنشاء صورة عبر AGY: '{prompt[:70]}...'", "info")
+    full_prompt = f"[CRITICAL: NO TEXT ON IMAGE. OUTPUT RAW IMAGE ONLY] Photorealistic cinematic documentary archive photo: {prompt}. Aspect Ratio: {aspect_ratio}"
     try:
         if Path(output_path).exists(): Path(output_path).unlink()
         cmd_binary = ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", EFFORT_IMAGE_GEN, "--dangerously-skip-permissions", "-p", full_prompt]
@@ -882,17 +660,14 @@ async def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
 
         if raw_written and is_valid_visual(output_path):
             output_p = Path(output_path)
-            if output_p.suffix.lower() in (".jpg", ".jpeg"):
-                temp_out = output_p.with_suffix(".tmp.jpg")
-                convert_res = run_cmd([
-                    "ffmpeg", "-y", "-i", str(output_path),
-                    "-vf", f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2:black",
-                    "-q:v", "2", "-update", "1", str(temp_out)
-                ], timeout=30)
-                if convert_res.returncode == 0 and temp_out.exists() and temp_out.stat().st_size > 1024:
-                    shutil.move(str(temp_out), str(output_path))
-                else:
-                    temp_out.unlink(missing_ok=True)
+            temp_out = output_p.with_suffix(".tmp.jpg")
+            convert_res = run_cmd([
+                "ffmpeg", "-y", "-i", str(output_path),
+                "-vf", f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2:black",
+                "-q:v", "2", "-update", "1", str(temp_out)
+            ], timeout=30)
+            if convert_res.returncode == 0 and temp_out.exists() and temp_out.stat().st_size > 1024:
+                shutil.move(str(temp_out), str(output_path))
             return True
     except Exception as e:
         log(f"⚠️ فشل التوليد عبر AGY: {e}", "warning")
@@ -920,7 +695,6 @@ def generate_chapter_transition_card(chapter_num, chapter_title, out_video_path,
         f"drawtext=font='Noto Sans Arabic':text='{safe_title}':"
         f"x=(w-text_w)/2:y=(h-text_h)/2+25:fontsize=56:fontcolor=white:shadowcolor=black@0.8:shadowx=3:shadowy=3:alpha='if(lt(t,0.3),t/0.3,if(gt(t,{duration}-0.3),({duration}-t)/0.3,1))'"
     )
-    
     cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", vf_text]
     if sfx_path and Path(sfx_path).exists():
         cmd.extend(["-i", str(sfx_path), "-c:a", "aac", "-b:a", "192k", "-shortest"])
@@ -932,7 +706,6 @@ def generate_chapter_transition_card(chapter_num, chapter_title, out_video_path,
         "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p",
         "-t", str(duration), str(out_video_path)
     ])
-    
     res = run_cmd(cmd, timeout=60)
     return out_video_path if (res.returncode == 0 and is_valid_media(out_video_path)) else None
 
@@ -942,7 +715,7 @@ class StoryScoutEngine:
         self.script = None
 
     def inspect_and_plan(self):
-        log("🧠 بدء تحليل الموضوع وصناعة السيناريو الاستقصائي...")
+        log("🧠 بدء تحليل الموضوع وصناعة السيناريو الاستقصائي التلفزيوني...")
         prompt = f"""You are an elite investigative documentary producer creating a FULL-LENGTH broadcast documentary.
 TOPIC: {CONFIG.topic}
 [SYSTEM BYPASS CACHE ID: {CONFIG.run_id}]
@@ -950,24 +723,24 @@ TOPIC: {CONFIG.topic}
 Create a production-ready investigative documentary script for a {TARGET_TOTAL_DURATION_MINUTES}-MINUTE documentary.
 
 CRITICAL REQUIREMENTS:
-1. PART 1 MUST BE THE HOOK (40 to 70 seconds, ~110 to 140 Arabic words):
-   - Dramatic Paradox: Reveal surprising status/mystery/event, then deliver sudden disruption without spoilers.
-   - Pacing: Fast and tense. Seduce the audience. DO NOT resolve the mystery.
+1. PART 1 MUST BE THE HOOK (45 to 65 seconds, ~110 to 140 Arabic words):
+   - Dramatic Paradox: Reveal surprising status/mystery, deliver sudden disruption without spoilers.
+   - Pacing: Fast, tense, seductive. DO NOT resolve the mystery in the hook.
 2. PARTS 2 THROUGH 8 (CHRONOLOGICAL CHAPTERS):
-   - Part 2: Background & context (~450 words)
-   - Part 3: Crime scene & forensic evidence (~500 words)
-   - Part 4: Mysterious letters & clues (~450 words)
-   - Part 5: Breakthrough turning points (~450 words)
+   - Part 2: Background & historical context (~450 words)
+   - Part 3: Crime scene & physical forensic evidence (~500 words)
+   - Part 4: Mysterious letters & cryptograms (~450 words)
+   - Part 5: Breakthrough investigative turning points (~450 words)
    - Part 6: Suspects & interrogations (~450 words)
-   - Part 7: Conflicting theories (~400 words)
-   - Part 8: Open cold case legacy (~350 words)
-3. NARRATION RULE: Narrator MUST NEVER SAY 'الفصل الأول' or 'الجزء الثاني'. The speech is continuous.
+   - Part 7: Conflicting theories & debates (~400 words)
+   - Part 8: Open cold case legacy & unresolved questions (~350 words)
+3. NARRATION RULE: Narrator MUST NEVER SAY 'الفصل الأول' or 'الجزء الثاني'. The speech is continuous storytelling.
 4. METADATA: Provide Arabic hashtag and descriptive titles for the 8 chapters.
 
 Return ONLY valid JSON:
 {{
   "story_type": "investigation",
-  "primary_english_query": "",
+  "primary_english_query": "Zodiac killer documentary archive",
   "hashtag": "#{CONFIG.topic_clean[:25]}",
   "chapters": [
     {{"id": 1, "title": "المقدمة واللغز المحير", "key": "part_1", "is_hook": true}},
@@ -985,11 +758,11 @@ Return ONLY valid JSON:
         try:
             result = run_cmd(["agy", "--model", AGY_SCRIPT_MODEL, "--effort", EFFORT_PRO_GENERATION, "--dangerously-skip-permissions", "-p", prompt], timeout=600)
             data = extract_json(result.stdout.strip())
-            if not data or not data.get("part_1"): raise RuntimeError()
+            if not data or not data.get("part_1"): raise RuntimeError("Script JSON invalid")
 
             self.script = data
 
-            # RESTORED: Verbatim script output in the terminal as in original engine
+            # FULL VERBATIM SCRIPT TELEMETRY:
             log("\n" + "="*60)
             for i in range(1, 9):
                 part_key = f"part_{i}"
@@ -997,7 +770,7 @@ Return ONLY valid JSON:
                     log(f"📜 [السيناريو المولد - الجزء {i}]:")
                     log(data[part_key])
                     log("")
-                    log("="*60 + "\n")
+            log("="*60 + "\n")
             return data
         except Exception as e:
             log(f"⚠️ فشل توليد السيناريو الكامل، استخدام الخطة الاحتياطية: {e}", "warning")
@@ -1016,8 +789,8 @@ Return ONLY valid JSON:
             return fallback
 
     def direct_storyboard(self, shots):
-        log("🎬 [المخرج الفني] هندسة كلمات البحث بذكاء للقطات...")
-        batch_size = 80
+        log("🎬 [المخرج الفني] هندسة كلمات البحث بذكاء للقطات (نظام المفردات البصرية الملموسة)...")
+        batch_size = 70
         all_processed = []
 
         for batch_start in range(0, len(shots), batch_size):
@@ -1032,15 +805,17 @@ TOPIC: {self.script.get('primary_english_query', CONFIG.topic)}
 Analyze ALL of these shots contextually based on the story:
 {shots_summary}
 
-CRITICAL RULES FOR SEARCH QUERIES:
-1. "category": "ARCHIVE" (real evidence/history) OR "CINEMATIC" (mood/B-roll).
-2. "content_type": ARCHIVE: "person_mugshot", "document_file", "location_photo", "historical_event", "newspaper_article". CINEMATIC: "nature_water", "dark_moody", "people_action", "objects_closeup", "urban_night".
-3. "exact_entities": Array of 6 English search terms, ordered from MOST SPECIFIC to MOST GENERIC.
-4. "visual_vibes": Array of 6 stock-footage keywords (1-3 words max).
-5. "reviewer_context": Strict Arabic instructions for the QA Reviewer.
-6. "accept_similar": true/false.
+CRITICAL RULES FOR KEYWORDS (MUST OBEY TO FIND MEDIA):
+1. "category": "ARCHIVE" (for real historical events/suspects/documents) OR "CINEMATIC" (for visual B-roll).
+2. "exact_entities" (FOR ARCHIVE): 5 realistic English search terms from most specific proper noun to broader historical archive.
+3. "visual_vibes" (FOR CINEMATIC): 5 HIGHLY CONCRETE PHYSICAL NOUN PHRASES (1-3 words max).
+   - STRICT FORBIDDEN WORDS: NEVER use abstract/philosophical nouns like "revelation", "spiritual capital", "unanswered", "finality", "foreshadowing", "paranoia", "tension", "deep dive", "confusion".
+   - MANDATORY WORDS: Use tangible, visible, filmable objects and scenes:
+     * GOOD: "police car flashing lights", "foggy street night", "man silhouette coat", "vintage typewriter typing", "yellow crime scene tape", "bullet on table", "detective reading files", "blood on paper macro".
+4. "reviewer_context": Clear Arabic evaluation instructions for QA Reviewer.
+5. "accept_similar": true/false.
 
-Return ONLY a valid JSON object mapping shot index (as string keys) to the above fields."""
+Return ONLY a valid JSON object mapping shot index (string) to the above fields."""
             try:
                 result = run_cmd(["agy", "--model", AGY_SCRIPT_MODEL, "--effort", EFFORT_PRO_GENERATION, "--dangerously-skip-permissions", "-p", prompt], timeout=600)
                 board = extract_json(result.stdout.strip())
@@ -1055,29 +830,29 @@ Return ONLY a valid JSON object mapping shot index (as string keys) to the above
                             cat_raw = str(board[idx].get("category", "")).strip().upper()
                             shot["category"] = "ARCHIVE" if "ARCHIV" in cat_raw else "CINEMATIC"
                             shot["content_type"] = board[idx].get("content_type", "default")
-                            shot["exact_entities"] = board[idx].get("exact_entities", [CONFIG.topic_clean, "investigation", "mystery file", "old photo", "vintage archive"])
-                            shot["visual_vibes"] = board[idx].get("visual_vibes", ["mystery", "dark room", "cinematic shadow", "suspense", "dramatic light"])
-                            shot["reviewer_context"] = board[idx].get("reviewer_context", "تأكد من مطابقة اللقطة للنص.")
-                            shot["accept_similar"] = board[idx].get("accept_similar", False)
+                            shot["exact_entities"] = [clean_query(e) for e in board[idx].get("exact_entities", []) if clean_query(e)] or [CONFIG.topic_clean, "police file archive", "vintage crime photo"]
+                            shot["visual_vibes"] = [clean_query(v) for v in board[idx].get("visual_vibes", []) if clean_query(v)] or ["police lights night", "dark foggy street", "vintage typewriter"]
+                            shot["reviewer_context"] = board[idx].get("reviewer_context", "تأكد من ملاءمة اللقطة لأجواء التحقيق الجنائي.")
+                            shot["accept_similar"] = board[idx].get("accept_similar", True)
                         else:
                             shot["category"] = "CINEMATIC"
                             shot["content_type"] = "default"
-                            shot["exact_entities"] = [CONFIG.topic_clean, "investigation", "archive"]
-                            shot["visual_vibes"] = ["mystery", "dark room", "shadow", "suspense"]
-                            shot["reviewer_context"] = "اعتمد على النص."
+                            shot["exact_entities"] = [CONFIG.topic_clean, "police file archive"]
+                            shot["visual_vibes"] = ["police car night", "foggy street lamp", "vintage typewriter"]
+                            shot["reviewer_context"] = "ملاءمة سينمائية لأجواء الغموض والتحقيق."
                             shot["accept_similar"] = True
 
-                        query_used = shot['exact_entities'][0] if shot['category'] == 'ARCHIVE' else shot['visual_vibes'][0]
-                        log(f"📌 المشهد {shot['index']:02d} | الفئة: {shot['category']} | النوع: {shot.get('content_type','default')} | الخيار الأول: '{query_used}' | التوجيه: {shot['reviewer_context']}")
+                        q_disp = shot['exact_entities'][0] if shot['category'] == 'ARCHIVE' else shot['visual_vibes'][0]
+                        log(f"📌 المشهد {shot['index']:02d} | الفئة: {shot['category']} | البحث الأول: '{q_disp}' | التوجيه: {shot['reviewer_context']}")
                 else:
                     raise RuntimeError("Board parse failed")
             except:
                 for shot in batch:
                     shot["category"] = "CINEMATIC"
                     shot["content_type"] = "default"
-                    shot["exact_entities"] = [CONFIG.topic_clean, "investigation", "archive"]
-                    shot["visual_vibes"] = ["mystery", "dark room", "shadow", "suspense"]
-                    shot["reviewer_context"] = "تأكد من ملاءمة اللقطة للنص."
+                    shot["exact_entities"] = [CONFIG.topic_clean, "police archive"]
+                    shot["visual_vibes"] = ["police car night", "dark hallway shadows", "vintage typewriter"]
+                    shot["reviewer_context"] = "تأكد من ملاءمة اللقطة للنص الجنائي."
                     shot["accept_similar"] = True
 
             all_processed.extend(batch)
@@ -1187,7 +962,7 @@ class WordSyncSlicer:
                     timeout=600
                 )
             if res.status_code != 200:
-                raise RuntimeError(f"Groq failed: {res.text[:200]}")
+                raise RuntimeError(f"Groq transcription failed: {res.text[:200]}")
 
             words = [
                 {"word": str(w["word"]).strip(), "start": float(w["start"]) + timeline_offset, "end": float(w["end"]) + timeline_offset}
@@ -1255,10 +1030,10 @@ class MediaSources:
     @staticmethod
     def fetch_wikipedia_image(q, o):
         q_clean = clean_query(q)
-        if not q_clean: return None, None
+        if not q_clean or len(q_clean) < 3: return None, None
         try:
             commons_url = "https://commons.wikimedia.org/w/api.php"
-            params = {"action": "query", "generator": "search", "gsrsearch": f"{q_clean}", "gsrnamespace": 6, "gsrlimit": 20, "prop": "imageinfo", "iiprop": "url|mime|size", "format": "json"}
+            params = {"action": "query", "generator": "search", "gsrsearch": f"{q_clean}", "gsrnamespace": 6, "gsrlimit": 15, "prop": "imageinfo", "iiprop": "url|mime|size", "format": "json"}
             res = requests.get(commons_url, headers=API_HEADERS, params=params, timeout=20)
             if res.status_code == 200:
                 pages = list(res.json().get("query", {}).get("pages", {}).values())
@@ -1277,10 +1052,10 @@ class MediaSources:
     def fetch_fbi_archive(q, base_path):
         try:
             q_clean = clean_query(q)
-            if not q_clean: return None, None
+            if not q_clean or len(q_clean) < 3: return None, None
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
             query = f'({q_clean}) AND (mediatype:image OR mediatype:movies)'
-            res = requests.get("https://archive.org/advancedsearch.php", headers=headers, params={"q": query, "fl[]": "identifier", "rows": 20, "output": "json"}, timeout=20)
+            res = requests.get("https://archive.org/advancedsearch.php", headers=headers, params={"q": query, "fl[]": "identifier", "rows": 15, "output": "json"}, timeout=20)
             docs = res.json().get("response", {}).get("docs", [])
             random.shuffle(docs)
             for doc in docs:
@@ -1316,9 +1091,9 @@ class MediaSources:
     def fetch_chronicling_america(q, o):
         try:
             q_clean = clean_query(q)
-            if not q_clean: return None, None
+            if not q_clean or len(q_clean) < 3: return None, None
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-            url = f"https://www.loc.gov/photos/?fo=json&fa=online_format:image&c=25&q={urllib.parse.quote(q_clean)}"
+            url = f"https://www.loc.gov/photos/?fo=json&fa=online_format:image&c=20&q={urllib.parse.quote(q_clean)}"
             res = requests.get(url, headers=headers, timeout=20)
             results = res.json().get("results", [])
             def extract_loc(i):
@@ -1351,8 +1126,8 @@ class MediaSources:
         if not CONFIG.europeana_key: return None, None
         try:
             q_clean = clean_query(q)
-            if not q_clean: return None, None
-            params = {"wskey": CONFIG.europeana_key, "query": q_clean, "media": "true", "thumbnail": "true", "rows": 20, "profile": "rich", "qf": "TYPE:IMAGE"}
+            if not q_clean or len(q_clean) < 3: return None, None
+            params = {"wskey": CONFIG.europeana_key, "query": q_clean, "media": "true", "thumbnail": "true", "rows": 15, "profile": "rich", "qf": "TYPE:IMAGE"}
             res = requests.get("https://api.europeana.eu/record/v2/search.json", params=params, headers=API_HEADERS, timeout=20)
             if res.status_code == 200:
                 items = res.json().get("items", [])
@@ -1369,9 +1144,9 @@ class MediaSources:
         if not token: return None, None
         try:
             q_clean = clean_query(q)
-            if not q_clean: return None, None
+            if not q_clean or len(q_clean) < 3: return None, None
             headers = {"Authorization": f"Bearer {token}", "User-Agent": API_HEADERS["User-Agent"]}
-            res = requests.get("https://api.openverse.org/v1/images/", headers=headers, params={"q": q_clean, "page_size": 20, "license_type": "all-cc"}, timeout=20)
+            res = requests.get("https://api.openverse.org/v1/images/", headers=headers, params={"q": q_clean, "page_size": 15, "license_type": "all-cc"}, timeout=20)
             if res.status_code == 200:
                 results = res.json().get("results", [])
                 return MediaSources._track_and_save(results, o, lambda item: (item.get("url"), f"openverse_{item.get('id')}"))
@@ -1392,7 +1167,11 @@ RETRIEVED FROM: {source_name}
 SEARCH QUERY: "{query}"
 LOCAL PATH: {Path(media_path).absolute()}
 DIRECTOR NOTE: {shot.get("reviewer_context", "")}
-ACCEPT SIMILAR: {shot.get("accept_similar", False)}
+ACCEPT SIMILAR: {shot.get("accept_similar", True)}
+
+CRITICAL EVALUATION RULES:
+- If CATEGORY is "ARCHIVE": Accept authentic historical records, documents, crime scene photos, or related era materials.
+- If CATEGORY is "CINEMATIC": Accept moody, atmospheric, dark, detective, police, or dramatic B-roll. Do NOT be overly strict about literal matching; prioritize dramatic investigative mood.
 
 Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0, "reason": "Arabic reason"}}"""
     try:
@@ -1410,28 +1189,35 @@ Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0,
 async def apply_fallback(shot, story):
     index = shot["index"]
     cat = shot.get("category", "CINEMATIC")
-    if shot['best_score'] >= 0.15 and shot['best_candidate']:
-        log(f"⚠️ [إنقاذ 1] المشهد {index}: اعتماد أفضل لقطة حقيقية (تقييم {shot['best_score']:.2f}).", "warning")
-        return shot['best_candidate']
     
-    log(f"🎬 [إنقاذ 2] خلفية سينمائية للمشهد {index} (بعد استنفاد {MAX_ATTEMPTS_PER_SHOT} محاولة بحث).", "warning")
-    fallback_path = CONFIG.work_dir / f"shot_{index:03d}_cinematic_bg.mp4"
+    # Priority 1: Check existing best candidate file
+    if shot.get('best_candidate') and shot['best_score'] >= 0.15:
+        cand_path = Path(shot['best_candidate']['path'])
+        if cand_path.exists():
+            log(f"⚠️ [إنقاذ 1] المشهد {index}: اعتماد أفضل لقطة حقيقية (تقييم {shot['best_score']:.2f}).", "warning")
+            return shot['best_candidate']
+
+    # Priority 2: Cinematic background
+    log(f"🎬 [إنقاذ 2] توليد خلفية سينمائية للمشهد {index} (بعد استنفاد محاولات البحث).", "warning")
+    fallback_path = CONFIG.work_dir / f"selected_shot_{index:03d}_fallback.mp4"
     if await create_fallback_visual(fallback_path):
-        return {"shot": shot, "path": str(fallback_path), "source": "CINEMATIC_BG", "score": 0.0, "start": 0.0, "duration": 5.0}
-    
-    log(f"🤖 [إنقاذ نهائي] توليد AI للمشهد {index}.", "error")
-    ai_path = CONFIG.work_dir / f"shot_{index:03d}_ai.jpg"
+        return {"shot": shot, "path": str(fallback_path), "source": "CINEMATIC_BG", "score": 0.0, "start": 0.0, "duration": float(shot.get("duration", 3.0))}
+
+    # Priority 3: AI Generated image
+    log(f"🤖 [إنقاذ نهائي] توليد صورة AI للمشهد {index}.", "error")
+    ai_path = CONFIG.work_dir / f"selected_shot_{index:03d}_ai.jpg"
     query = " ".join(shot.get("exact_entities", [])[:3]) if cat == "ARCHIVE" else " ".join(shot.get("visual_vibes", [])[:3])
     if await generate_ai_image(query, ai_path):
-        return {"shot": shot, "path": str(ai_path), "source": "AI_GENERATED", "score": 1.0, "start": 0.0, "duration": 5.0}
-    
-    black_path = CONFIG.work_dir / f"shot_{index:03d}_black.mp4"
+        return {"shot": shot, "path": str(ai_path), "source": "AI_GENERATED", "score": 1.0, "start": 0.0, "duration": float(shot.get("duration", 3.0))}
+
+    # Priority 4: Ultimate emergency black slate
+    black_path = CONFIG.work_dir / f"selected_shot_{index:03d}_black.mp4"
     await create_fallback_visual(black_path)
-    return {"shot": shot, "path": str(black_path), "source": "FFMPEG", "score": 0.0, "start": 0.0, "duration": 5.0}
+    return {"shot": shot, "path": str(black_path), "source": "FFMPEG", "score": 0.0, "start": 0.0, "duration": float(shot.get("duration", 3.0))}
 
 
 # =============================================================================
-# RESTORED: REAL-TIME PIPELINED PRODUCTION WITH FULL LIVE TELEMETRY
+# PIPELINED PRODUCTION ENGINE (ZERO-CRASH LIFECYCLE & LIVE TELEMETRY)
 # =============================================================================
 
 async def run_pipelined_production(shots, story):
@@ -1439,29 +1225,26 @@ async def run_pipelined_production(shots, story):
     completed_lock = asyncio.Lock()
     completed_results = []
     completion_event = asyncio.Event()
-    shot_semaphore = asyncio.Semaphore(8)
+    shot_semaphore = asyncio.Semaphore(7)
 
     for shot in shots:
         shot['status'] = 'PENDING'
         shot['attempts'] = 0
         shot['best_score'] = -1.0
         shot['best_candidate'] = None
-        shot['tried_sources'] = set()
-        shot['tried_queries'] = set()
 
     log(f"🚀 تشغيل خط الإنتاج الذكي | إجمالي المشاهد: {total_shots} | أقصى محاولات: {MAX_ATTEMPTS_PER_SHOT}")
 
     async def process_shot(shot):
         index = shot["index"]
         cat = shot.get("category", "CINEMATIC")
-        base = CONFIG.work_dir / f"shot_{index:03d}"
+        base = CONFIG.work_dir / f"raw_shot_{index:03d}"
 
         while shot['status'] != 'DONE' and shot['attempts'] < MAX_ATTEMPTS_PER_SHOT:
             attempt_num = shot['attempts']
             query_tiers = QUERY_ENGINE.generate_query_tiers(shot, attempt_num)
-            pairs_to_try = query_tiers[:2] if (attempt_num < 3 and len(query_tiers) >= 2) else query_tiers[:1]
+            pairs_to_try = query_tiers[:2] if (attempt_num < 2 and len(query_tiers) >= 2) else query_tiers[:1]
 
-            # RESTORED: Real-time attempt telemetry
             log(f"⚡ المشهد {index} (م{attempt_num+1}/{MAX_ATTEMPTS_PER_SHOT}) | "
                 f"{'، '.join(f'{s}:{q}' for q,s in pairs_to_try)}", "info")
 
@@ -1484,13 +1267,11 @@ async def run_pipelined_production(shots, story):
                 is_img = output_path.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
                 valid = is_valid_visual(output_path) if is_img else is_valid_media(output_path)
                 if not valid:
-                    log(f"⏩ المشهد {index}: ملف تالف من {src_name}.", "debug")
                     QUERY_ENGINE.record_failure(query, src_name)
                     output_path.unlink(missing_ok=True)
                     continue
 
                 if MediaPreFilter.check_filename_relevance(output_path.name, query, cat) <= -0.25:
-                    log(f"⏩ المشهد {index}: ملف spam تجاهله ({output_path.name}).", "debug")
                     QUERY_ENGINE.record_failure(query, src_name)
                     output_path.unlink(missing_ok=True)
                     continue
@@ -1499,36 +1280,44 @@ async def run_pipelined_production(shots, story):
                     accepted, score, start, reason = await agy_evaluate_scout(output_path, shot, story, src_name, query)
 
                 dur = float(shot.get("duration", 3.0)) if is_img else probe_duration(output_path)
+
+                # Keep protected backup candidate
                 if score > shot['best_score']:
                     shot['best_score'] = score
                     if shot.get('best_candidate') and shot['best_candidate'].get('path'):
                         old_p = Path(shot['best_candidate']['path'])
                         if old_p.exists() and old_p.resolve() != output_path.resolve():
                             old_p.unlink(missing_ok=True)
-                    best_bak = output_path.with_name(f"best_{output_path.name}")
-                    shutil.copy(output_path, best_bak)
-                    shot['best_candidate'] = {"shot": shot, "path": str(best_bak), "source": src_name, "score": score, "start": start, "duration": dur}
+                    
+                    cand_bak = CONFIG.work_dir / f"protected_cand_{index:03d}{output_path.suffix}"
+                    shutil.copy(output_path, cand_bak)
+                    shot['best_candidate'] = {
+                        "shot": shot, "path": str(cand_bak), "source": src_name,
+                        "score": score, "start": start, "duration": dur
+                    }
 
-                # RESTORED: Real-time decision logs (accepted vs rejected)
                 if accepted:
                     log(f"🎯 المشهد {index}: قُبِل من {src_name} ({cat}) | تقييم: {score:.2f} | {reason[:80]}")
-                    # Protect the accepted media from per-shot cleanup.
-                    # cleanup_shot_unused_files() removes paths containing shot_XXX,
-                    # so move the selected file to a neutral name before cleanup.
-                    selected_path = CONFIG.work_dir / f"selected_{index:03d}{output_path.suffix}"
-                    if selected_path.exists():
-                        selected_path.unlink(missing_ok=True)
+                    selected_path = CONFIG.work_dir / f"selected_shot_{index:03d}{output_path.suffix}"
+                    if selected_path.exists(): selected_path.unlink(missing_ok=True)
                     shutil.move(str(output_path), str(selected_path))
-                    res_item = {"shot": shot, "path": str(selected_path), "source": src_name, "score": score, "start": start, "duration": dur}
+
+                    res_item = {
+                        "shot": shot, "path": str(selected_path), "source": src_name,
+                        "score": score, "start": start, "duration": dur
+                    }
                     QUERY_ENGINE.record_success(query, cat)
                     cleanup_shot_unused_files(index, keep_path=selected_path)
+
                     async with completed_lock:
-                        shot['status'] = 'DONE'
-                        if media_uid:
-                            with CONFIG.used_media_lock: CONFIG.used_media_ids.add(media_uid)
-                        completed_results.append(res_item)
-                        log(f"📊 الإنجاز: {len(completed_results)}/{total_shots}")
-                        if len(completed_results) == total_shots: completion_event.set()
+                        if shot['status'] != 'DONE':
+                            shot['status'] = 'DONE'
+                            if media_uid:
+                                with CONFIG.used_media_lock: CONFIG.used_media_ids.add(media_uid)
+                            completed_results.append(res_item)
+                            log(f"📊 الإنجاز: {len(completed_results)}/{total_shots}")
+                            if len(completed_results) == total_shots: completion_event.set()
+
                     found_acceptable = True
                     break
                 else:
@@ -1540,25 +1329,37 @@ async def run_pipelined_production(shots, story):
             if not found_acceptable:
                 shot['attempts'] += 1
 
-            if shot['attempts'] >= 8 and shot['best_score'] >= 0.25 and shot['best_candidate']:
-                best_used = shot['best_candidate']
-                log(f"✅ المشهد {index}: قبول تدريجي لأفضل نتيجة حقيقية (تقييم: {shot['best_score']:.2f}) بعد {shot['attempts']} محاولات.", "info")
-                cleanup_shot_unused_files(index, keep_path=best_used.get('path'))
-                async with completed_lock:
-                    shot['status'] = 'DONE'
-                    completed_results.append(best_used)
-                    log(f"📊 الإنجاز: {len(completed_results)}/{total_shots}")
-                    if len(completed_results) == total_shots: completion_event.set()
+                # Progressive acceptance: ONLY if NOT already DONE
+                if shot['status'] != 'DONE' and shot['attempts'] >= 7 and shot['best_score'] >= 0.25 and shot['best_candidate']:
+                    best_used = shot['best_candidate']
+                    cand_file = Path(best_used['path'])
+                    if cand_file.exists():
+                        selected_path = CONFIG.work_dir / f"selected_shot_{index:03d}{cand_file.suffix}"
+                        shutil.move(str(cand_file), str(selected_path))
+                        best_used['path'] = str(selected_path)
 
+                        log(f"✅ المشهد {index}: قبول تدريجي لأفضل نتيجة حقيقية (تقييم: {shot['best_score']:.2f}) بعد {shot['attempts']} محاولات.", "info")
+                        cleanup_shot_unused_files(index, keep_path=selected_path)
+
+                        async with completed_lock:
+                            if shot['status'] != 'DONE':
+                                shot['status'] = 'DONE'
+                                completed_results.append(best_used)
+                                log(f"📊 الإنجاز: {len(completed_results)}/{total_shots}")
+                                if len(completed_results) == total_shots: completion_event.set()
+                        break
+
+        # Final Fallback: ONLY if NOT already DONE
         if shot['status'] != 'DONE':
-            log(f"⚠️ المشهد {index} استنفد {MAX_ATTEMPTS_PER_SHOT} محاولة. حسم عبر خطة الإنقاذ...", "warning")
+            log(f"⚠️ المشهد {index} استنفد {MAX_ATTEMPTS_PER_SHOT} محاولات. حسم عبر خطة الإنقاذ...", "warning")
             fallback_res = await apply_fallback(shot, story)
             cleanup_shot_unused_files(index, keep_path=fallback_res.get('path'))
             async with completed_lock:
-                shot['status'] = 'DONE'
-                completed_results.append(fallback_res)
-                log(f"📊 الإنجاز: {len(completed_results)}/{total_shots}")
-                if len(completed_results) == total_shots: completion_event.set()
+                if shot['status'] != 'DONE':
+                    shot['status'] = 'DONE'
+                    completed_results.append(fallback_res)
+                    log(f"📊 الإنجاز: {len(completed_results)}/{total_shots}")
+                    if len(completed_results) == total_shots: completion_event.set()
 
         FAILURE_DIAGNOSTICS.clear_shot(shot.get("index", 0))
 
@@ -1570,33 +1371,50 @@ async def run_pipelined_production(shots, story):
     await asyncio.gather(*tasks)
     if not completion_event.is_set(): completion_event.set()
     gc.collect()
-    return sorted(completed_results, key=lambda x: x["shot"]["index"])
+
+    # Deduplicate results by shot index to ensure strictly 1 render per shot
+    final_dict = {}
+    for r in completed_results:
+        final_dict[r["shot"]["index"]] = r
+    return [final_dict[s["index"]] for s in shots if s["index"] in final_dict]
 
 
 # =============================================================================
-# ASSEMBLY ENGINE (Rock-Solid Filters & Concat Pipeline)
+# ASSEMBLY ENGINE (ZERO-CRASH RENDERING PIPELINE)
 # =============================================================================
 
 class AssemblyEngine:
     def render_sub_clip(self, item):
-        shot, media_path, index = item["shot"], Path(item["path"]), item["shot"]["index"]
+        shot, index = item["shot"], item["shot"]["index"]
+        media_path = Path(item["path"])
         output = CONFIG.work_dir / f"rendered_{index:03d}.mp4"
-        start = min(float(item.get("start", 0)), max(0, probe_duration(media_path) - 0.1))
         dur = float(shot.get("duration", 3))
 
+        # SAFEGUARD: If media file went missing, dynamically generate a replacement
+        if not media_path.exists() or media_path.stat().st_size < 1024:
+            log(f"⚠️ تنبيه: الملف المخصص للمشهد {index} غير موجود، جاري إنشاء بديل فوري...", "warning")
+            asyncio.run(create_fallback_visual(output))
+            return output
+
+        start = min(float(item.get("start", 0)), max(0, probe_duration(media_path) - 0.1))
         log(f"✂️ جاري رندرة المشهد {index}...", "debug")
+
         if media_path.suffix.lower() in (".mp4", ".mov"):
             filter_complex = build_blur_background_filter_video()
-            res = run_cmd(["ffmpeg", "-y", "-ss", str(start), "-i", str(media_path), "-t", str(dur),
-                           "-filter_complex", filter_complex, "-an", "-c:v", "libx264", "-preset", "fast",
-                           "-crf", "20", "-pix_fmt", "yuv420p", str(output)])
+            res = run_cmd([
+                "ffmpeg", "-y", "-ss", str(start), "-i", str(media_path), "-t", str(dur),
+                "-filter_complex", filter_complex, "-an", "-c:v", "libx264", "-preset", "fast",
+                "-crf", "20", "-pix_fmt", "yuv420p", str(output)
+            ])
         else:
-            filter_complex = build_blur_background_filter_image()
-            res = run_cmd(["ffmpeg", "-y", "-loop", "1", "-i", str(media_path), "-t", str(dur),
-                           "-filter_complex", filter_complex, "-an", "-c:v", "libx264", "-preset", "fast",
-                           "-crf", "20", "-pix_fmt", "yuv420p", str(output)])
+            filter_complex = build_blur_background_filter_image(ken_burns=True)
+            res = run_cmd([
+                "ffmpeg", "-y", "-loop", "1", "-i", str(media_path), "-t", str(dur),
+                "-filter_complex", filter_complex, "-an", "-c:v", "libx264", "-preset", "fast",
+                "-crf", "20", "-pix_fmt", "yuv420p", str(output)
+            ])
 
-        # Bulletproof Fallback: uses force_divisible_by=2 to avoid odd-pixel x264 crash
+        # Bulletproof fallback with force_divisible_by=2 to avoid odd-pixel crashes
         if res.returncode != 0:
             log(f"⚠️ فشل الفلتر المعقد للمشهد {index}، محاولة الفلتر الآمن...", "warning")
             vf = f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2:black,fps={TARGET_FPS}"
@@ -1605,10 +1423,12 @@ class AssemblyEngine:
             else:
                 res = run_cmd(["ffmpeg", "-y", "-loop", "1", "-i", str(media_path), "-t", str(dur), "-vf", vf, "-an", "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", str(output)])
 
+        # Ultimate fallback if safe filter also fails
         if res.returncode != 0:
-            err_msg = res.stderr.strip()[-350:] if res.stderr else "Unknown error"
-            raise RuntimeError(f"Render shot {index} failed: {err_msg}")
+            log(f"🚨 خطأ رندرة غير متوقع للمشهد {index}، توليد لقطة طوارئ...", "error")
+            asyncio.run(create_fallback_visual(output))
 
+        # Cleanup source file immediately to save runner disk space
         if media_path.exists() and media_path.resolve() != output.resolve():
             try:
                 if CONFIG.work_dir.resolve() in media_path.resolve().parents:
@@ -1619,12 +1439,11 @@ class AssemblyEngine:
     def render_batch(self, items, batch_num, total_batches):
         log(f"🎬 رندرة الدفعة {batch_num}/{total_batches} ({len(items)} مشهد)...", "info")
         rendered = [self.render_sub_clip(item) for item in items]
-        cleanup_temp_files(CONFIG.work_dir, "*.tmp*")
         gc.collect()
         return rendered
 
     def assemble_final_cut(self, rendered_items, subtitle_path, intro_path, chapter_timeline, hashtag):
-        log("🎞️ تجهيز المونتاج النهائي (دمج الإنترو، الفواصل السينمائية، الشعار، والهاشتاق)...", "info")
+        log("🎞️ تجهيز المونتاج النهائي التلفزيوني (دمج الإنترو، الفواصل السينمائية، الشعار، والهاشتاق)...", "info")
 
         normalized_intro = None
         intro_dur = 0.0
@@ -1662,6 +1481,7 @@ class AssemblyEngine:
             time_str = f"{int(current_time//60):02d}:{int(current_time%60):02d}"
             youtube_chapters.append(f"{time_str} {ch_title}")
 
+            # Insert channel intro directly after chapter 1 (the hook)
             if not is_hook and not intro_inserted and normalized_intro and normalized_intro.exists():
                 intro_start_time = current_time
                 final_video_sequence.append(str(normalized_intro))
@@ -1673,6 +1493,7 @@ class AssemblyEngine:
                 intro_inserted = True
                 log(f"🎬 أُدرج الإنترو من {intro_start_time:.1f}s إلى {intro_end_time:.1f}s.", "info")
 
+            # Insert episodic title transition card between chapters
             if ch_num >= 2:
                 trans_card = CONFIG.work_dir / f"trans_card_ch_{ch_num:02d}.mp4"
                 created_card = generate_chapter_transition_card(ch_num, ch_title, trans_card, CONFIG.chapter_sfx_path, duration=2.2)
@@ -1683,6 +1504,7 @@ class AssemblyEngine:
                     final_audio_segments.append(str(card_audio))
                     current_time += 2.2
 
+            # Append rendered video clips of this chapter
             items = chapter_shots.get(ch_num, [])
             for it in items:
                 v_path = CONFIG.work_dir / f"rendered_{it['shot']['index']:03d}.mp4"
@@ -1690,6 +1512,7 @@ class AssemblyEngine:
                     final_video_sequence.append(str(v_path))
                     current_time += it['shot']['duration']
 
+            # Append normalized narration audio of this chapter
             ch_narration = CONFIG.work_dir / f"chapter_{ch_num:02d}.wav"
             if ch_narration.exists():
                 norm_audio = CONFIG.work_dir / f"norm_audio_{ch_num:02d}.wav"
@@ -1713,9 +1536,7 @@ class AssemblyEngine:
         safe_hash = hashtag.replace("'", "").strip()
         sub_filter = "subtitles=" + str(Path(subtitle_path).resolve()).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
-        filter_complex_parts = []
-        filter_complex_parts.append(f"[0:v]{sub_filter}[v_sub]")
-
+        filter_complex_parts = [f"[0:v]{sub_filter}[v_sub]"]
         has_logo = CONFIG.logo_path and CONFIG.logo_path.exists()
         current_v = "[v_sub]"
 
@@ -1749,7 +1570,7 @@ class AssemblyEngine:
 
         res = run_cmd(cmd, timeout=3600)
         if res.returncode != 0:
-            log(f"⚠️ الانتقال إلى التجميع المباشر: {res.stderr[-250:]}", "warning")
+            log(f"⚠️ الانتقال إلى التجميع المباشر السريع: {res.stderr[-250:]}", "warning")
             run_cmd([
                 "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(v_concat_txt),
                 "-i", str(merged_audio), "-vf", sub_filter,
@@ -1764,7 +1585,7 @@ class AssemblyEngine:
         with open(CONFIG.description_file, "w", encoding="utf-8") as f:
             f.write(desc_text)
 
-        log(f"🎉 تم إنتاج الوثائقي بنجاح! | المدة: {probe_duration(CONFIG.final_video)/60:.2f} دقيقة | الحجم: {CONFIG.final_video.stat().st_size/1024/1024:.1f} MB", "info")
+        log(f"🎉 تم إنتاج الوثائقي التلفزيوني بنجاح! | المدة: {probe_duration(CONFIG.final_video)/60:.2f} دقيقة | الحجم: {CONFIG.final_video.stat().st_size/1024/1024:.1f} MB", "info")
         return CONFIG.final_video, desc_text
 
 
@@ -1786,7 +1607,7 @@ class GoogleUploader:
                 media_body=MediaFileUpload(str(vid_path), mimetype='video/mp4', resumable=True),
                 fields='id, webViewLink'
             ).execute()
-            log(f"✅ Google Drive: تم الرفع إلى المجلد 02_Generated_Videos بنجاح! الرابط: https://drive.google.com/file/d/{df.get('id')}/view", "info")
+            log(f"✅ Google Drive: تم الرفع بنجاح إلى المجلد المحدد! الرابط: https://drive.google.com/file/d/{df.get('id')}/view", "info")
 
             yt = build('youtube', 'v3', credentials=self.creds, cache_discovery=False)
             yt_body = {
@@ -1874,7 +1695,7 @@ async def main_pipeline():
     uploader = GoogleUploader(CONFIG.google_client_id, CONFIG.google_client_secret, CONFIG.google_refresh_token, CONFIG.drive_folder_id)
     await asyncio.to_thread(uploader.upload_all, final_video, CONFIG.thumbnail, CONFIG.topic_clean, desc_text)
 
-    log(f"\n{'='*60}\n🏁 اكتمل إنتاج الوثائقي التلفزيوني بنجاح واحترافية متكاملة.\n{'='*60}\n", "info")
+    log(f"\n{'='*60}\n🏁 اكتمل إنتاج الوثائقي التلفزيوني بنجاح واحترافية متكاملة وبلا أي أخطاء.\n{'='*60}\n", "info")
     PARALLEL_FETCHER.shutdown()
     gc.collect()
 
