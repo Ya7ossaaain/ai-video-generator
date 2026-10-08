@@ -1512,9 +1512,16 @@ async def run_pipelined_production(shots, story):
                 # RESTORED: Real-time decision logs (accepted vs rejected)
                 if accepted:
                     log(f"🎯 المشهد {index}: قُبِل من {src_name} ({cat}) | تقييم: {score:.2f} | {reason[:80]}")
-                    res_item = {"shot": shot, "path": str(output_path), "source": src_name, "score": score, "start": start, "duration": dur}
+                    # Protect the accepted media from per-shot cleanup.
+                    # cleanup_shot_unused_files() removes paths containing shot_XXX,
+                    # so move the selected file to a neutral name before cleanup.
+                    selected_path = CONFIG.work_dir / f"selected_{index:03d}{output_path.suffix}"
+                    if selected_path.exists():
+                        selected_path.unlink(missing_ok=True)
+                    shutil.move(str(output_path), str(selected_path))
+                    res_item = {"shot": shot, "path": str(selected_path), "source": src_name, "score": score, "start": start, "duration": dur}
                     QUERY_ENGINE.record_success(query, cat)
-                    cleanup_shot_unused_files(index, keep_path=output_path)
+                    cleanup_shot_unused_files(index, keep_path=selected_path)
                     async with completed_lock:
                         shot['status'] = 'DONE'
                         if media_uid:
