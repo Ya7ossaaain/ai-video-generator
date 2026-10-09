@@ -3,8 +3,8 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V59.1 - STABLE ARCHIVE & RESILIENT SOURCING MASTER
-(COMPACT QUERIES, YT-DLP BYPASS, YARN DIALOGUE FIX & ZERO RATELIMIT)
+V60 - GENIUS ARCHIVE & COMPACT SOURCING MASTER
+(ZERO-RATELIMIT DDG, YT-DLP DENO ENGINE, RESILIENT YARN & SURGICAL QUERIES)
 """
 
 import os
@@ -37,7 +37,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V59.1-STABLE-ARCHIVE-MASTER"
+ENGINE_VERSION = "V60-GENIUS-ARCHIVE-MASTER"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -72,8 +72,8 @@ EFFORT_PRO_GENERATION = "high"
 EFFORT_IMAGE_GEN = "medium"
 
 API_HEADERS = {
-    "User-Agent": "InvestigativeDocumentaryEngine/5.1 (https://github.com/Ya7ossaaain; contact@example.com)",
-    "Accept": "application/json, text/plain, */*"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
 }
 
 MEDIA_DOWNLOAD_HEADERS = {
@@ -81,19 +81,19 @@ MEDIA_DOWNLOAD_HEADERS = {
     "Accept": "*/*"
 }
 
-ARCHIVE_SOURCES = ["WIKIPEDIA", "FBI_ARCHIVE", "YOUTUBE", "YARN", "OPENVERSE", "LOC", "EUROPEANA"]
+ARCHIVE_SOURCES = ["WIKIPEDIA", "DUCKDUCKGO", "FBI_ARCHIVE", "YOUTUBE", "YARN", "OPENVERSE", "LOC", "EUROPEANA"]
 CINEMATIC_SOURCES = ["PEXELS", "PIXABAY"]
 
 SOURCE_AFFINITY = {
     "ARCHIVE": {
-        "person_mugshot": ["WIKIPEDIA", "FBI_ARCHIVE", "OPENVERSE", "LOC"],
-        "document_file": ["FBI_ARCHIVE", "WIKIPEDIA", "LOC", "EUROPEANA"],
+        "person_mugshot": ["WIKIPEDIA", "DUCKDUCKGO", "FBI_ARCHIVE", "OPENVERSE", "LOC"],
+        "document_file": ["FBI_ARCHIVE", "WIKIPEDIA", "DUCKDUCKGO", "LOC", "EUROPEANA"],
         "historic_interview": ["YOUTUBE", "FBI_ARCHIVE", "WIKIPEDIA"],
         "movie_clip": ["YARN", "YOUTUBE"],
-        "location_photo": ["WIKIPEDIA", "OPENVERSE", "LOC", "EUROPEANA"],
-        "historical_event": ["WIKIPEDIA", "FBI_ARCHIVE", "YOUTUBE", "OPENVERSE"],
-        "newspaper_article": ["LOC", "WIKIPEDIA", "EUROPEANA", "FBI_ARCHIVE"],
-        "default": ["WIKIPEDIA", "FBI_ARCHIVE", "OPENVERSE", "LOC", "PEXELS"],
+        "location_photo": ["WIKIPEDIA", "DUCKDUCKGO", "OPENVERSE", "LOC"],
+        "historical_event": ["WIKIPEDIA", "FBI_ARCHIVE", "DUCKDUCKGO", "YOUTUBE"],
+        "newspaper_article": ["LOC", "WIKIPEDIA", "DUCKDUCKGO", "EUROPEANA"],
+        "default": ["WIKIPEDIA", "DUCKDUCKGO", "FBI_ARCHIVE", "OPENVERSE", "LOC"],
     },
     "CINEMATIC": {
         "nature_water": ["PEXELS", "PIXABAY"],
@@ -248,9 +248,13 @@ def is_valid_visual(path):
     return w > 0 and h > 0
 
 def clean_query(text):
+    """Surgical 2-3 word distillation to guarantee high hit-rates on archive APIs."""
     clean = re.sub(r"\s+", " ", re.sub(r"[^\x00-\x7F]+", " ", text or "")).strip()
     words = clean.split()
-    return " ".join(words[:5])[:90]
+    fluff = {"investigation", "classified", "memorandum", "official", "diagram", "report", "case", "file"}
+    distilled = [w for w in words if w.lower() not in fluff]
+    if not distilled: distilled = words
+    return " ".join(distilled[:3])[:60]
 
 def run_cmd(cmd, timeout=300):
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
@@ -364,29 +368,26 @@ class SmartQueryEngine:
         content_type = shot.get("content_type", "default")
         filtered_sources = self.get_ordered_sources(shot)
 
-        # Ensure fallback clean topics
-        topic_short = " ".join(clean_query(CONFIG.topic).split()[:3])
-        if not entities: entities = [topic_short, f"{topic_short} police", f"{topic_short} case"]
-        if not vibes: vibes = ["police lights night", "dark street lamp", "typewriter paper"]
+        topic_words = clean_query(CONFIG.topic).split()[:2]
+        topic_short = " ".join(topic_words)
+        if not entities: entities = [topic_short, f"{topic_short} police"]
+        if not vibes: vibes = ["police lights night", "dark street lamp"]
 
         queries = []
         n_sources = len(filtered_sources)
         src = filtered_sources[attempt_num % n_sources]
 
         if cat == "ARCHIVE":
-            # COMPACT SURGICAL QUERIES (Max 3-4 words to guarantee API hits)
             anchor = entities[attempt_num % len(entities)]
-            anchor_words = anchor.split()[:3]
-            short_anchor = " ".join(anchor_words)
+            short_anchor = " ".join(anchor.split()[:2])
 
             if content_type == "movie_clip":
-                # Dialogue / 2-word quotes only for Yarn
-                dialogue_quotes = ["I have a bomb", "twenty dollar bills", "parachute", "hijack", "airplane cabin"]
+                dialogue_quotes = ["I have a bomb", "twenty dollar bills", "parachute", "hijack"]
                 queries.append((dialogue_quotes[attempt_num % len(dialogue_quotes)], "YARN"))
-                queries.append((f"{short_anchor} movie scene", "YOUTUBE"))
+                queries.append((short_anchor, "YOUTUBE"))
             elif content_type == "historic_interview":
                 queries.append((f"{short_anchor} interview", "YOUTUBE"))
-                queries.append((f"{short_anchor} news report", "FBI_ARCHIVE"))
+                queries.append((short_anchor, "FBI_ARCHIVE"))
             else:
                 if attempt_num == 0:
                     queries.append((short_anchor, src))
@@ -395,10 +396,10 @@ class SmartQueryEngine:
                     tag = tags[(attempt_num - 1) % len(tags)]
                     queries.append((f"{short_anchor} {tag}", src))
                 elif attempt_num <= 9:
-                    queries.append((f"{short_anchor} archive", src))
-                else:
-                    # In later attempts, gracefully allow high-quality fallback sources
                     queries.append((f"{short_anchor}", "WIKIPEDIA"))
+                    queries.append((f"{short_anchor}", "DUCKDUCKGO"))
+                else:
+                    queries.append((short_anchor, "OPENVERSE"))
                     queries.append(("police investigation night", "PEXELS"))
         else:
             if attempt_num < len(vibes):
@@ -407,8 +408,7 @@ class SmartQueryEngine:
                 ageless_fallbacks = [
                     "police flashing lights reflection wet night",
                     "fountain pen writing paper macro",
-                    "ticking clock hands macro shadows",
-                    "heavy fog street lamp night"
+                    "ticking clock hands macro shadows"
                 ]
                 queries.append((ageless_fallbacks[attempt_num % len(ageless_fallbacks)], src))
 
@@ -486,14 +486,16 @@ class ParallelSourceFetcher:
         image_path = Path(f"{base_path}_{source_name}_{random.randint(100,999)}.jpg")
         try:
             found_file, media_uid = None, None
-            if source_name == "YOUTUBE":
+            if source_name == "WIKIPEDIA":
+                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_wikipedia_image, query, image_path)
+            elif source_name == "DUCKDUCKGO":
+                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_duckduckgo_resilient, query, image_path)
+            elif source_name == "FBI_ARCHIVE":
+                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_fbi_archive, query, Path(f"{base_path}_{source_name}"))
+            elif source_name == "YOUTUBE":
                 found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_youtube_clip, query, video_path, shot)
             elif source_name == "YARN":
                 found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_yarn_clip, query, video_path)
-            elif source_name == "WIKIPEDIA":
-                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_wikipedia_image, query, image_path)
-            elif source_name == "FBI_ARCHIVE":
-                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_fbi_archive, query, Path(f"{base_path}_{source_name}"))
             elif source_name == "PEXELS":
                 found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_pexels_video, query, video_path)
             elif source_name == "PIXABAY":
@@ -516,7 +518,7 @@ PARALLEL_FETCHER = ParallelSourceFetcher()
 
 
 # =============================================================================
-# RESILIENT MEDIA SOURCES
+# ZERO-BLOCK RESILIENT MEDIA SOURCES
 # =============================================================================
 
 class MediaSources:
@@ -530,7 +532,7 @@ class MediaSources:
             with CONFIG.used_media_lock:
                 if uid in CONFIG.used_media_ids: continue
             try:
-                r = requests.get(url, headers=MEDIA_DOWNLOAD_HEADERS, stream=True, timeout=25)
+                r = requests.get(url, headers=MEDIA_DOWNLOAD_HEADERS, stream=True, timeout=20)
                 if r.status_code == 200:
                     with open(output, "wb") as f:
                         for chunk in r.iter_content(1024*256):
@@ -540,15 +542,53 @@ class MediaSources:
         return None, None
 
     @staticmethod
+    def fetch_duckduckgo_resilient(q, output_path):
+        """Bypasses Cloudflare 202 Ratelimit using real browser header session and Wikimedia fallback."""
+        q_clean = clean_query(q)
+        if not q_clean: return None, None
+        try:
+            # First attempt: Direct DuckDuckGo JSON with Chrome headers
+            session = requests.Session()
+            session.headers.update({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Referer": "https://duckduckgo.com/",
+                "Accept": "*/*"
+            })
+            res_vqd = session.get(f"https://duckduckgo.com/?q={urllib.parse.quote(q_clean)}&t=h_", timeout=8)
+            vqd_match = re.search(r'vqd=([\d\-]+)', res_vqd.text) or re.search(r'vqd="([\d\-]+)"', res_vqd.text)
+            if vqd_match:
+                vqd = vqd_match.group(1)
+                img_url = f"https://duckduckgo.com/i.js?l=us-en&o=json&q={urllib.parse.quote(q_clean)}&vqd={vqd}&f=,,,&p=1"
+                img_res = session.get(img_url, timeout=10)
+                if img_res.status_code == 200:
+                    results = img_res.json().get("results", [])
+                    if results:
+                        return MediaSources._track_and_save(results, output_path, lambda x: (x.get("image"), f"ddg_{hash(x.get('image'))}"))
+        except Exception:
+            pass
+
+        # Intelligent Fallback: Instant Wikipedia article image pull (Zero Ratelimit)
+        try:
+            wiki_res = requests.get(
+                f"https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch={urllib.parse.quote(q_clean)}&gsrlimit=5&prop=pageimages&pithumbsize=1080&format=json",
+                headers=API_HEADERS, timeout=8
+            )
+            if wiki_res.status_code == 200:
+                pages = list(wiki_res.json().get("query", {}).get("pages", {}).values())
+                return MediaSources._track_and_save(pages, output_path, lambda p: (p.get("thumbnail", {}).get("source"), f"wiki_{p.get('pageid')}"))
+        except Exception:
+            pass
+        return None, None
+
+    @staticmethod
     def fetch_youtube_clip(q, output_path, shot):
-        """Bypass bot-detection via android/web player client fallback."""
+        """Bypass bot-detection using Android/web client and Node/Deno challenge solving."""
         q_clean = clean_query(q)
         if not q_clean: return None, None
         try:
             dur = max(3.0, float(shot.get("duration", 3.0)))
-            target_query = f"{q_clean} documentary interview"
+            target_query = f"{q_clean} interview"
             
-            # Use android client to minimize datacenter bot detection
             cmd_search = [
                 "yt-dlp",
                 "--extractor-args", "youtube:player_client=android,web",
@@ -557,7 +597,7 @@ class MediaSources:
                 "--get-id",
                 "--no-playlist", "--quiet"
             ]
-            res = subprocess.run(cmd_search, stdout=subprocess.PIPE, text=True, timeout=25)
+            res = subprocess.run(cmd_search, stdout=subprocess.PIPE, text=True, timeout=20)
             lines = res.stdout.strip().split("\n")
             if not lines or not lines[0]: return None, None
             video_id = lines[0].strip()
@@ -579,7 +619,7 @@ class MediaSources:
                 "--no-playlist", "--quiet",
                 video_url
             ]
-            dl_res = subprocess.run(cmd_dl, timeout=45)
+            dl_res = subprocess.run(cmd_dl, timeout=40)
             if dl_res.returncode == 0 and Path(output_path).exists() and Path(output_path).stat().st_size > 10240:
                 return str(output_path), f"yt_{video_id}"
         except Exception:
@@ -588,23 +628,22 @@ class MediaSources:
 
     @staticmethod
     def fetch_yarn_clip(q, output_path):
-        """Dialogue matching clip fetcher from yarn.co."""
+        """Short spoken dialogue quote matching for yarn.co."""
         q_clean = clean_query(q)
         if not q_clean: return None, None
         try:
-            # Yarn searches strictly for spoken dialogue (1-3 words max)
-            quote = " ".join(q_clean.split()[:3])
+            quote = " ".join(q_clean.split()[:2])
             url = f"https://yarn.co/yarn-find?text={urllib.parse.quote(quote)}"
-            res = requests.get(url, headers=API_HEADERS, timeout=12)
+            res = requests.get(url, headers=API_HEADERS, timeout=10)
             if res.status_code == 200:
                 clip_ids = re.findall(r'/yarn-clip/([a-zA-Z0-9\-]+)', res.text)
                 if clip_ids:
                     random.shuffle(clip_ids)
-                    for cid in clip_ids[:3]:
+                    for cid in clip_ids[:2]:
                         with CONFIG.used_media_lock:
                             if f"yarn_{cid}" in CONFIG.used_media_ids: continue
                         video_url = f"https://y.yarn.co/{cid}.mp4"
-                        r = requests.get(video_url, headers=MEDIA_DOWNLOAD_HEADERS, timeout=20)
+                        r = requests.get(video_url, headers=MEDIA_DOWNLOAD_HEADERS, timeout=15)
                         if r.status_code == 200 and len(r.content) > 10240:
                             with open(output_path, "wb") as f:
                                 f.write(r.content)
@@ -616,11 +655,11 @@ class MediaSources:
     @staticmethod
     def fetch_wikipedia_image(q, o):
         q_clean = clean_query(q)
-        if not q_clean or len(q_clean) < 3: return None, None
+        if not q_clean: return None, None
         try:
             commons_url = "https://commons.wikimedia.org/w/api.php"
             params = {"action": "query", "generator": "search", "gsrsearch": f"{q_clean}", "gsrnamespace": 6, "gsrlimit": 15, "prop": "imageinfo", "iiprop": "url|mime|size", "format": "json"}
-            res = requests.get(commons_url, headers=API_HEADERS, params=params, timeout=20)
+            res = requests.get(commons_url, headers=API_HEADERS, params=params, timeout=15)
             if res.status_code == 200:
                 pages = list(res.json().get("query", {}).get("pages", {}).values())
                 def extract_commons(p):
@@ -638,10 +677,10 @@ class MediaSources:
     def fetch_fbi_archive(q, base_path):
         try:
             q_clean = clean_query(q)
-            if not q_clean or len(q_clean) < 3: return None, None
+            if not q_clean: return None, None
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
             query = f'({q_clean}) AND (mediatype:image OR mediatype:movies)'
-            res = requests.get("https://archive.org/advancedsearch.php", headers=headers, params={"q": query, "fl[]": "identifier", "rows": 15, "output": "json"}, timeout=20)
+            res = requests.get("https://archive.org/advancedsearch.php", headers=headers, params={"q": query, "fl[]": "identifier", "rows": 15, "output": "json"}, timeout=18)
             docs = res.json().get("response", {}).get("docs", [])
             random.shuffle(docs)
             for doc in docs:
@@ -649,7 +688,7 @@ class MediaSources:
                 with CONFIG.used_media_lock:
                     if uid in CONFIG.used_media_ids: continue
                 try:
-                    meta = requests.get(f"https://archive.org/metadata/{uid}", headers=headers, timeout=20).json()
+                    meta = requests.get(f"https://archive.org/metadata/{uid}", headers=headers, timeout=15).json()
                     files = meta.get("files", [])
                     videos = [(int(i.get("size",0) or 0), str(i.get("name",""))) for i in files if str(i.get("name","")).lower().endswith((".mp4",".mov")) and 500*1024 <= int(i.get("size",0) or 0) <= MAX_MEDIA_SIZE_MB*1024*1024]
                     images = [(int(i.get("size",0) or 0), str(i.get("name",""))) for i in files if str(i.get("name","")).lower().endswith((".jpg",".jpeg",".png")) and int(i.get("size",0) or 0) >= 15*1024]
@@ -663,7 +702,7 @@ class MediaSources:
                     if target_name:
                         out_path = base_path.with_suffix(".mp4" if is_video else ".jpg")
                         file_url = f"https://archive.org/download/{uid}/{urllib.parse.quote(target_name, safe='/')}"
-                        r = requests.get(file_url, headers=MEDIA_DOWNLOAD_HEADERS, stream=True, timeout=35)
+                        r = requests.get(file_url, headers=MEDIA_DOWNLOAD_HEADERS, stream=True, timeout=25)
                         if r.status_code == 200:
                             with open(out_path, "wb") as f:
                                 for chunk in r.iter_content(1024*256):
@@ -679,7 +718,7 @@ class MediaSources:
         try:
             headers = MEDIA_DOWNLOAD_HEADERS.copy()
             headers["Authorization"] = CONFIG.pexels_key
-            res = requests.get("https://api.pexels.com/videos/search", headers=headers, params={"query": q, "per_page": 10}, timeout=20).json().get("videos", [])
+            res = requests.get("https://api.pexels.com/videos/search", headers=headers, params={"query": q, "per_page": 8}, timeout=15).json().get("videos", [])
             return MediaSources._track_and_save(res, o, lambda i: (sorted(i.get("video_files", []), key=lambda x: abs((x.get("width") or 0)-TARGET_W))[0].get("link") if i.get("video_files") else None, str(i.get("id"))))
         except: return None, None
 
@@ -687,7 +726,7 @@ class MediaSources:
     def fetch_pixabay_video(q, o):
         if not CONFIG.pixabay_key: return None, None
         try:
-            res = requests.get("https://pixabay.com/api/videos/", headers=MEDIA_DOWNLOAD_HEADERS, params={"key": CONFIG.pixabay_key, "q": q, "per_page": 10}, timeout=20).json().get("hits", [])
+            res = requests.get("https://pixabay.com/api/videos/", headers=MEDIA_DOWNLOAD_HEADERS, params={"key": CONFIG.pixabay_key, "q": q, "per_page": 8}, timeout=15).json().get("hits", [])
             return MediaSources._track_and_save(res, o, lambda i: ((i.get("videos", {}).get("large") or i.get("videos", {}).get("medium", {})).get("url"), str(i.get("id"))))
         except: return None, None
 
@@ -695,10 +734,10 @@ class MediaSources:
     def fetch_chronicling_america(q, o):
         try:
             q_clean = clean_query(q)
-            if not q_clean or len(q_clean) < 3: return None, None
+            if not q_clean: return None, None
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
             url = f"https://www.loc.gov/photos/?fo=json&fa=online_format:image&c=15&q={urllib.parse.quote(q_clean)}"
-            res = requests.get(url, headers=headers, timeout=20)
+            res = requests.get(url, headers=headers, timeout=15)
             results = res.json().get("results", [])
             def extract_loc(i):
                 img_urls = i.get("image_url", [])
@@ -712,9 +751,9 @@ class MediaSources:
         if not CONFIG.europeana_key: return None, None
         try:
             q_clean = clean_query(q)
-            if not q_clean or len(q_clean) < 3: return None, None
+            if not q_clean: return None, None
             params = {"wskey": CONFIG.europeana_key, "query": q_clean, "media": "true", "thumbnail": "true", "rows": 15, "profile": "rich", "qf": "TYPE:IMAGE"}
-            res = requests.get("https://api.europeana.eu/record/v2/search.json", params=params, headers=API_HEADERS, timeout=20)
+            res = requests.get("https://api.europeana.eu/record/v2/search.json", params=params, headers=API_HEADERS, timeout=15)
             if res.status_code == 200:
                 items = res.json().get("items", [])
                 def extract_europeana(item):
@@ -730,9 +769,9 @@ class MediaSources:
         if not token: return None, None
         try:
             q_clean = clean_query(q)
-            if not q_clean or len(q_clean) < 3: return None, None
+            if not q_clean: return None, None
             headers = {"Authorization": f"Bearer {token}", "User-Agent": API_HEADERS["User-Agent"]}
-            res = requests.get("https://api.openverse.org/v1/images/", headers=headers, params={"q": q_clean, "page_size": 15, "license_type": "all-cc"}, timeout=20)
+            res = requests.get("https://api.openverse.org/v1/images/", headers=headers, params={"q": q_clean, "page_size": 15, "license_type": "all-cc"}, timeout=15)
             if res.status_code == 200:
                 results = res.json().get("results", [])
                 return MediaSources._track_and_save(results, o, lambda item: (item.get("url"), f"openverse_{item.get('id')}"))
@@ -981,7 +1020,7 @@ Return ONLY valid JSON:
         return None
 
     def direct_storyboard(self, shots):
-        log("🎬 [المخرج الفني] هندسة كلمات البحث بذكاء للقطات...")
+        log("🎬 [المخرج الفني] هندسة كلمات البحث (إلزام نسبة 90% للأرشيف والمصادر التاريخية)...")
         batch_size = 70
         all_processed = []
 
@@ -1005,19 +1044,20 @@ FORBIDDEN MODERN ITEMS: {forbidden}
 Analyze ALL of these shots contextually based on the story:
 {shots_summary}
 
-STRICT ARCHIVE DISTRIBUTION RULE:
+STRICT ARCHIVE DISTRIBUTION RULE (CRITICAL):
 - 85% to 90% of scenes MUST BE CATEGORIZED AS "ARCHIVE".
   Use content_type: "document_file", "historic_interview", "movie_clip", "person_mugshot", "location_photo", "newspaper_article".
-- ONLY 10% to 15% maximum may be "CINEMATIC".
+- ONLY 10% to 15% maximum may be "CINEMATIC" (pure atmospheric B-roll like rain, fog, flashing police lights).
 
-CRITICAL RULES FOR KEYWORDS:
-1. KEEP ALL ENTITIES SHORT (2-4 words max): Never make long sentence queries! (e.g. 'D.B. Cooper FBI diagram', NOT 'FBI bomb diagram D.B. Cooper case investigation file').
-2. If "content_type" is "movie_clip": USE ONLY 2-3 word spoken dialogue quotes for Yarn (e.g. 'bomb in briefcase', 'parachute jump').
-3. "exact_entities": 5 concise English search terms (2-4 words max each).
-4. "visual_vibes": 5 concise physical period-neutral phrases (e.g. 'police lights night', 'vintage typewriter typing').
+CRITICAL KEYWORD RULES (SURGICAL 2-3 WORDS):
+1. KEEP ALL ENTITIES SHORT (2-3 words max): Never make long sentence queries! (e.g. 'D.B. Cooper bomb', NOT 'FBI bomb diagram D.B. Cooper case investigation file').
+2. If "content_type" is "movie_clip": USE ONLY 2-word spoken dialogue quotes for Yarn (e.g. 'bomb briefcase', 'twenty dollars').
+3. "exact_entities": 5 concise English search terms (2-3 words max each).
+4. "visual_vibes": 5 concise physical period-neutral phrases (e.g. 'police lights night', 'revolver cylinder spinning').
 5. "reviewer_context": Strict Arabic instructions ensuring authenticity.
 
 MANDATORY JSON FORMAT:
+Map string integer index directly to object:
 {{
   "{batch[0]['index']}": {{
     "category": "ARCHIVE",
@@ -1043,14 +1083,14 @@ MANDATORY JSON FORMAT:
                         cat_raw = str(shot_data.get("category", "")).strip().upper()
                         shot["category"] = "CINEMATIC" if ("CINEMAT" in cat_raw and "ARCHIV" not in cat_raw) else "ARCHIVE"
                         shot["content_type"] = shot_data.get("content_type", "document_file" if shot["category"] == "ARCHIVE" else "dark_moody")
-                        shot["exact_entities"] = [clean_query(e) for e in shot_data.get("exact_entities", []) if clean_query(e)] or [clean_query(CONFIG.topic), "police file archive"]
-                        shot["visual_vibes"] = [clean_query(v) for v in shot_data.get("visual_vibes", []) if clean_query(v)] or ["police lights night", "dark street lamp", "typewriter paper"]
+                        shot["exact_entities"] = [clean_query(e) for e in shot_data.get("exact_entities", []) if clean_query(e)] or [clean_query(CONFIG.topic), "police file"]
+                        shot["visual_vibes"] = [clean_query(v) for v in shot_data.get("visual_vibes", []) if clean_query(v)] or ["police lights night", "dark street lamp"]
                         shot["reviewer_context"] = shot_data.get("reviewer_context", "تأكد من أصلية الوثيقة ومطابقتها للحقبة التاريخية.")
                         shot["accept_similar"] = shot_data.get("accept_similar", True)
                     else:
                         shot["category"] = "ARCHIVE"
                         shot["content_type"] = "document_file"
-                        shot["exact_entities"] = [clean_query(CONFIG.topic), "police evidence archive"]
+                        shot["exact_entities"] = [clean_query(CONFIG.topic), "police archive"]
                         shot["visual_vibes"] = ["police car night", "dark hallway shadows"]
                         shot["reviewer_context"] = "تأكد من ملاءمة اللقطة للنص الجنائي والحقبة التاريخية."
                         shot["accept_similar"] = True
