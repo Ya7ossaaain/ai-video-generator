@@ -3,8 +3,17 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V58.1 - BROADCAST HUMAN MASTER EDITION
-(FIXED STORYBOARD KEY MATCHER & DYNAMIC ERA RESILIENCE)
+V59 - 90% ARCHIVE & PRECISION CLIPPER MASTER EDITION
+(YOUTUBE INTERVIEWS, YARN MOVIES, DUCKDUCKGO ARCHIVE & 10% B-ROLL)
+
+Key Features in V59:
+- 90% ARCHIVE ENFORCEMENT: AI Director strictly mandated to classify 85-90% of scenes as ARCHIVE.
+- YOUTUBE INTERVIEW SLICER: yt-dlp precision downloading of matching interview/news segments.
+- YARN MOVIE CLIPPER: Scrapes exact relevant film adaptation scenes (e.g. Zodiac 2007).
+- DUCKDUCKGO ARCHIVE IMAGES: Pulls rare evidence/sketches/mugshots from across global historical archives.
+- 10% B-ROLL CAP: Pexels and Pixabay restricted strictly to transitional mood shots.
+- TOFU GLYPH & TITLE BUG FIXES: Full Unicode NFKC normalization and authentic Arabic YouTube titles.
+- EXACT CFR FRAME SYNC: Zero drift between narration, subtitles, and video clips.
 """
 
 import os
@@ -37,7 +46,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V58.1-BROADCAST-MASTER"
+ENGINE_VERSION = "V59-ARCHIVE-90-MASTER"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -72,7 +81,7 @@ EFFORT_PRO_GENERATION = "high"
 EFFORT_IMAGE_GEN = "medium"
 
 API_HEADERS = {
-    "User-Agent": "InvestigativeDocumentaryEngine/4.0 (https://github.com/Ya7ossaaain; contact@example.com)",
+    "User-Agent": "InvestigativeDocumentaryEngine/5.0 (https://github.com/Ya7ossaaain; contact@example.com)",
     "Accept": "application/json, text/plain, */*"
 }
 
@@ -81,25 +90,28 @@ MEDIA_DOWNLOAD_HEADERS = {
     "Accept": "*/*"
 }
 
-ARCHIVE_SOURCES = ["WIKIPEDIA", "FBI_ARCHIVE", "LOC", "EUROPEANA", "OPENVERSE"]
-CINEMATIC_SOURCES = ["PEXELS", "PIXABAY", "OPENVERSE"]
+# ARCHIVAL AND HISTORICAL SOURCES DOMINATE
+ARCHIVE_SOURCES = ["YOUTUBE", "WIKIPEDIA", "FBI_ARCHIVE", "DUCKDUCKGO", "YARN", "LOC", "EUROPEANA", "OPENVERSE"]
+CINEMATIC_SOURCES = ["PEXELS", "PIXABAY"]
 
 SOURCE_AFFINITY = {
     "ARCHIVE": {
-        "person_mugshot": ["WIKIPEDIA", "FBI_ARCHIVE", "OPENVERSE", "LOC", "EUROPEANA"],
-        "document_file": ["FBI_ARCHIVE", "LOC", "WIKIPEDIA", "EUROPEANA", "OPENVERSE"],
-        "location_photo": ["WIKIPEDIA", "OPENVERSE", "LOC", "EUROPEANA", "FBI_ARCHIVE"],
-        "historical_event": ["FBI_ARCHIVE", "WIKIPEDIA", "LOC", "EUROPEANA", "OPENVERSE"],
-        "newspaper_article": ["LOC", "EUROPEANA", "FBI_ARCHIVE", "WIKIPEDIA", "OPENVERSE"],
-        "default": ["WIKIPEDIA", "FBI_ARCHIVE", "LOC", "EUROPEANA", "OPENVERSE"],
+        "person_mugshot": ["WIKIPEDIA", "DUCKDUCKGO", "FBI_ARCHIVE", "OPENVERSE", "LOC"],
+        "document_file": ["FBI_ARCHIVE", "WIKIPEDIA", "DUCKDUCKGO", "LOC", "EUROPEANA"],
+        "historic_interview": ["YOUTUBE", "FBI_ARCHIVE", "WIKIPEDIA"],
+        "movie_clip": ["YARN", "YOUTUBE"],
+        "location_photo": ["WIKIPEDIA", "DUCKDUCKGO", "LOC", "EUROPEANA", "OPENVERSE"],
+        "historical_event": ["YOUTUBE", "FBI_ARCHIVE", "WIKIPEDIA", "DUCKDUCKGO"],
+        "newspaper_article": ["LOC", "WIKIPEDIA", "DUCKDUCKGO", "EUROPEANA", "FBI_ARCHIVE"],
+        "default": ["WIKIPEDIA", "FBI_ARCHIVE", "YOUTUBE", "DUCKDUCKGO", "LOC"],
     },
     "CINEMATIC": {
-        "nature_water": ["PEXELS", "PIXABAY", "OPENVERSE"],
-        "dark_moody": ["PEXELS", "PIXABAY", "OPENVERSE"],
-        "people_action": ["PEXELS", "PIXABAY", "OPENVERSE"],
-        "objects_closeup": ["PIXABAY", "PEXELS", "OPENVERSE"],
-        "urban_night": ["PEXELS", "PIXABAY", "OPENVERSE"],
-        "default": ["PEXELS", "PIXABAY", "OPENVERSE"],
+        "nature_water": ["PEXELS", "PIXABAY"],
+        "dark_moody": ["PEXELS", "PIXABAY"],
+        "people_action": ["PEXELS", "PIXABAY"],
+        "objects_closeup": ["PIXABAY", "PEXELS"],
+        "urban_night": ["PEXELS", "PIXABAY"],
+        "default": ["PEXELS", "PIXABAY"],
     }
 }
 
@@ -152,6 +164,7 @@ class EngineConfig:
         raw_keys = os.environ.get("GEMINI_API_KEYS") or os.environ.get("GEMINI_API_KEY") or ""
         self.gemini_keys = list(dict.fromkeys([k.strip() for k in re.split(r"[,;\n]+", raw_keys) if k.strip()]))
         self.groq_api_key = os.environ.get("GROQ_API_KEY", "")
+        self.youtube_api_key = os.environ.get("YOUTUBE_API_KEY", "")
         self.pexels_key = os.environ.get("PEXELS_API_KEY", "")
         self.pixabay_key = os.environ.get("PIXABAY_API_KEY", "")
         self.europeana_key = os.environ.get("EUROPEANA_API_KEY", "")
@@ -340,7 +353,6 @@ class SmartQueryEngine:
             "{entity} historical photograph",
             "wanted poster criminal archive",
             "{entity} FBI record photograph",
-            "{entity} press conference photo",
             "vintage police mugshot archive"
         ],
         "document_file": [
@@ -348,32 +360,35 @@ class SmartQueryEngine:
             "{entity} official police report",
             "{entity} cipher document original",
             "{entity} classified memorandum",
-            "FBI official investigation document",
-            "police crime scene report document",
-            "government classified memo archive",
-            "typewritten police evidence dossier"
+            "police crime scene report document archive",
+            "government classified memo archive"
+        ],
+        "historic_interview": [
+            "{entity} interview archive",
+            "{entity} news broadcast 1969",
+            "{entity} press conference interview",
+            "{entity} testimony television archive"
+        ],
+        "movie_clip": [
+            "{entity} movie scene clip",
+            "{entity} film scene",
+            "{entity} dramatic scene adaptation"
         ],
         "location_photo": [
             "{entity} historical photograph",
             "{entity} vintage exterior view",
             "{entity} crime scene location photo",
-            "historic site vintage photograph",
-            "{entity} aerial photograph vintage",
-            "police patrol location photograph"
+            "historic site vintage photograph"
         ],
         "historical_event": [
             "{entity} news press photograph",
             "{entity} historical archive photo",
-            "historic crime scene photograph",
-            "{entity} press report archive",
-            "vintage investigative press photograph"
+            "historic crime scene photograph"
         ],
         "newspaper_article": [
             "{entity} newspaper front page",
             "{entity} headline clipping archive",
-            "historic newspaper crime headline",
-            "vintage press report headline front page",
-            "archive newspaper article clipping"
+            "historic newspaper crime headline"
         ]
     }
 
@@ -382,7 +397,7 @@ class SmartQueryEngine:
         self.lock = threading.Lock()
 
     def get_ordered_sources(self, shot):
-        cat = shot.get("category", "CINEMATIC")
+        cat = shot.get("category", "ARCHIVE")
         content_type = shot.get("content_type", "default")
         if cat == "ARCHIVE":
             ordered = SOURCE_AFFINITY["ARCHIVE"].get(content_type, ARCHIVE_SOURCES)
@@ -398,7 +413,7 @@ class SmartQueryEngine:
         return True
 
     def generate_query_tiers(self, shot, attempt_num=0):
-        cat = shot.get("category", "CINEMATIC")
+        cat = shot.get("category", "ARCHIVE")
         entities = [clean_query(e) for e in shot.get("exact_entities", []) if clean_query(e)]
         vibes = [clean_query(v) for v in shot.get("visual_vibes", []) if clean_query(v)]
         content_type = shot.get("content_type", "default")
@@ -424,12 +439,11 @@ class SmartQueryEngine:
                 queries.append((template.format(entity=primary_entity), src))
             elif attempt_num <= 10:
                 alt_entity = entities[attempt_num % len(entities)]
-                queries.append((f"{alt_entity} official document", src))
+                queries.append((f"{alt_entity} official record", src))
                 if n_sources > 1:
-                    queries.append((f"{alt_entity} archive photograph", filtered_sources[(attempt_num + 1) % n_sources]))
+                    queries.append((f"{alt_entity} archive photo", filtered_sources[(attempt_num + 1) % n_sources]))
             else:
                 broad_terms = [
-                    f"{primary_entity} newspaper archive",
                     f"{primary_entity} historical evidence",
                     "police investigation official archive document",
                     "historical crime record photograph"
@@ -439,17 +453,12 @@ class SmartQueryEngine:
             src = filtered_sources[attempt_num % n_sources]
             if attempt_num < len(vibes):
                 queries.append((vibes[attempt_num], src))
-                if attempt_num + 1 < len(vibes) and n_sources > 1:
-                    queries.append((vibes[attempt_num + 1], filtered_sources[(attempt_num + 1) % n_sources]))
             else:
                 ageless_fallbacks = [
                     "police flashing lights reflection wet night",
                     "fountain pen writing paper macro",
                     "ticking clock hands macro shadows",
-                    "heavy fog street lamp night",
-                    "revolver cylinder spinning macro",
-                    "magnifying glass examining paper",
-                    "man silhouette coat foggy night"
+                    "heavy fog street lamp night"
                 ]
                 queries.append((ageless_fallbacks[attempt_num % len(ageless_fallbacks)], src))
 
@@ -465,7 +474,7 @@ class SmartQueryEngine:
                     seen.add(key)
 
         if not valid_pairs:
-            fallback_q = clean_query(entities[0] if cat == "ARCHIVE" else vibes[0]) or "investigation"
+            fallback_q = clean_query(entities[0] if cat == "ARCHIVE" else vibes[0]) or "historical investigation"
             valid_pairs.append((fallback_q, filtered_sources[attempt_num % n_sources]))
 
         return valid_pairs
@@ -527,16 +536,22 @@ class ParallelSourceFetcher:
         image_path = Path(f"{base_path}_{source_name}_{random.randint(100,999)}.jpg")
         try:
             found_file, media_uid = None, None
-            if source_name == "PEXELS":
+            if source_name == "YOUTUBE":
+                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_youtube_clip, query, video_path, shot)
+            elif source_name == "YARN":
+                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_yarn_clip, query, video_path)
+            elif source_name == "DUCKDUCKGO":
+                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_duckduckgo_archive, query, image_path)
+            elif source_name == "WIKIPEDIA":
+                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_wikipedia_image, query, image_path)
+            elif source_name == "FBI_ARCHIVE":
+                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_fbi_archive, query, Path(f"{base_path}_{source_name}"))
+            elif source_name == "PEXELS":
                 found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_pexels_video, query, video_path)
             elif source_name == "PIXABAY":
                 found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_pixabay_video, query, video_path)
             elif source_name == "LOC":
                 found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_chronicling_america, query, image_path)
-            elif source_name == "WIKIPEDIA":
-                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_wikipedia_image, query, image_path)
-            elif source_name == "FBI_ARCHIVE":
-                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_fbi_archive, query, Path(f"{base_path}_{source_name}"))
             elif source_name == "EUROPEANA":
                 found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_europeana, query, image_path)
             elif source_name == "OPENVERSE":
@@ -550,6 +565,241 @@ class ParallelSourceFetcher:
         self.executor.shutdown(wait=False)
 
 PARALLEL_FETCHER = ParallelSourceFetcher()
+
+
+# =============================================================================
+# NEW EXPANDED MEDIA SOURCES (YouTube, Yarn, DuckDuckGo, Archives)
+# =============================================================================
+
+class MediaSources:
+    @staticmethod
+    def _track_and_save(items, output, extract_url_func):
+        random.shuffle(items)
+        for item in items:
+            url, uid = extract_url_func(item)
+            if not url: continue
+            if url.startswith("//"): url = "https:" + url
+            with CONFIG.used_media_lock:
+                if uid in CONFIG.used_media_ids: continue
+            try:
+                r = requests.get(url, headers=MEDIA_DOWNLOAD_HEADERS, stream=True, timeout=25)
+                if r.status_code == 200:
+                    with open(output, "wb") as f:
+                        for chunk in r.iter_content(1024*256):
+                            if chunk: f.write(chunk)
+                    return str(output), uid
+            except: pass
+        return None, None
+
+    @staticmethod
+    def fetch_youtube_clip(q, output_path, shot):
+        """Precision precision YouTube interview / documentary slicer via yt-dlp."""
+        q_clean = clean_query(q)
+        if not q_clean: return None, None
+        try:
+            dur = max(3.0, float(shot.get("duration", 3.0)))
+            target_query = f"{q_clean} interview documentary archive"
+            # Fast ytsearch for matching ID
+            cmd_search = [
+                "yt-dlp", f"ytsearch1:{target_query}",
+                "--get-id", "--get-duration",
+                "--no-playlist", "--quiet"
+            ]
+            res = subprocess.run(cmd_search, stdout=subprocess.PIPE, text=True, timeout=30)
+            lines = res.stdout.strip().split("\n")
+            if not lines or not lines[0]: return None, None
+            video_id = lines[0].strip()
+
+            with CONFIG.used_media_lock:
+                if f"yt_{video_id}" in CONFIG.used_media_ids: return None, None
+
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
+            # Download a high-quality 4-second section directly without full video download
+            start_sec = 25 # targeted interview snippet
+            sec_spec = f"*{start_sec:02d}-{int(start_sec+dur):02d}"
+            
+            cmd_dl = [
+                "yt-dlp",
+                "--download-sections", sec_spec,
+                "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
+                "-o", str(output_path),
+                "--force-keyframes-at-cuts",
+                "--no-playlist", "--quiet",
+                video_url
+            ]
+            dl_res = subprocess.run(cmd_dl, timeout=60)
+            if dl_res.returncode == 0 and Path(output_path).exists() and Path(output_path).stat().st_size > 10240:
+                return str(output_path), f"yt_{video_id}"
+        except Exception as e:
+            log(f"⚠️ YouTube clip slice error: {e}", "debug")
+        return None, None
+
+    @staticmethod
+    def fetch_yarn_clip(q, output_path):
+        """Fetches exact matching movie scenes from yarn.co."""
+        q_clean = clean_query(q)
+        if not q_clean: return None, None
+        try:
+            url = f"https://yarn.co/yarn-find?text={urllib.parse.quote(q_clean)}"
+            res = requests.get(url, headers=API_HEADERS, timeout=15)
+            if res.status_code == 200:
+                clip_ids = re.findall(r'/yarn-clip/([a-zA-Z0-9\-]+)', res.text)
+                if clip_ids:
+                    random.shuffle(clip_ids)
+                    for cid in clip_ids[:5]:
+                        with CONFIG.used_media_lock:
+                            if f"yarn_{cid}" in CONFIG.used_media_ids: continue
+                        video_url = f"https://y.yarn.co/{cid}.mp4"
+                        r = requests.get(video_url, headers=MEDIA_DOWNLOAD_HEADERS, timeout=25)
+                        if r.status_code == 200 and len(r.content) > 10240:
+                            with open(output_path, "wb") as f:
+                                f.write(r.content)
+                            return str(output_path), f"yarn_{cid}"
+        except Exception as e:
+            log(f"⚠️ Yarn error: {e}", "debug")
+        return None, None
+
+    @staticmethod
+    def fetch_duckduckgo_archive(q, output_path):
+        """Pulls rare authentic archival photos, evidence, and mugshots via DuckDuckGo."""
+        q_clean = clean_query(q)
+        if not q_clean: return None, None
+        try:
+            from duckduckgo_search import DDGS
+            with DDGS() as ddgs:
+                results = list(ddgs.images(f"{q_clean} vintage archive 1960s photo", max_results=10))
+                def extract_ddg(item):
+                    return item.get("image"), f"ddg_{hash(item.get('image', ''))}"
+                return MediaSources._track_and_save(results, output_path, extract_ddg)
+        except Exception as e:
+            log(f"⚠️ DuckDuckGo image error: {e}", "debug")
+        return None, None
+
+    @staticmethod
+    def fetch_wikipedia_image(q, o):
+        q_clean = clean_query(q)
+        if not q_clean or len(q_clean) < 3: return None, None
+        try:
+            commons_url = "https://commons.wikimedia.org/w/api.php"
+            params = {"action": "query", "generator": "search", "gsrsearch": f"{q_clean}", "gsrnamespace": 6, "gsrlimit": 15, "prop": "imageinfo", "iiprop": "url|mime|size", "format": "json"}
+            res = requests.get(commons_url, headers=API_HEADERS, params=params, timeout=20)
+            if res.status_code == 200:
+                pages = list(res.json().get("query", {}).get("pages", {}).values())
+                def extract_commons(p):
+                    info_list = p.get("imageinfo") or [{}]
+                    info = info_list[0] if info_list else {}
+                    url = info.get("url")
+                    mime = info.get("mime", "")
+                    if url and ("image" in mime or url.lower().endswith((".jpg", ".jpeg", ".png"))): return url, str(p.get("pageid"))
+                    return None, None
+                return MediaSources._track_and_save(pages, o, extract_commons)
+        except: pass
+        return None, None
+
+    @staticmethod
+    def fetch_fbi_archive(q, base_path):
+        try:
+            q_clean = clean_query(q)
+            if not q_clean or len(q_clean) < 3: return None, None
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            query = f'({q_clean}) AND (mediatype:image OR mediatype:movies)'
+            res = requests.get("https://archive.org/advancedsearch.php", headers=headers, params={"q": query, "fl[]": "identifier", "rows": 15, "output": "json"}, timeout=20)
+            docs = res.json().get("response", {}).get("docs", [])
+            random.shuffle(docs)
+            for doc in docs:
+                uid = str(doc.get("identifier"))
+                with CONFIG.used_media_lock:
+                    if uid in CONFIG.used_media_ids: continue
+                try:
+                    meta = requests.get(f"https://archive.org/metadata/{uid}", headers=headers, timeout=20).json()
+                    files = meta.get("files", [])
+                    videos = [(int(i.get("size",0) or 0), str(i.get("name",""))) for i in files if str(i.get("name","")).lower().endswith((".mp4",".mov")) and 500*1024 <= int(i.get("size",0) or 0) <= MAX_MEDIA_SIZE_MB*1024*1024]
+                    images = [(int(i.get("size",0) or 0), str(i.get("name",""))) for i in files if str(i.get("name","")).lower().endswith((".jpg",".jpeg",".png")) and int(i.get("size",0) or 0) >= 15*1024]
+                    target_name, is_video = None, False
+                    if videos:
+                        videos.sort(key=lambda x: x[0], reverse=True)
+                        target_name, is_video = videos[0][1], True
+                    elif images:
+                        images.sort(key=lambda x: x[0], reverse=True)
+                        target_name, is_video = images[0][1], False
+                    if target_name:
+                        out_path = base_path.with_suffix(".mp4" if is_video else ".jpg")
+                        file_url = f"https://archive.org/download/{uid}/{urllib.parse.quote(target_name, safe='/')}"
+                        r = requests.get(file_url, headers=MEDIA_DOWNLOAD_HEADERS, stream=True, timeout=35)
+                        if r.status_code == 200:
+                            with open(out_path, "wb") as f:
+                                for chunk in r.iter_content(1024*256):
+                                    if chunk: f.write(chunk)
+                            return str(out_path), uid
+                except: pass
+        except: pass
+        return None, None
+
+    @staticmethod
+    def fetch_pexels_video(q, o):
+        if not CONFIG.pexels_key: return None, None
+        try:
+            headers = MEDIA_DOWNLOAD_HEADERS.copy()
+            headers["Authorization"] = CONFIG.pexels_key
+            res = requests.get("https://api.pexels.com/videos/search", headers=headers, params={"query": q, "per_page": 10}, timeout=20).json().get("videos", [])
+            return MediaSources._track_and_save(res, o, lambda i: (sorted(i.get("video_files", []), key=lambda x: abs((x.get("width") or 0)-TARGET_W))[0].get("link") if i.get("video_files") else None, str(i.get("id"))))
+        except: return None, None
+
+    @staticmethod
+    def fetch_pixabay_video(q, o):
+        if not CONFIG.pixabay_key: return None, None
+        try:
+            res = requests.get("https://pixabay.com/api/videos/", headers=MEDIA_DOWNLOAD_HEADERS, params={"key": CONFIG.pixabay_key, "q": q, "per_page": 10}, timeout=20).json().get("hits", [])
+            return MediaSources._track_and_save(res, o, lambda i: ((i.get("videos", {}).get("large") or i.get("videos", {}).get("medium", {})).get("url"), str(i.get("id"))))
+        except: return None, None
+
+    @staticmethod
+    def fetch_chronicling_america(q, o):
+        try:
+            q_clean = clean_query(q)
+            if not q_clean or len(q_clean) < 3: return None, None
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            url = f"https://www.loc.gov/photos/?fo=json&fa=online_format:image&c=15&q={urllib.parse.quote(q_clean)}"
+            res = requests.get(url, headers=headers, timeout=20)
+            results = res.json().get("results", [])
+            def extract_loc(i):
+                img_urls = i.get("image_url", [])
+                if isinstance(img_urls, str): img_urls = [img_urls]
+                return (img_urls[-1], str(i.get("id", img_urls[-1]))) if img_urls else (None, None)
+            return MediaSources._track_and_save(results, o, extract_loc)
+        except: return None, None
+
+    @staticmethod
+    def fetch_europeana(q, o):
+        if not CONFIG.europeana_key: return None, None
+        try:
+            q_clean = clean_query(q)
+            if not q_clean or len(q_clean) < 3: return None, None
+            params = {"wskey": CONFIG.europeana_key, "query": q_clean, "media": "true", "thumbnail": "true", "rows": 15, "profile": "rich", "qf": "TYPE:IMAGE"}
+            res = requests.get("https://api.europeana.eu/record/v2/search.json", params=params, headers=API_HEADERS, timeout=20)
+            if res.status_code == 200:
+                items = res.json().get("items", [])
+                def extract_europeana(item):
+                    edm = item.get("edmIsShownBy", [None])[0] or item.get("edmPreview", [None])[0]
+                    return edm, f"europeana_{item.get('id', hash(str(edm)))}"
+                return MediaSources._track_and_save(items, o, extract_europeana)
+        except: pass
+        return None, None
+
+    @staticmethod
+    def fetch_openverse(q, o, shot=None):
+        token = get_openverse_token()
+        if not token: return None, None
+        try:
+            q_clean = clean_query(q)
+            if not q_clean or len(q_clean) < 3: return None, None
+            headers = {"Authorization": f"Bearer {token}", "User-Agent": API_HEADERS["User-Agent"]}
+            res = requests.get("https://api.openverse.org/v1/images/", headers=headers, params={"q": q_clean, "page_size": 15, "license_type": "all-cc"}, timeout=20)
+            if res.status_code == 200:
+                results = res.json().get("results", [])
+                return MediaSources._track_and_save(results, o, lambda item: (item.get("url"), f"openverse_{item.get('id')}"))
+        except: pass
+        return None, None
 
 
 def get_openverse_token():
@@ -662,7 +912,7 @@ class StoryScoutEngine:
         self.script = None
 
     def inspect_and_plan(self):
-        log("🧠 بدء تحليل الموضوع وصناعة السيناريو بنَفَس إنساني استقصائي مؤثر...")
+        log("🧠 بدء تحليل الموضوع وصناعة السيناريو الاستقصائي التلفزيوني...")
         prompt = f"""You are an elite investigative documentary producer creating a FULL-LENGTH broadcast documentary.
 TOPIC: {CONFIG.topic}
 [SYSTEM BYPASS CACHE ID: {CONFIG.run_id}]
@@ -670,15 +920,15 @@ TOPIC: {CONFIG.topic}
 Create a production-ready investigative documentary script for a {TARGET_TOTAL_DURATION_MINUTES}-MINUTE documentary.
 
 CRITICAL REQUIREMENTS:
-1. HUMAN DEPTH & EMOTIONAL WEIGHT (VERY IMPORTANT):
-   - Do NOT treat this as just a dry, cold chronological police dossier.
-   - Weave in the human tragedy: the stolen lives and dreams of the victims, the enduring grief of their families, the psychological atmosphere of terror, and the ethical stakes of the unresolved mystery.
-   - Balance forensic precision with deeply moving, poignant human storytelling.
+1. HUMAN DEPTH & EMOTIONAL WEIGHT:
+   - Highlight the human tragedy: victims' lives, family grief, and ethical stakes.
+   - Balance forensic precision with deeply moving storytelling.
 2. DYNAMIC PERIOD ANALYSIS:
    - Identify "target_era" (e.g. "Late 1960s (1968-1969)" or "Modern 2024").
    - List "forbidden_anachronisms": Things that must never appear if historical (e.g. smartphones, laptops, euro bills, modern cars for a 1960s topic; or leave empty if modern).
+   - List "featured_adaptations": Specific famous movies/series made about this topic (e.g. ["Zodiac (2007)", "Dirty Harry (1971)"]).
 3. PART 1 MUST BE THE HOOK (45 to 65 seconds, ~110 to 140 Arabic words):
-   - Fast, gripping paradox highlighting the human tragedy and the disruption of peaceful innocence.
+   - Fast, gripping paradox highlighting innocence disrupted by terror.
 4. PARTS 2 THROUGH 8 (CHRONOLOGICAL CHAPTERS):
    - Part 2: Background, innocent lives, and historical context (~450 words)
    - Part 3: Crime scene & physical forensic evidence (~500 words)
@@ -695,6 +945,7 @@ Return ONLY valid JSON:
   "primary_english_query": "",
   "target_era": "",
   "forbidden_anachronisms": [],
+  "featured_adaptations": [],
   "hashtag": "#{CONFIG.topic_clean[:25]}",
   "chapters": [
     {{"id": 1, "title": "المقدمة واللغز المحير", "key": "part_1", "is_hook": true}},
@@ -718,6 +969,7 @@ Return ONLY valid JSON:
 
             log("\n" + "="*60)
             log(f"🕰️ الحقبة المستنتجة للقضية: {data.get('target_era', 'غير محددة')}")
+            log(f"🎬 الأعمال السينمائية المرتبطة بالقضية: {', '.join(data.get('featured_adaptations', []))}")
             log(f"🚫 المحظورات الزمنية الصارمة: {', '.join(data.get('forbidden_anachronisms', []))}")
             for i in range(1, 9):
                 part_key = f"part_{i}"
@@ -734,6 +986,7 @@ Return ONLY valid JSON:
                 "primary_english_query": clean_query(CONFIG.topic),
                 "target_era": "Historical Investigation",
                 "forbidden_anachronisms": ["smartphones", "laptops", "modern euro currency"],
+                "featured_adaptations": ["Zodiac (2007)"],
                 "hashtag": f"#{CONFIG.topic_clean[:25]}",
                 "chapters": [
                     {"id": 1, "title": "المقدمة واللغز", "key": "part_1", "is_hook": True},
@@ -748,10 +1001,8 @@ Return ONLY valid JSON:
     @staticmethod
     def _find_shot_data(board, idx_int):
         """Universal, resilient matcher to find a shot in AI output under any key format."""
-        if not board:
-            return None
+        if not board: return None
 
-        # 1. If board is a list of shot objects
         if isinstance(board, list):
             for item in board:
                 if isinstance(item, dict):
@@ -761,9 +1012,7 @@ Return ONLY valid JSON:
             if 0 <= idx_int - 1 < len(board) and isinstance(board[idx_int - 1], dict):
                 return board[idx_int - 1]
 
-        # 2. If board is a dict
         if isinstance(board, dict):
-            # Unwrap common root wrappers
             for wrapper in ["shots", "scenes", "storyboard", "data", "results", "board"]:
                 if wrapper in board and isinstance(board[wrapper], (dict, list)):
                     found = StoryScoutEngine._find_shot_data(board[wrapper], idx_int)
@@ -774,37 +1023,34 @@ Return ONLY valid JSON:
                 idx_str,
                 f"shot_{idx_str}",
                 f"shot_{idx_int:02d}",
-                f"shot_{idx_int:03d}",
                 f"Shot {idx_str}",
                 f"Shot_{idx_str}",
                 f"shot {idx_str}",
                 f"scene_{idx_str}",
                 f"Scene {idx_str}",
-                f"Shot {idx_int:02d}",
+                f"[{idx_str}]"
             ]
             for ck in candidate_keys:
                 if ck in board and isinstance(board[ck], dict):
                     return board[ck]
-                # Case-insensitive check
                 for actual_k, val in board.items():
                     if actual_k.lower().strip() == ck.lower().strip() and isinstance(val, dict):
                         return val
 
-            # Regex search for the number
             for actual_k, val in board.items():
                 if isinstance(val, dict):
                     if re.search(r'\b' + idx_str + r'\b', actual_k):
                         return val
-
         return None
 
     def direct_storyboard(self, shots):
-        log("🎬 [المخرج الفني] هندسة كلمات البحث بذكاء للقطات...")
+        log("🎬 [المخرج الفني] هندسة كلمات البحث (إلزام نسبة 90% للأرشيف والمصادر التاريخية)...")
         batch_size = 70
         all_processed = []
 
         target_era = self.script.get("target_era", "")
         forbidden = ", ".join(self.script.get("forbidden_anachronisms", []))
+        adaptations = ", ".join(self.script.get("featured_adaptations", []))
 
         for batch_start in range(0, len(shots), batch_size):
             batch = shots[batch_start:batch_start + batch_size]
@@ -812,27 +1058,31 @@ Return ONLY valid JSON:
             log(f"🎬 معالجة دفعة المشاهد {batch_start+1}-{batch_end} من {len(shots)}...")
 
             shots_summary = "\n".join([f"[{s['index']}]: {s['text']}" for s in batch])
-            prompt = f"""You are an Elite Visual Director and Expert Stock/Archive SEO Metadata Specialist.
+            prompt = f"""You are an Elite Visual Director and Expert Archival Video Researcher.
 TOPIC: {self.script.get('primary_english_query', CONFIG.topic)}
 TARGET ERA: {target_era}
-FORBIDDEN ANACHRONISMS: {forbidden}
+FEATURED MOVIE ADAPTATIONS: {adaptations}
+FORBIDDEN MODERN ITEMS: {forbidden}
 [ID: {CONFIG.run_id}_{batch_start}]
 
 Analyze ALL of these shots contextually based on the story:
 {shots_summary}
 
-CRITICAL RULES FOR KEYWORDS:
-1. "category": "ARCHIVE" (for real historical documents, victims, suspects) OR "CINEMATIC" (for visual B-roll).
-2. "exact_entities" (FOR ARCHIVE): 6 concrete English search terms from specific entity name to official police archive.
-3. "visual_vibes" (FOR CINEMATIC): 6 CONCRETE PHYSICAL OBJECT/ACTION PHRASES (1-3 words max).
-   - NEVER request abstract nouns (e.g. 'revelation', 'paranoia', 'tension', 'finality').
-   - NEVER take metaphors literally.
-   - USE ageless period-neutral footage (e.g. 'vintage typewriter typing', 'fountain pen writing', 'car headlights night fog', 'bullet casing ground', 'police badge closeup').
-4. "reviewer_context": Arabic instructions for QA Reviewer.
-5. "accept_similar": true/false.
+STRICT ARCHIVE DISTRIBUTION RULE (CRITICAL):
+- 85% to 90% of scenes MUST BE CATEGORIZED AS "ARCHIVE".
+  Use content_type: "document_file", "historic_interview", "movie_clip", "person_mugshot", "location_photo", "newspaper_article".
+- ONLY 10% to 15% maximum may be "CINEMATIC" (pure atmospheric B-roll like rain, fog, flashing police lights).
+
+CRITICAL KEYWORD RULES:
+1. If "content_type" is "historic_interview": Provide exact query for TV interview / news report (e.g. 'Bryan Hartnell survivor hospital interview 1969').
+2. If "content_type" is "movie_clip": LOCK search strictly to official adaptations: '{adaptations}' with the scene action (e.g. 'Zodiac 2007 Paul Stine taxi cab scene').
+3. If "content_type" is "document_file" or "person_mugshot": Provide exact proper nouns for sketches, mugshots, and FBI reports.
+4. "exact_entities": 6 concrete English search queries from most specific to historical archive.
+5. "visual_vibes": 6 physical period-neutral phrases (e.g. 'vintage typewriter typing', 'revolver cylinder spinning').
+6. "reviewer_context": Strict Arabic instructions ensuring authenticity.
 
 MANDATORY JSON FORMAT:
-Map string number index directly to the object:
+Map string integer index directly to object:
 {{
   "{batch[0]['index']}": {{
     "category": "ARCHIVE",
@@ -848,7 +1098,7 @@ Map string number index directly to the object:
                 board = extract_json(result.stdout.strip())
 
                 if batch_start == 0:
-                    log("\n" + "🎥 "*15 + "[قرارات المخرج الفني]" + " 🎥"*15)
+                    log("\n" + "🎥 "*15 + "[قرارات المخرج الفني - سيادة الأرشيف]" + " 🎥"*15)
 
                 for shot in batch:
                     idx_int = shot["index"]
@@ -856,29 +1106,29 @@ Map string number index directly to the object:
 
                     if shot_data and isinstance(shot_data, dict):
                         cat_raw = str(shot_data.get("category", "")).strip().upper()
-                        shot["category"] = "ARCHIVE" if "ARCHIV" in cat_raw else "CINEMATIC"
-                        shot["content_type"] = shot_data.get("content_type", "default")
+                        # Default to ARCHIVE unless explicitly CINEMATIC
+                        shot["category"] = "CINEMATIC" if ("CINEMAT" in cat_raw and "ARCHIV" not in cat_raw) else "ARCHIVE"
+                        shot["content_type"] = shot_data.get("content_type", "document_file" if shot["category"] == "ARCHIVE" else "dark_moody")
                         shot["exact_entities"] = [clean_query(e) for e in shot_data.get("exact_entities", []) if clean_query(e)] or [clean_query(CONFIG.topic), "police file archive"]
                         shot["visual_vibes"] = [clean_query(v) for v in shot_data.get("visual_vibes", []) if clean_query(v)] or ["police lights night", "dark foggy street", "vintage typewriter"]
-                        shot["reviewer_context"] = shot_data.get("reviewer_context", "تأكد من ملاءمة اللقطة لأجواء التحقيق الجنائي وتوافقها مع الحقبة.")
+                        shot["reviewer_context"] = shot_data.get("reviewer_context", "تأكد من أصلية الوثيقة ومطابقتها للحقبة التاريخية.")
                         shot["accept_similar"] = shot_data.get("accept_similar", True)
                     else:
-                        # Fallback ONLY for individual missing shots
-                        shot["category"] = "CINEMATIC"
-                        shot["content_type"] = "default"
-                        shot["exact_entities"] = [clean_query(CONFIG.topic), "police archive"]
+                        shot["category"] = "ARCHIVE"
+                        shot["content_type"] = "document_file"
+                        shot["exact_entities"] = [clean_query(CONFIG.topic), "police evidence archive", "vintage case file"]
                         shot["visual_vibes"] = ["police car night", "dark hallway shadows", "vintage typewriter"]
-                        shot["reviewer_context"] = "ملاءمة سينمائية لأجواء الغموض والتحقيق."
+                        shot["reviewer_context"] = "تأكد من ملاءمة اللقطة للنص الجنائي والحقبة التاريخية."
                         shot["accept_similar"] = True
 
                     q_disp = shot['exact_entities'][0] if shot['category'] == 'ARCHIVE' else shot['visual_vibes'][0]
-                    log(f"📌 المشهد {shot['index']:02d} | الفئة: {shot['category']} | البحث الأول: '{q_disp}' | التوجيه: {shot['reviewer_context']}")
+                    log(f"📌 المشهد {shot['index']:02d} | الفئة: {shot['category']} ({shot['content_type']}) | البحث الأول: '{q_disp}'")
 
             except Exception as e:
                 log(f"⚠️ خطأ في معالجة الدفعة: {e}", "warning")
                 for shot in batch:
-                    shot["category"] = "CINEMATIC"
-                    shot["content_type"] = "default"
+                    shot["category"] = "ARCHIVE"
+                    shot["content_type"] = "document_file"
                     shot["exact_entities"] = [clean_query(CONFIG.topic), "police archive"]
                     shot["visual_vibes"] = ["police car night", "dark hallway shadows", "vintage typewriter"]
                     shot["reviewer_context"] = "تأكد من ملاءمة اللقطة للنص الجنائي."
@@ -1070,153 +1320,6 @@ class WordSyncSlicer:
         return shots, chapter_timeline
 
 
-class MediaSources:
-    @staticmethod
-    def _track_and_save(items, output, extract_url_func):
-        random.shuffle(items)
-        for item in items:
-            url, uid = extract_url_func(item)
-            if not url: continue
-            if url.startswith("//"): url = "https:" + url
-            with CONFIG.used_media_lock:
-                if uid in CONFIG.used_media_ids: continue
-            try:
-                r = requests.get(url, headers=MEDIA_DOWNLOAD_HEADERS, stream=True, timeout=25)
-                if r.status_code == 200:
-                    with open(output, "wb") as f:
-                        for chunk in r.iter_content(1024*256):
-                            if chunk: f.write(chunk)
-                    return str(output), uid
-            except: pass
-        return None, None
-
-    @staticmethod
-    def fetch_wikipedia_image(q, o):
-        q_clean = clean_query(q)
-        if not q_clean or len(q_clean) < 3: return None, None
-        try:
-            commons_url = "https://commons.wikimedia.org/w/api.php"
-            params = {"action": "query", "generator": "search", "gsrsearch": f"{q_clean}", "gsrnamespace": 6, "gsrlimit": 15, "prop": "imageinfo", "iiprop": "url|mime|size", "format": "json"}
-            res = requests.get(commons_url, headers=API_HEADERS, params=params, timeout=20)
-            if res.status_code == 200:
-                pages = list(res.json().get("query", {}).get("pages", {}).values())
-                def extract_commons(p):
-                    info_list = p.get("imageinfo") or [{}]
-                    info = info_list[0] if info_list else {}
-                    url = info.get("url")
-                    mime = info.get("mime", "")
-                    if url and ("image" in mime or url.lower().endswith((".jpg", ".jpeg", ".png"))): return url, str(p.get("pageid"))
-                    return None, None
-                return MediaSources._track_and_save(pages, o, extract_commons)
-        except: pass
-        return None, None
-
-    @staticmethod
-    def fetch_fbi_archive(q, base_path):
-        try:
-            q_clean = clean_query(q)
-            if not q_clean or len(q_clean) < 3: return None, None
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-            query = f'({q_clean}) AND (mediatype:image OR mediatype:movies)'
-            res = requests.get("https://archive.org/advancedsearch.php", headers=headers, params={"q": query, "fl[]": "identifier", "rows": 15, "output": "json"}, timeout=20)
-            docs = res.json().get("response", {}).get("docs", [])
-            random.shuffle(docs)
-            for doc in docs:
-                uid = str(doc.get("identifier"))
-                with CONFIG.used_media_lock:
-                    if uid in CONFIG.used_media_ids: continue
-                try:
-                    meta = requests.get(f"https://archive.org/metadata/{uid}", headers=headers, timeout=20).json()
-                    files = meta.get("files", [])
-                    videos = [(int(i.get("size",0) or 0), str(i.get("name",""))) for i in files if str(i.get("name","")).lower().endswith((".mp4",".mov")) and 500*1024 <= int(i.get("size",0) or 0) <= MAX_MEDIA_SIZE_MB*1024*1024]
-                    images = [(int(i.get("size",0) or 0), str(i.get("name",""))) for i in files if str(i.get("name","")).lower().endswith((".jpg",".jpeg",".png")) and int(i.get("size",0) or 0) >= 15*1024]
-                    target_name, is_video = None, False
-                    if videos:
-                        videos.sort(key=lambda x: x[0], reverse=True)
-                        target_name, is_video = videos[0][1], True
-                    elif images:
-                        images.sort(key=lambda x: x[0], reverse=True)
-                        target_name, is_video = images[0][1], False
-                    if target_name:
-                        out_path = base_path.with_suffix(".mp4" if is_video else ".jpg")
-                        file_url = f"https://archive.org/download/{uid}/{urllib.parse.quote(target_name, safe='/')}"
-                        r = requests.get(file_url, headers=MEDIA_DOWNLOAD_HEADERS, stream=True, timeout=35)
-                        if r.status_code == 200:
-                            with open(out_path, "wb") as f:
-                                for chunk in r.iter_content(1024*256):
-                                    if chunk: f.write(chunk)
-                            return str(out_path), uid
-                except: pass
-        except: pass
-        return None, None
-
-    @staticmethod
-    def fetch_chronicling_america(q, o):
-        try:
-            q_clean = clean_query(q)
-            if not q_clean or len(q_clean) < 3: return None, None
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-            url = f"https://www.loc.gov/photos/?fo=json&fa=online_format:image&c=20&q={urllib.parse.quote(q_clean)}"
-            res = requests.get(url, headers=headers, timeout=20)
-            results = res.json().get("results", [])
-            def extract_loc(i):
-                img_urls = i.get("image_url", [])
-                if isinstance(img_urls, str): img_urls = [img_urls]
-                return (img_urls[-1], str(i.get("id", img_urls[-1]))) if img_urls else (None, None)
-            return MediaSources._track_and_save(results, o, extract_loc)
-        except: return None, None
-
-    @staticmethod
-    def fetch_pixabay_video(q, o):
-        if not CONFIG.pixabay_key: return None, None
-        try:
-            res = requests.get("https://pixabay.com/api/videos/", headers=MEDIA_DOWNLOAD_HEADERS, params={"key": CONFIG.pixabay_key, "q": q, "per_page": 15}, timeout=20).json().get("hits", [])
-            return MediaSources._track_and_save(res, o, lambda i: ((i.get("videos", {}).get("large") or i.get("videos", {}).get("medium", {})).get("url"), str(i.get("id"))))
-        except: return None, None
-
-    @staticmethod
-    def fetch_pexels_video(q, o):
-        if not CONFIG.pexels_key: return None, None
-        try:
-            headers = MEDIA_DOWNLOAD_HEADERS.copy()
-            headers["Authorization"] = CONFIG.pexels_key
-            res = requests.get("https://api.pexels.com/videos/search", headers=headers, params={"query": q, "per_page": 15}, timeout=20).json().get("videos", [])
-            return MediaSources._track_and_save(res, o, lambda i: (sorted(i.get("video_files", []), key=lambda x: abs((x.get("width") or 0)-TARGET_W))[0].get("link") if i.get("video_files") else None, str(i.get("id"))))
-        except: return None, None
-
-    @staticmethod
-    def fetch_europeana(q, o):
-        if not CONFIG.europeana_key: return None, None
-        try:
-            q_clean = clean_query(q)
-            if not q_clean or len(q_clean) < 3: return None, None
-            params = {"wskey": CONFIG.europeana_key, "query": q_clean, "media": "true", "thumbnail": "true", "rows": 15, "profile": "rich", "qf": "TYPE:IMAGE"}
-            res = requests.get("https://api.europeana.eu/record/v2/search.json", params=params, headers=API_HEADERS, timeout=20)
-            if res.status_code == 200:
-                items = res.json().get("items", [])
-                def extract_europeana(item):
-                    edm = item.get("edmIsShownBy", [None])[0] or item.get("edmPreview", [None])[0]
-                    return edm, f"europeana_{item.get('id', hash(str(edm)))}"
-                return MediaSources._track_and_save(items, o, extract_europeana)
-        except: pass
-        return None, None
-
-    @staticmethod
-    def fetch_openverse(q, o, shot=None):
-        token = get_openverse_token()
-        if not token: return None, None
-        try:
-            q_clean = clean_query(q)
-            if not q_clean or len(q_clean) < 3: return None, None
-            headers = {"Authorization": f"Bearer {token}", "User-Agent": API_HEADERS["User-Agent"]}
-            res = requests.get("https://api.openverse.org/v1/images/", headers=headers, params={"q": q_clean, "page_size": 15, "license_type": "all-cc"}, timeout=20)
-            if res.status_code == 200:
-                results = res.json().get("results", [])
-                return MediaSources._track_and_save(results, o, lambda item: (item.get("url"), f"openverse_{item.get('id')}"))
-        except: pass
-        return None, None
-
-
 async def agy_evaluate_scout(media_path, shot, story, source_name, query):
     if not media_path: return False, 0.0, 0.0, "الملف غير موجود في المسار"
     prefilter_ok, prefilter_reason = MediaPreFilter.quick_validate(media_path, shot)
@@ -1240,7 +1343,7 @@ ACCEPT SIMILAR: {shot.get("accept_similar", True)}
 
 CRITICAL EVALUATION RULES:
 1. TEMPORAL ACCURACY: If the story era is historical, and forbidden modern anachronisms appear (e.g. smartphones, modern cars, laptops, euros), REJECT IMMEDIATELY with score 0.0.
-2. If CATEGORY is "ARCHIVE": Accept genuine historical evidence, archival newspaper clippings, authentic case documents, or vintage photos.
+2. If CATEGORY is "ARCHIVE": Accept genuine historical evidence, authentic interview clips, case movies, newspaper clippings, or vintage photos.
 3. If CATEGORY is "CINEMATIC": Do NOT demand literal text match. Accept mood, noir atmosphere, rain, fog, vintage closeups, flashing lights, or shadows. Be flexible on mood, ruthless on modern anachronisms.
 
 Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0, "reason": "Arabic reason"}}"""
@@ -1258,7 +1361,7 @@ Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0,
 
 async def apply_fallback(shot, story):
     index = shot["index"]
-    cat = shot.get("category", "CINEMATIC")
+    cat = shot.get("category", "ARCHIVE")
     dur = float(shot.get("duration", 3.0))
     
     if shot.get('best_candidate') and shot['best_score'] >= 0.15:
@@ -1300,11 +1403,11 @@ async def run_pipelined_production(shots, story):
         shot['best_score'] = -1.0
         shot['best_candidate'] = None
 
-    log(f"🚀 تشغيل خط الإنتاج الذكي | إجمالي المشاهد: {total_shots} | أقصى محاولات: {MAX_ATTEMPTS_PER_SHOT}")
+    log(f"🚀 تشغيل خط الإنتاج الذكي (سيادة الأرشيف 90%) | إجمالي المشاهد: {total_shots} | أقصى محاولات: {MAX_ATTEMPTS_PER_SHOT}")
 
     async def process_shot(shot):
         index = shot["index"]
-        cat = shot.get("category", "CINEMATIC")
+        cat = shot.get("category", "ARCHIVE")
         base = CONFIG.work_dir / f"raw_shot_{index:03d}"
 
         while shot['status'] != 'DONE' and shot['attempts'] < MAX_ATTEMPTS_PER_SHOT:
@@ -1332,7 +1435,7 @@ async def run_pipelined_production(shots, story):
                 output_path = Path(found_file)
                 pre_ok, pre_reason = MediaPreFilter.quick_validate(output_path, shot)
                 if not pre_ok:
-                    log(f"⏩ المشهد {index}: تم استبعاد {output_path.name} ({pre_reason}).", "debug")
+                    log(f"⏩ المشهد {index}: استبعاد {output_path.name} ({pre_reason}).", "debug")
                     QUERY_ENGINE.record_failure(query, src_name)
                     output_path.unlink(missing_ok=True)
                     continue
@@ -1573,9 +1676,7 @@ class AssemblyEngine:
                 run_cmd(["ffmpeg", "-y", "-i", str(ch_narration), "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", str(norm_audio)])
                 final_audio_segments.append(str(norm_audio))
 
-        # -------------------------------------------------------------
-        # OPTIMIZED SUBTITLE STYLING (Size 58 with Lam-Tofu Fix)
-        # -------------------------------------------------------------
+        # Subtitles ASS with Lam-Tofu Fix & Size 58
         sub_path = CONFIG.work_dir / "subtitles_sync.ass"
         with open(sub_path, "w", encoding="utf-8") as f:
             f.write(
@@ -1607,9 +1708,6 @@ class AssemblyEngine:
         merged_audio = CONFIG.work_dir / "master_soundtrack.wav"
         run_cmd(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(a_concat_txt), "-c:a", "pcm_s16le", str(merged_audio)])
 
-        # -------------------------------------------------------------
-        # BULLETPROOF BRANDING (Logo: Top-Right | Title: Top-Left via textfile)
-        # -------------------------------------------------------------
         intro_mask = f"not(between(t,{intro_start_time:.2f},{intro_end_time:.2f}))" if intro_end_time > 0 else "1"
         sub_filter = "subtitles=" + str(Path(sub_path).resolve()).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
@@ -1624,13 +1722,13 @@ class AssemblyEngine:
         filter_complex_parts = [f"[0:v]{sub_filter}[v_sub]"]
         current_v = "[v_sub]"
 
-        # 1. Overlay Channel Logo in Top-Right Corner (x=W-w-50, y=50)
+        # Logo: Top-Right
         if has_logo:
             filter_complex_parts.append(f"[2:v]scale=180:-1[logo_scaled]")
             filter_complex_parts.append(f"{current_v}[logo_scaled]overlay=W-w-50:50:enable='{intro_mask}':format=auto[v_logo]")
             current_v = "[v_logo]"
 
-        # 2. Overlay Episode Title/Hashtag in Top-Left Corner (x=50, y=50)
+        # Title / Hashtag: Top-Left via textfile
         if font_file:
             safe_title_path = str(title_file.resolve()).replace("\\", "/").replace(":", "\\:")
             filter_complex_parts.append(
@@ -1777,7 +1875,7 @@ async def main_pipeline():
     uploader = GoogleUploader(CONFIG.google_client_id, CONFIG.google_client_secret, CONFIG.google_refresh_token, CONFIG.drive_folder_id)
     await asyncio.to_thread(uploader.upload_all, final_video, CONFIG.thumbnail, CONFIG.topic, desc_text)
 
-    log(f"\n{'='*60}\n🏁 اكتمل إنتاج الوثائقي التلفزيوني بنجاح واحترافية متكاملة وبلا أي أخطاء.\n{'='*60}\n", "info")
+    log(f"\n{'='*60}\n🏁 اكتمل إنتاج الوثائقي التلفزيوني بنجاح واحترافية متكاملة.\n{'='*60}\n", "info")
     PARALLEL_FETCHER.shutdown()
     gc.collect()
 
