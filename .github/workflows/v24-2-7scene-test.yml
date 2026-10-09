@@ -32,22 +32,10 @@ jobs:
       PYTHONUNBUFFERED: '1'
 
     steps:
-      - name: 📥 Checkout repository (with Git LFS for Intro & Logo)
+      - name: 📥 Checkout repository (with Git LFS)
         uses: actions/checkout@v4
         with:
           lfs: true
-
-      - name: 🔎 Verify & Pull Git LFS Media Assets
-        run: |
-          git lfs pull || true
-          echo "=== التحقق من وجود وحجم ملفات الإنترو والشعار ==="
-          ls -lh intro.mp4 logo.png || true
-          if [ -f intro.mp4 ]; then
-            echo "--- فحص بنية فيديو الإنترو ---"
-            ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 intro.mp4 || echo "⚠️ تنبيه: الملف تالف أو غير صالح كفيديو"
-          else
-            echo "⚠️ ملف intro.mp4 غير موجود في المجلد الرئيسي"
-          fi
 
       - name: 🧹 Maximize Runner Disk Space (Reclaim ~30GB)
         run: |
@@ -66,6 +54,16 @@ jobs:
 
       - name: 🎞️ Install FFmpeg
         uses: FedericoCarboni/setup-ffmpeg@v3
+
+      - name: 🔎 Verify Media Assets (Intro & Logo)
+        run: |
+          git lfs pull || true
+          echo "=== فحص حجم الملفات ==="
+          ls -lh intro.mp4 logo.png || true
+          if [ -f intro.mp4 ]; then
+            echo "--- فحص بنية ومدة فيديو الإنترو ---"
+            ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 intro.mp4 || echo "⚠️ تنبيه: الملف لا يزال تالفاً أو فارغاً"
+          fi
 
       - name: 🔤 Install Arabic subtitle fonts and ASS dependencies
         run: |
@@ -102,7 +100,7 @@ jobs:
           echo "✅ Antigravity CLI is ready and authenticated from AGY_CREDENTIALS."
 
       - name: 🚀 Run Master Pipeline
-        run: python pipeline_V26.py # تأكد أن هذا الاسم يطابق اسم ملف بايثون في مستودعك
+        run: python pipeline_V26.py
 
       - name: 🔍 Verify Final Documentary
         run: |
