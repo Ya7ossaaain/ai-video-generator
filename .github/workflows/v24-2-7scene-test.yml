@@ -1,21 +1,22 @@
-name: 🎬 V26 Documentary Engine (Upload + 10-Key)
+name: 🎬 V57 Documentary Engine (Master Production)
 
 on:
   workflow_dispatch:
     inputs:
       topic:
-        description: 'موضوع الوثائقي (مثال: كارثة تشيرنوبل)'
+        description: 'موضوع الوثائقي (مثال: لغز القاتل زودياك)'
         required: true
-        default: 'لغز اختفاء غامض'
+        default: 'لغز القاتل زودياك'
 
 jobs:
   production:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+
     env:
       VIDEO_TOPIC: ${{ inputs.topic }}
-      GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }} # لدعم تدوير المفاتيح المتعددة (افصل بينها بفاصلة)
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}   # كاحتياطي في حال استخدمت مفتاح واحد
+      GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }} # لدعم تدوير المفاتيح المتعددة
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}   # كاحتياطي في حال استخدمت مفتاحاً واحداً
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
       PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
@@ -24,15 +25,29 @@ jobs:
       FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
       OPENVERSE_CLIENT_ID: ${{ secrets.OPENVERSE_CLIENT_ID }}
       OPENVERSE_CLIENT_SECRET: ${{ secrets.OPENVERSE_CLIENT_SECRET }}
-      # أسرار الرفع إلى جوجل درايف ويوتيوب
       GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
       GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
       GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+      DRIVE_FOLDER_ID: '1wn4z3A-t8Dnnq1kkiJopvUsCBQpkWxQW'
       PYTHONUNBUFFERED: '1'
 
     steps:
-      - name: 📥 Checkout repository
+      - name: 📥 Checkout repository (with Git LFS for Intro & Logo)
         uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: 🔎 Verify & Pull Git LFS Media Assets
+        run: |
+          git lfs pull || true
+          echo "=== التحقق من وجود وحجم ملفات الإنترو والشعار ==="
+          ls -lh intro.mp4 logo.png || true
+          if [ -f intro.mp4 ]; then
+            echo "--- فحص بنية فيديو الإنترو ---"
+            ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 intro.mp4 || echo "⚠️ تنبيه: الملف تالف أو غير صالح كفيديو"
+          else
+            echo "⚠️ ملف intro.mp4 غير موجود في المجلد الرئيسي"
+          fi
 
       - name: 🧹 Maximize Runner Disk Space (Reclaim ~30GB)
         run: |
@@ -86,8 +101,8 @@ jobs:
           agy --help >/dev/null 2>&1
           echo "✅ Antigravity CLI is ready and authenticated from AGY_CREDENTIALS."
 
-      - name: 🚀 Run V26 Audio-First Pipeline
-        run: python pipeline_V26.py # تأكد من أن اسم ملف البايثون لديك مطابق لهذا الاسم
+      - name: 🚀 Run Master Pipeline
+        run: python pipeline_V26.py # تأكد أن هذا الاسم يطابق اسم ملف بايثون في مستودعك
 
       - name: 🔍 Verify Final Documentary
         run: |
@@ -100,6 +115,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: V26-Documentary-Master
+          name: V57-Documentary-Master
           path: output_build/final_documentary.mp4
           if-no-files-found: warn
