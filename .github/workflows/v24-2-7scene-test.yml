@@ -1,4 +1,4 @@
-name: 🎬 V59 Documentary Engine (Master Production)
+name: 🎬 V60 Documentary Engine (Master Production)
 
 on:
   workflow_dispatch:
@@ -15,10 +15,10 @@ jobs:
 
     env:
       VIDEO_TOPIC: ${{ inputs.topic }}
-      GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }} # لدعم تدوير المفاتيح المتعددة
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}   # كاحتياطي في حال استخدمت مفتاحاً واحداً
+      GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }} # مفتاح يوتيوب للبحث السريع
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
       PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
       GIPHY_API_KEY: ${{ secrets.GIPHY_API_KEY }}
@@ -53,6 +53,11 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
+      - name: 🦕 Setup Deno (Solves YouTube Bot & JS Challenges)
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
       - name: 🎞️ Install FFmpeg
         uses: FedericoCarboni/setup-ffmpeg@v3
 
@@ -75,9 +80,9 @@ jobs:
           fc-match 'Noto Sans Arabic' || true
           fc-cache -f -v >/dev/null 2>&1 || true
 
-      - name: 📦 Install Python dependencies (with yt-dlp & duckduckgo_search)
+      - name: 📦 Install Python dependencies
         run: |
-          pip install requests google-genai google-api-python-client google-auth-oauthlib google-auth-httplib2 yt-dlp duckduckgo_search
+          pip install requests google-genai google-api-python-client google-auth-oauthlib google-auth-httplib2 yt-dlp
 
       - name: ⚡ Install Antigravity CLI
         run: |
@@ -116,6 +121,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: V59-Documentary-Master
+          name: V60-Documentary-Master
           path: output_build/final_documentary.mp4
           if-no-files-found: warn
