@@ -3,18 +3,8 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V58 - BROADCAST HUMAN MASTER EDITION
-(EMPATHETIC NARRATIVE, GLYPH-CLEAN TYPOGRAPHY & BULLETPROOF BRANDING)
-
-Key Upgrades in V58:
-- HUMAN-CENTERED NARRATIVE: Balances forensic investigation with poignant human tragedy and empathetic voice delivery.
-- TOFU GLYPH REMOVAL: Unicode NFKC normalization purges rogue ligatures/zero-width chars affecting initial 'Lam'.
-- READABLE SUBTITLE SIZING: Optimized font size 58 with balanced margins.
-- BULLETPROOF CORNER BRANDING: Top-Right (Channel Logo) and Top-Left (Episode Title/Hashtag via safe textfile filter).
-- ARABIC TITLE RESTORATION: Fixed regex bug that stripped Arabic titles and resulted in 'unknown' on YouTube.
-- YOUTUBE THUMBNAIL COMPLIANCE: Pure baseline 1280x720 JPEG generation avoids API 400 errors.
-- 15-ATTEMPT DEEP SEARCH: Maintained 15 continuous archive/cinematic attempts.
-- FRAME-LOCKED CFR SYNC: Mathematically synchronizes visuals, audio, and subtitles to the exact frame.
+V58.1 - BROADCAST HUMAN MASTER EDITION
+(FIXED STORYBOARD KEY MATCHER & DYNAMIC ERA RESILIENCE)
 """
 
 import os
@@ -47,7 +37,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V58-BROADCAST-HUMAN-MASTER"
+ENGINE_VERSION = "V58.1-BROADCAST-MASTER"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -142,9 +132,7 @@ def log(msg, level="info"):
 
 class EngineConfig:
     def __init__(self):
-        # Full authentic Arabic topic preserved
         self.topic = os.environ.get("VIDEO_TOPIC", "لغز القاتل زودياك").strip()
-        # Clean safe slug for file systems only (without stripping Arabic letters)
         self.topic_clean = re.sub(r'[\\/*?:"<>|]', "", self.topic).strip() or "documentary"
         self.run_id = f"RUN-{datetime.now().strftime('%Y%m%d%H%M%S')}-{random.randint(10000, 99999)}"
         self.base_dir = Path("./output_build")
@@ -275,7 +263,6 @@ def extract_json(text):
     return None
 
 def find_system_arabic_font():
-    """Detects available Arabic font in the system."""
     candidates = [
         "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
         "/usr/share/fonts/truetype/noto/NotoKufiArabic-Regular.ttf",
@@ -423,9 +410,6 @@ class SmartQueryEngine:
         queries = []
         n_sources = len(filtered_sources)
 
-        # -------------------------------------------------------------
-        # STRICT ARCHIVE: All 15 attempts remain 100% inside Archives
-        # -------------------------------------------------------------
         if cat == "ARCHIVE":
             templates = self.ARCHIVE_STRATEGIES.get(content_type, self.ARCHIVE_STRATEGIES["document_file"])
             primary_entity = entities[0] if entities else clean_query(CONFIG.topic)
@@ -585,7 +569,6 @@ def get_openverse_token():
 
 
 def create_fallback_image(output_path):
-    """Generates a true 1280x720 baseline JPEG thumbnail."""
     out_p = Path(output_path)
     res = run_cmd([
         "ffmpeg", "-y", "-f", "lavfi",
@@ -762,6 +745,59 @@ Return ONLY valid JSON:
             self.script = fallback
             return fallback
 
+    @staticmethod
+    def _find_shot_data(board, idx_int):
+        """Universal, resilient matcher to find a shot in AI output under any key format."""
+        if not board:
+            return None
+
+        # 1. If board is a list of shot objects
+        if isinstance(board, list):
+            for item in board:
+                if isinstance(item, dict):
+                    for k in ["index", "shot", "id", "shot_id", "shot_index"]:
+                        if str(item.get(k, "")).strip() == str(idx_int):
+                            return item
+            if 0 <= idx_int - 1 < len(board) and isinstance(board[idx_int - 1], dict):
+                return board[idx_int - 1]
+
+        # 2. If board is a dict
+        if isinstance(board, dict):
+            # Unwrap common root wrappers
+            for wrapper in ["shots", "scenes", "storyboard", "data", "results", "board"]:
+                if wrapper in board and isinstance(board[wrapper], (dict, list)):
+                    found = StoryScoutEngine._find_shot_data(board[wrapper], idx_int)
+                    if found: return found
+
+            idx_str = str(idx_int)
+            candidate_keys = [
+                idx_str,
+                f"shot_{idx_str}",
+                f"shot_{idx_int:02d}",
+                f"shot_{idx_int:03d}",
+                f"Shot {idx_str}",
+                f"Shot_{idx_str}",
+                f"shot {idx_str}",
+                f"scene_{idx_str}",
+                f"Scene {idx_str}",
+                f"Shot {idx_int:02d}",
+            ]
+            for ck in candidate_keys:
+                if ck in board and isinstance(board[ck], dict):
+                    return board[ck]
+                # Case-insensitive check
+                for actual_k, val in board.items():
+                    if actual_k.lower().strip() == ck.lower().strip() and isinstance(val, dict):
+                        return val
+
+            # Regex search for the number
+            for actual_k, val in board.items():
+                if isinstance(val, dict):
+                    if re.search(r'\b' + idx_str + r'\b', actual_k):
+                        return val
+
+        return None
+
     def direct_storyboard(self, shots):
         log("🎬 [المخرج الفني] هندسة كلمات البحث بذكاء للقطات...")
         batch_size = 70
@@ -775,7 +811,7 @@ Return ONLY valid JSON:
             batch_end = batch_start + len(batch)
             log(f"🎬 معالجة دفعة المشاهد {batch_start+1}-{batch_end} من {len(shots)}...")
 
-            shots_summary = "\n".join([f"Shot {s['index']} ({'HOOK' if s.get('is_hook') else 'MAIN'}): {s['text']}" for s in batch])
+            shots_summary = "\n".join([f"[{s['index']}]: {s['text']}" for s in batch])
             prompt = f"""You are an Elite Visual Director and Expert Stock/Archive SEO Metadata Specialist.
 TOPIC: {self.script.get('primary_english_query', CONFIG.topic)}
 TARGET ERA: {target_era}
@@ -795,7 +831,18 @@ CRITICAL RULES FOR KEYWORDS:
 4. "reviewer_context": Arabic instructions for QA Reviewer.
 5. "accept_similar": true/false.
 
-Return ONLY valid JSON mapping shot index string to these fields."""
+MANDATORY JSON FORMAT:
+Map string number index directly to the object:
+{{
+  "{batch[0]['index']}": {{
+    "category": "ARCHIVE",
+    "content_type": "document_file",
+    "exact_entities": ["...", "..."],
+    "visual_vibes": ["...", "..."],
+    "reviewer_context": "تأكد من مطابقة الوثيقة للتحقيق",
+    "accept_similar": true
+  }}
+}}"""
             try:
                 result = run_cmd(["agy", "--model", AGY_SCRIPT_MODEL, "--effort", EFFORT_PRO_GENERATION, "--dangerously-skip-permissions", "-p", prompt], timeout=600)
                 board = extract_json(result.stdout.strip())
@@ -803,30 +850,32 @@ Return ONLY valid JSON mapping shot index string to these fields."""
                 if batch_start == 0:
                     log("\n" + "🎥 "*15 + "[قرارات المخرج الفني]" + " 🎥"*15)
 
-                if board and isinstance(board, dict):
-                    for shot in batch:
-                        idx = str(shot["index"])
-                        if idx in board:
-                            cat_raw = str(board[idx].get("category", "")).strip().upper()
-                            shot["category"] = "ARCHIVE" if "ARCHIV" in cat_raw else "CINEMATIC"
-                            shot["content_type"] = board[idx].get("content_type", "default")
-                            shot["exact_entities"] = [clean_query(e) for e in board[idx].get("exact_entities", []) if clean_query(e)] or [clean_query(CONFIG.topic), "police file archive"]
-                            shot["visual_vibes"] = [clean_query(v) for v in board[idx].get("visual_vibes", []) if clean_query(v)] or ["police lights night", "dark foggy street", "vintage typewriter"]
-                            shot["reviewer_context"] = board[idx].get("reviewer_context", "تأكد من ملاءمة اللقطة لأجواء التحقيق الجنائي وتوافقها مع الحقبة.")
-                            shot["accept_similar"] = board[idx].get("accept_similar", True)
-                        else:
-                            shot["category"] = "CINEMATIC"
-                            shot["content_type"] = "default"
-                            shot["exact_entities"] = [clean_query(CONFIG.topic), "police archive"]
-                            shot["visual_vibes"] = ["police car night", "foggy street lamp", "vintage typewriter"]
-                            shot["reviewer_context"] = "ملاءمة سينمائية لأجواء الغموض والتحقيق."
-                            shot["accept_similar"] = True
+                for shot in batch:
+                    idx_int = shot["index"]
+                    shot_data = self._find_shot_data(board, idx_int)
 
-                        q_disp = shot['exact_entities'][0] if shot['category'] == 'ARCHIVE' else shot['visual_vibes'][0]
-                        log(f"📌 المشهد {shot['index']:02d} | الفئة: {shot['category']} | البحث الأول: '{q_disp}' | التوجيه: {shot['reviewer_context']}")
-                else:
-                    raise RuntimeError("Board parse failed")
-            except:
+                    if shot_data and isinstance(shot_data, dict):
+                        cat_raw = str(shot_data.get("category", "")).strip().upper()
+                        shot["category"] = "ARCHIVE" if "ARCHIV" in cat_raw else "CINEMATIC"
+                        shot["content_type"] = shot_data.get("content_type", "default")
+                        shot["exact_entities"] = [clean_query(e) for e in shot_data.get("exact_entities", []) if clean_query(e)] or [clean_query(CONFIG.topic), "police file archive"]
+                        shot["visual_vibes"] = [clean_query(v) for v in shot_data.get("visual_vibes", []) if clean_query(v)] or ["police lights night", "dark foggy street", "vintage typewriter"]
+                        shot["reviewer_context"] = shot_data.get("reviewer_context", "تأكد من ملاءمة اللقطة لأجواء التحقيق الجنائي وتوافقها مع الحقبة.")
+                        shot["accept_similar"] = shot_data.get("accept_similar", True)
+                    else:
+                        # Fallback ONLY for individual missing shots
+                        shot["category"] = "CINEMATIC"
+                        shot["content_type"] = "default"
+                        shot["exact_entities"] = [clean_query(CONFIG.topic), "police archive"]
+                        shot["visual_vibes"] = ["police car night", "dark hallway shadows", "vintage typewriter"]
+                        shot["reviewer_context"] = "ملاءمة سينمائية لأجواء الغموض والتحقيق."
+                        shot["accept_similar"] = True
+
+                    q_disp = shot['exact_entities'][0] if shot['category'] == 'ARCHIVE' else shot['visual_vibes'][0]
+                    log(f"📌 المشهد {shot['index']:02d} | الفئة: {shot['category']} | البحث الأول: '{q_disp}' | التوجيه: {shot['reviewer_context']}")
+
+            except Exception as e:
+                log(f"⚠️ خطأ في معالجة الدفعة: {e}", "warning")
                 for shot in batch:
                     shot["category"] = "CINEMATIC"
                     shot["content_type"] = "default"
@@ -868,7 +917,6 @@ class MasterAudioStudio:
                 start_t = time.time()
                 try:
                     client = genai.Client(api_key=api_key)
-                    # Emotionally resonant and empathetic prompt instruction
                     voice_instruction = (
                         "[INSTRUCTION: Solemn, emotionally resonant, and gripping Arabic investigative documentary narrator. "
                         "Blend suspenseful authority with genuine empathy for the victims and the human tragedy. "
@@ -972,12 +1020,8 @@ class WordSyncSlicer:
                 cur_len = item["end"] - s_start
                 if cur_len >= max_dur or (cur_len >= min_dur and item["word"].endswith((".", "!", "؟", "،"))):
                     raw_text = " ".join(x["word"] for x in cur).strip()
-                    
-                    # 1. Purge || delimiters
                     clean_text = re.sub(r"[\|]{2,}", " ", raw_text).strip()
-                    # 2. Unicode NFKC normalization (fixes missing glyphs / tofu box on initial 'Lam')
                     clean_text = unicodedata.normalize('NFKC', clean_text)
-                    # 3. Purge zero-width joiners/invisible control chars
                     clean_text = re.sub(r'[\u200B-\u200F\uFEFF\u00A0]', ' ', clean_text)
                     clean_text = re.sub(r"\s+", " ", clean_text).strip()
 
@@ -1240,7 +1284,7 @@ async def apply_fallback(shot, story):
 
 
 # =============================================================================
-# PRODUCTION PIPELINE (15 Continuous Attempts)
+# PRODUCTION PIPELINE
 # =============================================================================
 
 async def run_pipelined_production(shots, story):
@@ -1345,7 +1389,6 @@ async def run_pipelined_production(shots, story):
             if not found_acceptable:
                 shot['attempts'] += 1
 
-                # Progressive acceptance if score >= 0.25 after 8 attempts
                 if shot['status'] != 'DONE' and shot['attempts'] >= 8 and shot['best_score'] >= 0.25 and shot['best_candidate']:
                     best_used = shot['best_candidate']
                     cand_file = Path(best_used['path'])
@@ -1365,7 +1408,6 @@ async def run_pipelined_production(shots, story):
                                 if len(completed_results) == total_shots: completion_event.set()
                         break
 
-        # Emergency Fallback
         if shot['status'] != 'DONE':
             log(f"⚠️ المشهد {index} استنفد {MAX_ATTEMPTS_PER_SHOT} محاولات. حسم عبر خطة الإنقاذ...", "warning")
             fallback_res = await apply_fallback(shot, story)
@@ -1495,7 +1537,6 @@ class AssemblyEngine:
             time_str = f"{int(current_time//60):02d}:{int(current_time%60):02d}"
             youtube_chapters.append(f"{time_str} {ch_title}")
 
-            # Intro insertion after hook
             if not is_hook and not intro_inserted and normalized_intro and normalized_intro.exists():
                 intro_start_time = current_time
                 final_video_sequence.append(str(normalized_intro))
@@ -1507,7 +1548,6 @@ class AssemblyEngine:
                 intro_inserted = True
                 log(f"🎬 أُدرج الإنترو من {intro_start_time:.1f}s إلى {intro_end_time:.1f}s.", "info")
 
-            # Transition card insertion
             if ch_num >= 2:
                 trans_card = CONFIG.work_dir / f"trans_card_ch_{ch_num:02d}.mp4"
                 created_card = generate_chapter_transition_card(ch_num, ch_title, trans_card, CONFIG.chapter_sfx_path, duration=2.2)
@@ -1573,7 +1613,6 @@ class AssemblyEngine:
         intro_mask = f"not(between(t,{intro_start_time:.2f},{intro_end_time:.2f}))" if intro_end_time > 0 else "1"
         sub_filter = "subtitles=" + str(Path(sub_path).resolve()).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
-        # Create title file on disk to prevent FFmpeg escaping issues
         title_file = CONFIG.work_dir / "title_tag.txt"
         safe_display_title = f"{CONFIG.topic[:35]} | #{CONFIG.topic_clean[:20]}"
         with open(title_file, "w", encoding="utf-8") as tf:
@@ -1647,7 +1686,6 @@ class GoogleUploader:
 
     def upload_all(self, vid_path, thumb_path, title, description=""):
         if not self.creds: return
-        # Ensure title is never empty or unknown
         final_display_title = title or CONFIG.topic or "وثائقي استقصائي"
         try:
             drive = build('drive', 'v3', credentials=self.creds, cache_discovery=False)
@@ -1737,7 +1775,6 @@ async def main_pipeline():
     await generate_ai_image(story.get('primary_english_query', CONFIG.topic), CONFIG.thumbnail, "16:9")
 
     uploader = GoogleUploader(CONFIG.google_client_id, CONFIG.google_client_secret, CONFIG.google_refresh_token, CONFIG.drive_folder_id)
-    # Pass authentic Arabic title CONFIG.topic
     await asyncio.to_thread(uploader.upload_all, final_video, CONFIG.thumbnail, CONFIG.topic, desc_text)
 
     log(f"\n{'='*60}\n🏁 اكتمل إنتاج الوثائقي التلفزيوني بنجاح واحترافية متكاملة وبلا أي أخطاء.\n{'='*60}\n", "info")
