@@ -1,4 +1,4 @@
-name: 🎬 V57 Documentary Engine (Master Production)
+name: 🎬 V58 Documentary Engine (Master Production)
 
 on:
   workflow_dispatch:
@@ -18,6 +18,7 @@ jobs:
       GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }} # لدعم تدوير المفاتيح المتعددة
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}   # كاحتياطي في حال استخدمت مفتاحاً واحداً
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }} # المفتاح الذي أضفته مؤخراً
       PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
       PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
       GIPHY_API_KEY: ${{ secrets.GIPHY_API_KEY }}
@@ -58,11 +59,13 @@ jobs:
       - name: 🔎 Verify Media Assets (Intro & Logo)
         run: |
           git lfs pull || true
-          echo "=== فحص حجم الملفات ==="
+          echo "=== فحص حجم وجودة الملفات المرفوعة ==="
           ls -lh intro.mp4 logo.png || true
           if [ -f intro.mp4 ]; then
-            echo "--- فحص بنية ومدة فيديو الإنترو ---"
+            echo "--- فحص بنية ومدة فيديو الإنترو عبر ffprobe ---"
             ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 intro.mp4 || echo "⚠️ تنبيه: الملف لا يزال تالفاً أو فارغاً"
+          else
+            echo "⚠️ تنبيه: لم يتم العثور على ملف intro.mp4 في المجلد الرئيسي"
           fi
 
       - name: 🔤 Install Arabic subtitle fonts and ASS dependencies
@@ -113,6 +116,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: V57-Documentary-Master
+          name: V58-Documentary-Master
           path: output_build/final_documentary.mp4
           if-no-files-found: warn
