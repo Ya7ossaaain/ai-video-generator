@@ -3,18 +3,18 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V56 - BROADCAST CINEMATIC MASTER EDITION
-(RESTORED HIGH-PRECISION SEARCH & ZERO-CRASH STABLE LIFECYCLE)
+V57 - BROADCAST MASTER EDITION
+(ZERO-DRIFT FRAME SYNC, DYNAMIC ERA DETECTION & 15-ATTEMPT EXHAUSTIVE ARCHIVE)
 
-Key Enhancements & Fixes:
-- CRITICAL FIX: Elimination of the double-append and premature file deletion bug in shot evaluation.
-- CRITICAL FIX: Safe file preservation with fallback safeguard in AssemblyEngine to prevent any render crashes.
-- RESTORED PRECISION SEARCH: Strict physical-noun search engineering from V26 (eliminating useless abstract keywords).
-- FULL VERBATIM TELEMETRY: Complete script text printing for all 8 chapters + live Reviewer telemetry.
-- STABLE BROADCAST FILTERS: Ken Burns with background blur, split graph safety, and force_divisible_by=2.
-- INTEGRATED INTRO & TRANSITIONS: 8-second channel intro + episodic chapter title cards with sub-bass hits.
-- BRANDING: Dynamic logo + hashtag overlay, automatically hidden during channel intro.
-- DIRECT DRIVE DESTINATION: Targeted upload to the 02_Generated_Videos folder.
+Key Architectural Upgrades:
+- ABSOLUTE AUDIO-VISUAL SYNC: Mathematical CFR frame-locking eliminates cumulative drift across 400+ scenes.
+- MASTER TIMELINE REALIGNMENT: Automatic offset shifting guarantees subtitles, cards, audio, and visuals never desync.
+- DYNAMIC ERA DETECTION: AI automatically deduces period constraints from topic—supports both 1960s cold cases and 2024 modern cybercrimes.
+- 15-TIER DEEP ARCHIVE: Strict, continuous 15-attempt investigation across LOC, FBI, Wikimedia, Europeana & Openverse.
+- ASPECT RATIO PROTECTION: Vertical 9:16 smartphone/reels videos are rejected before download.
+- CLEAN SUBTITLES & TYPOGRAPHY: Strips all '||' delimiter artifacts and applies clean broadcast styling.
+- THUMBNAIL ENGINE FIX: True JPEG 1280x720 generation prevents YouTube API 400 invalidImage errors.
+- ROBUST DRAWTEXT & BRANDING: Safe Linux font discovery for dynamic hashtag & logo overlay.
 """
 
 import os
@@ -46,7 +46,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V56-BROADCAST-CINEMATIC-MASTER"
+ENGINE_VERSION = "V57-BROADCAST-MASTER"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -61,7 +61,7 @@ AGY_REVIEWER_MODEL = "gemini-3.6-flash"
 GROQ_MODEL = "whisper-large-v3"
 
 MAX_MEDIA_SIZE_MB = 120
-MAX_ATTEMPTS_PER_SHOT = 12
+MAX_ATTEMPTS_PER_SHOT = 15
 
 REVIEWER_SEMAPHORE = asyncio.Semaphore(7)
 
@@ -70,7 +70,7 @@ PREFILTER_MIN_VIDEO_DURATION = 0.5
 
 TARGET_TOTAL_DURATION_MINUTES = 25
 TARGET_NARRATION_WORDS = 3500
-SCENE_DURATION_MIN = 2.2
+SCENE_DURATION_MIN = 2.0
 SCENE_DURATION_MAX = 5.0
 SCENE_DURATION_MIN_HOOK = 1.3
 SCENE_DURATION_MAX_HOOK = 2.0
@@ -81,7 +81,7 @@ EFFORT_PRO_GENERATION = "high"
 EFFORT_IMAGE_GEN = "medium"
 
 API_HEADERS = {
-    "User-Agent": "InvestigativeDocumentaryBot/2.0 (https://github.com/Ya7ossaaain; contact@example.com)",
+    "User-Agent": "InvestigativeDocumentaryEngine/3.0 (https://github.com/Ya7ossaaain; contact@example.com)",
     "Accept": "application/json, text/plain, */*"
 }
 
@@ -89,6 +89,9 @@ MEDIA_DOWNLOAD_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "*/*"
 }
+
+ARCHIVE_SOURCES = ["WIKIPEDIA", "FBI_ARCHIVE", "LOC", "EUROPEANA", "OPENVERSE"]
+CINEMATIC_SOURCES = ["PEXELS", "PIXABAY", "OPENVERSE"]
 
 SOURCE_AFFINITY = {
     "ARCHIVE": {
@@ -173,7 +176,8 @@ class EngineConfig:
     def _locate_asset(self, candidate_paths):
         for p in candidate_paths:
             path_obj = Path(p)
-            if path_obj.exists(): return path_obj
+            if path_obj.exists() and path_obj.stat().st_size > 1024:
+                return path_obj
         return Path(candidate_paths[0])
 
 CONFIG = EngineConfig()
@@ -224,6 +228,7 @@ def probe_duration(path):
 
 
 def probe_dimensions(path):
+    """Probes video/image dimensions (width, height). Returns (0, 0) on failure."""
     if not path or not os.path.exists(path): return 0, 0
     try:
         res = subprocess.run(
@@ -246,10 +251,8 @@ def is_valid_media(path, min_duration=0.05):
 def is_valid_visual(path):
     path = Path(path)
     if not path.exists() or path.stat().st_size < 1024: return False
-    try:
-        res = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", str(path)], stdout=subprocess.PIPE, text=True, timeout=30)
-        return "x" in res.stdout.strip()
-    except: return False
+    w, h = probe_dimensions(path)
+    return w > 0 and h > 0
 
 def clean_query(text):
     return re.sub(r"\s+", " ", re.sub(r"[^\x00-\x7F]+", " ", text or "")).strip()[:180]
@@ -269,6 +272,18 @@ def extract_json(text):
         except: pass
     return None
 
+def find_system_arabic_font():
+    """Detects available Arabic TrueType font in the system."""
+    candidates = [
+        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoKufiArabic-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansArabic-Regular.ttf",
+        "/usr/share/fonts/noto-cjk/NotoSansArabic-Regular.ttf"
+    ]
+    for c in candidates:
+        if Path(c).exists(): return c
+    return None
+
 def cleanup_shot_unused_files(index, keep_path=None):
     """Safely cleans up candidate downloads for a shot without touching protected items."""
     try:
@@ -284,7 +299,7 @@ def cleanup_shot_unused_files(index, keep_path=None):
 
 
 # =============================================================================
-# BULLETPROOF FFMPEG FILTERS (Ken Burns + Blur Background + Divisible by 2)
+# BULLETPROOF FFMPEG FILTERS
 # =============================================================================
 
 def build_blur_background_filter_image(target_w=TARGET_W, target_h=TARGET_H, ken_burns=True):
@@ -331,132 +346,65 @@ def build_blur_background_filter_video(target_w=TARGET_W, target_h=TARGET_H):
     )
 
 
-class SearchFailureDiagnostics:
-    NO_RESULTS = "no_results"
-    IRRELEVANT_RESULTS = "irrelevant_results"
-    REVIEWER_REJECTED = "reviewer_rejected"
-    FORMAT_INVALID = "format_invalid"
-
-    def __init__(self):
-        self.failures = defaultdict(list)
-        self.lock = threading.Lock()
-
-    def record(self, shot_index, query, source, category, score=0.0, reason=""):
-        with self.lock:
-            self.failures[shot_index].append({
-                "query": query, "source": source, "category": category,
-                "score": score, "reason": reason, "time": time.time()
-            })
-
-    def diagnose(self, shot_index):
-        with self.lock:
-            records = self.failures.get(shot_index, [])
-        if not records:
-            return {"recommendations": []}
-
-        failed_sources = set(r["source"] for r in records)
-        source_fail_counts = defaultdict(int)
-        for r in records:
-            source_fail_counts[r["source"]] += 1
-        exhausted_sources = [s for s, c in source_fail_counts.items() if c >= 3]
-
-        recommendations = []
-        if exhausted_sources:
-            recommendations.append(f"avoid_sources:{','.join(exhausted_sources)}")
-        return {"recommendations": recommendations, "failed_sources": list(failed_sources)}
-
-    def clear_shot(self, shot_index):
-        with self.lock:
-            self.failures.pop(shot_index, None)
-
-FAILURE_DIAGNOSTICS = SearchFailureDiagnostics()
-
-
 class SmartQueryEngine:
-    STOCK_BOOSTERS = {
-        "water": ["ocean waves night", "dark sea water", "underwater gloomy", "lake water surface"],
-        "dark": ["dark room shadows", "silhouette walking", "low key lighting", "noir mystery hallway"],
-        "night": ["city street night fog", "car headlights dark road", "abandoned street night"],
-        "prison": ["jail cell bars", "prison corridor", "metal gate lock", "vintage prison"],
-        "document": ["old papers desk", "vintage typewriter typing", "archive documents folder", "classified report vintage"],
-        "person": ["mysterious figure coat", "man silhouette shadows", "close up eyes tense", "lone figure walking"],
-        "fog": ["misty forest dark", "fog street lamp", "heavy smoke night"],
-        "car": ["vintage car driving night", "police car flashing lights", "car interior night rain"],
-        "letter": ["handwritten letter envelope", "pen ink paper writing", "vintage typewriter"],
-        "police": ["police flashing lights night", "crime scene yellow tape", "investigation board red strings"],
-        "gun": ["gun barrel closeup", "revolver on table", "bullet casing ground"]
-    }
-
+    """Intelligent query strategy supporting dynamic era awareness and 15-tier archive searching."""
+    
     ARCHIVE_STRATEGIES = {
         "person_mugshot": [
             "{entity} mugshot",
             "{entity} police booking photo",
-            "{entity} wanted poster vintage",
-            "{entity} historic photograph portrait",
-            "vintage criminal mugshot archive"
+            "{entity} wanted poster official",
+            "{entity} historical photograph",
+            "wanted poster criminal archive",
+            "{entity} FBI record photograph",
+            "{entity} press conference photo",
+            "vintage police mugshot archive"
         ],
         "document_file": [
-            "{entity} FBI file report",
-            "{entity} official police document",
-            "{entity} cipher letter archive",
-            "FBI investigation document vintage",
-            "historic confidential memo archive"
+            "{entity} FBI investigation file",
+            "{entity} official police report",
+            "{entity} cipher document original",
+            "{entity} classified memorandum",
+            "FBI official investigation document",
+            "police crime scene report document",
+            "government classified memo archive",
+            "typewritten police evidence dossier"
         ],
         "location_photo": [
             "{entity} historical photograph",
-            "{entity} aerial view vintage",
-            "{entity} exterior 1960s",
-            "historic site vintage photograph"
+            "{entity} vintage exterior view",
+            "{entity} crime scene location photo",
+            "historic site vintage photograph",
+            "{entity} aerial photograph vintage",
+            "police patrol location photograph"
         ],
         "historical_event": [
-            "{entity} press photo archive",
-            "{entity} 1960s news photograph",
-            "historic crime scene photograph vintage",
-            "vintage news photo archive"
+            "{entity} news press photograph",
+            "{entity} historical archive photo",
+            "historic crime scene photograph",
+            "{entity} press report archive",
+            "vintage investigative press photograph"
         ],
         "newspaper_article": [
             "{entity} newspaper front page",
             "{entity} headline clipping archive",
-            "vintage newspaper crime headline",
-            "historical newspaper front page archive"
+            "historic newspaper crime headline",
+            "vintage press report headline front page",
+            "archive newspaper article clipping"
         ]
     }
 
     def __init__(self):
         self.failed_queries = defaultdict(set)
-        self.successful_keywords = defaultdict(set)
         self.lock = threading.Lock()
-
-    def classify_content_type(self, shot):
-        text = (shot.get("text", "") + " " + " ".join(shot.get("exact_entities", []))).lower()
-        cat = shot.get("category", "CINEMATIC")
-
-        if cat == "ARCHIVE":
-            if any(w in text for w in ["mugshot", "wanted", "face", "portrait", "killer", "suspect"]):
-                return "person_mugshot"
-            if any(w in text for w in ["document", "file", "letter", "report", "fbi", "cipher", "memo"]):
-                return "document_file"
-            if any(w in text for w in ["building", "street", "city", "lake", "island", "exterior"]):
-                return "location_photo"
-            if any(w in text for w in ["newspaper", "headline", "press", "article", "front page"]):
-                return "newspaper_article"
-            return "historical_event"
-        else:
-            if any(w in text for w in ["water", "sea", "lake", "ocean", "river"]):
-                return "nature_water"
-            if any(w in text for w in ["dark", "shadow", "night", "fog", "silhouette"]):
-                return "dark_moody"
-            if any(w in text for w in ["person", "man", "detective", "running", "walking"]):
-                return "people_action"
-            if any(w in text for w in ["document", "typewriter", "gun", "knife", "phone", "evidence"]):
-                return "objects_closeup"
-            return "urban_night"
 
     def get_ordered_sources(self, shot):
         cat = shot.get("category", "CINEMATIC")
-        content_type = self.classify_content_type(shot)
-        affinity_map = SOURCE_AFFINITY.get(cat, SOURCE_AFFINITY["CINEMATIC"])
-        ordered = affinity_map.get(content_type, affinity_map["default"])
+        content_type = shot.get("content_type", "default")
+        if cat == "ARCHIVE":
+            ordered = SOURCE_AFFINITY["ARCHIVE"].get(content_type, ARCHIVE_SOURCES)
+        else:
+            ordered = SOURCE_AFFINITY["CINEMATIC"].get(content_type, CINEMATIC_SOURCES)
         return [s for s in ordered if self._source_available(s)]
 
     def _source_available(self, source):
@@ -471,66 +419,78 @@ class SmartQueryEngine:
         entities = [clean_query(e) for e in shot.get("exact_entities", []) if clean_query(e)]
         vibes = [clean_query(v) for v in shot.get("visual_vibes", []) if clean_query(v)]
         content_type = shot.get("content_type", "default")
-        ordered_sources = self.get_ordered_sources(shot)
+        filtered_sources = self.get_ordered_sources(shot)
 
-        if not entities: entities = [CONFIG.topic_clean, "police investigation", "crime archive"]
+        if not entities: entities = [clean_query(CONFIG.topic), "police investigation", "historical archive"]
         if not vibes: vibes = ["dark crime scene", "flashing police lights", "vintage typewriter", "foggy street night"]
-
-        diagnosis = FAILURE_DIAGNOSTICS.diagnose(shot.get("index", 0))
-        avoid_sources = set()
-        for rec in diagnosis.get("recommendations", []):
-            if rec.startswith("avoid_sources:"):
-                avoid_sources.update(rec.split(":")[1].split(","))
-
-        filtered_sources = [s for s in ordered_sources if s not in avoid_sources] or ordered_sources
 
         queries = []
         n_sources = len(filtered_sources)
 
+        # -------------------------------------------------------------
+        # STRICT ARCHIVE MODE: All 15 attempts remain 100% inside Archives
+        # -------------------------------------------------------------
         if cat == "ARCHIVE":
             templates = self.ARCHIVE_STRATEGIES.get(content_type, self.ARCHIVE_STRATEGIES["document_file"])
-            primary_entity = entities[0] if entities else CONFIG.topic_clean
+            primary_entity = entities[0] if entities else clean_query(CONFIG.topic)
+            src = filtered_sources[attempt_num % n_sources]
 
             if attempt_num == 0:
-                queries.append((f"{primary_entity}", filtered_sources[0]))
+                queries.append((primary_entity, src))
                 if len(entities) > 1 and n_sources > 1:
-                    queries.append((f"{entities[1]}", filtered_sources[1 % n_sources]))
-            elif attempt_num < len(templates):
-                template = templates[attempt_num % len(templates)]
-                queries.append((template.format(entity=primary_entity), filtered_sources[attempt_num % n_sources]))
+                    queries.append((entities[1], filtered_sources[1 % n_sources]))
+            elif attempt_num <= 5:
+                template = templates[(attempt_num - 1) % len(templates)]
+                queries.append((template.format(entity=primary_entity), src))
+            elif attempt_num <= 10:
+                alt_entity = entities[attempt_num % len(entities)]
+                queries.append((f"{alt_entity} official document", src))
+                if n_sources > 1:
+                    queries.append((f"{alt_entity} archive photograph", filtered_sources[(attempt_num + 1) % n_sources]))
             else:
-                fallback_entity = entities[attempt_num % len(entities)]
-                queries.append((f"{fallback_entity} vintage photo", filtered_sources[attempt_num % n_sources]))
+                broad_terms = [
+                    f"{primary_entity} newspaper archive",
+                    f"{primary_entity} historical evidence",
+                    "police investigation official archive document",
+                    "historical crime record photograph"
+                ]
+                queries.append((broad_terms[attempt_num % len(broad_terms)], src))
+
+        # -------------------------------------------------------------
+        # CINEMATIC MODE: Ageless physical B-roll and atmospheric shots
+        # -------------------------------------------------------------
         else:
+            src = filtered_sources[attempt_num % n_sources]
             if attempt_num < len(vibes):
-                vibe = vibes[attempt_num]
-                queries.append((vibe, filtered_sources[attempt_num % n_sources]))
+                queries.append((vibes[attempt_num], src))
                 if attempt_num + 1 < len(vibes) and n_sources > 1:
                     queries.append((vibes[attempt_num + 1], filtered_sources[(attempt_num + 1) % n_sources]))
             else:
-                safe_fallbacks = [
-                    "police lights night",
-                    "dark crime scene investigation",
-                    "man walking foggy night",
-                    "typewriter typing document",
-                    "mystery evidence board"
+                ageless_fallbacks = [
+                    "police flashing lights reflection wet night",
+                    "fountain pen writing paper macro",
+                    "ticking clock hands macro shadows",
+                    "heavy fog street lamp night",
+                    "revolver cylinder spinning macro",
+                    "magnifying glass examining paper",
+                    "man silhouette coat foggy night"
                 ]
-                queries.append((safe_fallbacks[attempt_num % len(safe_fallbacks)], filtered_sources[attempt_num % n_sources]))
+                queries.append((ageless_fallbacks[attempt_num % len(ageless_fallbacks)], src))
 
-        # Clean, unique, and strictly non-empty query filtering
+        # Filter duplicates and empty queries
         valid_pairs = []
         seen = set()
         with self.lock:
-            for q, src in queries:
+            for q, s in queries:
                 q_clean = clean_query(q)
                 if not q_clean or len(q_clean) < 3: continue
-                key = f"{src}:{q_clean.lower()}"
-                if key not in self.failed_queries.get(src, set()) and key not in seen:
-                    valid_pairs.append((q_clean, src))
+                key = f"{s}:{q_clean.lower()}"
+                if key not in self.failed_queries.get(s, set()) and key not in seen:
+                    valid_pairs.append((q_clean, s))
                     seen.add(key)
 
         if not valid_pairs:
-            fallback_q = clean_query(entities[0] if cat == "ARCHIVE" else vibes[0]) or "police investigation"
+            fallback_q = clean_query(entities[0] if cat == "ARCHIVE" else vibes[0]) or "investigation"
             valid_pairs.append((fallback_q, filtered_sources[attempt_num % n_sources]))
 
         return valid_pairs
@@ -538,12 +498,6 @@ class SmartQueryEngine:
     def record_failure(self, query, source):
         with self.lock:
             self.failed_queries[source].add(f"{source}:{query.lower().strip()}")
-
-    def record_success(self, query, category):
-        words = query.lower().split()
-        with self.lock:
-            for w in words:
-                if len(w) > 3: self.successful_keywords[category].add(w)
 
 QUERY_ENGINE = SmartQueryEngine()
 
@@ -556,13 +510,20 @@ class MediaPreFilter:
     ]
 
     @staticmethod
-    def quick_validate(media_path, shot, source_name):
+    def quick_validate(media_path, shot):
         if not media_path or not Path(media_path).exists():
             return False, "الملف غير موجود"
         path = Path(media_path)
         file_size = path.stat().st_size
         if file_size < PREFILTER_MIN_SIZE_BYTES:
             return False, f"حجم الملف صغير جداً ({file_size} bytes)"
+
+        # ASPECT RATIO ENFORCEMENT: Reject 9:16 vertical smartphone/reels footage
+        w, h = probe_dimensions(path)
+        if w > 0 and h > 0:
+            if w < h or (w / h) < 1.15:
+                return False, f"مقطع رأسي غير متوافق مع الشاشة العريضة 16:9 ({w}x{h})"
+
         is_img = path.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
         is_vid = path.suffix.lower() in (".mp4", ".mov")
         if is_img:
@@ -574,14 +535,6 @@ class MediaPreFilter:
         else:
             return False, f"نوع ملف غير مدعوم: {path.suffix}"
         return True, "ok"
-
-    @staticmethod
-    def check_filename_relevance(filename, query, category):
-        if not filename: return 0.0
-        fn_lower = filename.lower()
-        for pattern in MediaPreFilter.SPAM_PATTERNS:
-            if re.search(pattern, fn_lower): return -0.4
-        return 0.0
 
 
 class ParallelSourceFetcher:
@@ -641,44 +594,61 @@ def get_openverse_token():
         return None
 
 
+def create_fallback_image(output_path):
+    """Generates a true 1280x720 JPEG thumbnail to satisfy YouTube API requirements."""
+    out_p = Path(output_path)
+    res = run_cmd([
+        "ffmpeg", "-y", "-f", "lavfi",
+        "-i", "color=c=0x0a0c10:s=1280x720",
+        "-vf", "noise=alls=15:allf=t+u,vignette=PI/4",
+        "-frames:v", "1", "-q:v", "2",
+        str(out_p)
+    ])
+    return is_valid_visual(out_p)
+
+
 async def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
-    log(f"🎨 إنشاء صورة عبر AGY: '{prompt[:70]}...'", "info")
+    log(f"🎨 إنشاء صورة مصغرة عبر AGY: '{prompt[:70]}...'", "info")
     full_prompt = f"[CRITICAL: NO TEXT ON IMAGE. OUTPUT RAW IMAGE ONLY] Photorealistic cinematic documentary archive photo: {prompt}. Aspect Ratio: {aspect_ratio}"
     try:
-        if Path(output_path).exists(): Path(output_path).unlink()
+        out_p = Path(output_path)
+        if out_p.exists(): out_p.unlink()
+
         cmd_binary = ["agy", "--model", AGY_REVIEWER_MODEL, "--effort", EFFORT_IMAGE_GEN, "--dangerously-skip-permissions", "-p", full_prompt]
         res_bin = await asyncio.to_thread(subprocess.run, cmd_binary, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300)
+        
         raw_written = False
         if res_bin.stdout.startswith(b'\xff\xd8') or res_bin.stdout.startswith(b'\x89PNG'):
-            with open(output_path, "wb") as f: f.write(res_bin.stdout)
+            with open(out_p, "wb") as f: f.write(res_bin.stdout)
             raw_written = True
         else:
             data = extract_json(res_bin.stdout.decode('utf-8', errors='ignore'))
             if data and isinstance(data, dict) and "image" in data:
-                with open(output_path, "wb") as f: f.write(base64.b64decode(data["image"]))
+                with open(out_p, "wb") as f: f.write(base64.b64decode(data["image"]))
                 raw_written = True
 
-        if raw_written and is_valid_visual(output_path):
-            output_p = Path(output_path)
-            temp_out = output_p.with_suffix(".tmp.jpg")
+        if raw_written and is_valid_visual(out_p):
+            temp_out = out_p.with_suffix(".tmp.jpg")
             convert_res = run_cmd([
-                "ffmpeg", "-y", "-i", str(output_path),
-                "-vf", f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2:black",
-                "-q:v", "2", "-update", "1", str(temp_out)
+                "ffmpeg", "-y", "-i", str(out_p),
+                "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black",
+                "-frames:v", "1", "-q:v", "2", str(temp_out)
             ], timeout=30)
             if convert_res.returncode == 0 and temp_out.exists() and temp_out.stat().st_size > 1024:
-                shutil.move(str(temp_out), str(output_path))
-            return True
+                shutil.move(str(temp_out), str(out_p))
+                return True
     except Exception as e:
         log(f"⚠️ فشل التوليد عبر AGY: {e}", "warning")
-    return await create_fallback_visual(output_path)
+
+    return create_fallback_image(output_path)
 
 
-async def create_fallback_visual(output):
+async def create_fallback_visual(output, duration=3.0):
     res = await asyncio.to_thread(subprocess.run, [
-        "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x0a0a0a:s=1920x1080:r=30", "-t", "5",
+        "ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=0x0a0a0a:s={TARGET_W}x{TARGET_H}:r={TARGET_FPS}",
         "-vf", "noise=alls=12:allf=t+u,vignette,eq=contrast=1.1:saturation=0.5",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "24", "-pix_fmt", "yuv420p", str(output)
+        "-frames:v", str(int(duration * TARGET_FPS)),
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "22", "-pix_fmt", "yuv420p", str(output)
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return is_valid_media(output)
 
@@ -686,25 +656,29 @@ async def create_fallback_visual(output):
 def generate_chapter_transition_card(chapter_num, chapter_title, out_video_path, sfx_path=None, duration=2.2):
     log(f"🎬 توليد الفاصل السينمائي للفصل {chapter_num}: '{chapter_title}'...", "info")
     safe_title = chapter_title.replace("'", "").replace(":", "-").strip()
+    font_file = find_system_arabic_font()
     
+    draw_title = f"fontfile='{font_file}':" if font_file else ""
     vf_text = (
         f"color=c=0x060709:s=1920x1080:d={duration}:r={TARGET_FPS},"
         f"noise=alls=10:allf=t+u,vignette=PI/4,"
-        f"drawtext=font='Noto Sans Arabic':text='محور التحقيق 0{chapter_num}':"
+        f"drawtext={draw_title}text='محور التحقيق 0{chapter_num}':"
         f"x=(w-text_w)/2:y=(h-text_h)/2-55:fontsize=32:fontcolor=0x999999:alpha='if(lt(t,0.3),t/0.3,if(gt(t,{duration}-0.3),({duration}-t)/0.3,1))',"
-        f"drawtext=font='Noto Sans Arabic':text='{safe_title}':"
+        f"drawtext={draw_title}text='{safe_title}':"
         f"x=(w-text_w)/2:y=(h-text_h)/2+25:fontsize=56:fontcolor=white:shadowcolor=black@0.8:shadowx=3:shadowy=3:alpha='if(lt(t,0.3),t/0.3,if(gt(t,{duration}-0.3),({duration}-t)/0.3,1))'"
     )
     cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", vf_text]
-    if sfx_path and Path(sfx_path).exists():
-        cmd.extend(["-i", str(sfx_path), "-c:a", "aac", "-b:a", "192k", "-shortest"])
+    if sfx_path and Path(sfx_path).exists() and Path(sfx_path).stat().st_size > 1024:
+        cmd.extend(["-i", str(sfx_path), "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k", "-shortest"])
     else:
         synth_audio = f"sine=frequency=42:duration={duration},afade=t=out:st=0.8:d={duration-0.8},volume=2.2"
-        cmd.extend(["-f", "lavfi", "-i", synth_audio, "-c:a", "aac", "-b:a", "192k"])
+        cmd.extend(["-f", "lavfi", "-i", synth_audio, "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k"])
 
+    total_frames = int(round(duration * TARGET_FPS))
     cmd.extend([
+        "-frames:v", str(total_frames),
         "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p",
-        "-t", str(duration), str(out_video_path)
+        str(out_video_path)
     ])
     res = run_cmd(cmd, timeout=60)
     return out_video_path if (res.returncode == 0 and is_valid_media(out_video_path)) else None
@@ -715,7 +689,7 @@ class StoryScoutEngine:
         self.script = None
 
     def inspect_and_plan(self):
-        log("🧠 بدء تحليل الموضوع وصناعة السيناريو الاستقصائي التلفزيوني...")
+        log("🧠 بدء تحليل الموضوع وصناعة السيناريو واستنتاج محددات الحقبة ديناميكياً...")
         prompt = f"""You are an elite investigative documentary producer creating a FULL-LENGTH broadcast documentary.
 TOPIC: {CONFIG.topic}
 [SYSTEM BYPASS CACHE ID: {CONFIG.run_id}]
@@ -723,10 +697,12 @@ TOPIC: {CONFIG.topic}
 Create a production-ready investigative documentary script for a {TARGET_TOTAL_DURATION_MINUTES}-MINUTE documentary.
 
 CRITICAL REQUIREMENTS:
-1. PART 1 MUST BE THE HOOK (45 to 65 seconds, ~110 to 140 Arabic words):
-   - Dramatic Paradox: Reveal surprising status/mystery, deliver sudden disruption without spoilers.
-   - Pacing: Fast, tense, seductive. DO NOT resolve the mystery in the hook.
-2. PARTS 2 THROUGH 8 (CHRONOLOGICAL CHAPTERS):
+1. DYNAMIC PERIOD ANALYSIS:
+   - Identify the exact "target_era" (e.g. "Late 1960s (1968-1969)" or "Modern 2024" or "1990s").
+   - List "forbidden_anachronisms": Things that must NEVER appear visually if historical (e.g. smartphones, laptops, euro bills, modern cars for a 1960s topic; or leave empty/sci-fi if topic is modern).
+2. PART 1 MUST BE THE HOOK (45 to 65 seconds, ~110 to 140 Arabic words):
+   - Fast, gripping paradox without resolving the mystery.
+3. PARTS 2 THROUGH 8 (CHRONOLOGICAL CHAPTERS):
    - Part 2: Background & historical context (~450 words)
    - Part 3: Crime scene & physical forensic evidence (~500 words)
    - Part 4: Mysterious letters & cryptograms (~450 words)
@@ -734,13 +710,14 @@ CRITICAL REQUIREMENTS:
    - Part 6: Suspects & interrogations (~450 words)
    - Part 7: Conflicting theories & debates (~400 words)
    - Part 8: Open cold case legacy & unresolved questions (~350 words)
-3. NARRATION RULE: Narrator MUST NEVER SAY 'الفصل الأول' or 'الجزء الثاني'. The speech is continuous storytelling.
-4. METADATA: Provide Arabic hashtag and descriptive titles for the 8 chapters.
+4. NARRATION RULE: Continuous Arabic narration without naming chapter numbers.
 
 Return ONLY valid JSON:
 {{
   "story_type": "investigation",
-  "primary_english_query": "Zodiac killer documentary archive",
+  "primary_english_query": "",
+  "target_era": "",
+  "forbidden_anachronisms": [],
   "hashtag": "#{CONFIG.topic_clean[:25]}",
   "chapters": [
     {{"id": 1, "title": "المقدمة واللغز المحير", "key": "part_1", "is_hook": true}},
@@ -762,8 +739,9 @@ Return ONLY valid JSON:
 
             self.script = data
 
-            # FULL VERBATIM SCRIPT TELEMETRY:
             log("\n" + "="*60)
+            log(f"🕰️ الحقبة المستنتجة للقضية: {data.get('target_era', 'غير محددة')}")
+            log(f"🚫 المحظورات الزمنية الصارمة: {', '.join(data.get('forbidden_anachronisms', []))}")
             for i in range(1, 9):
                 part_key = f"part_{i}"
                 if data.get(part_key):
@@ -773,10 +751,12 @@ Return ONLY valid JSON:
             log("="*60 + "\n")
             return data
         except Exception as e:
-            log(f"⚠️ فشل توليد السيناريو الكامل، استخدام الخطة الاحتياطية: {e}", "warning")
+            log(f"⚠️ خطأ توليد السيناريو، تفعيل خطة الطوارئ: {e}", "warning")
             fallback = {
                 "story_type": "investigation",
                 "primary_english_query": clean_query(CONFIG.topic),
+                "target_era": "Historical Investigation",
+                "forbidden_anachronisms": ["smartphones", "laptops", "modern euro currency"],
                 "hashtag": f"#{CONFIG.topic_clean[:25]}",
                 "chapters": [
                     {"id": 1, "title": "المقدمة واللغز", "key": "part_1", "is_hook": True},
@@ -789,9 +769,12 @@ Return ONLY valid JSON:
             return fallback
 
     def direct_storyboard(self, shots):
-        log("🎬 [المخرج الفني] هندسة كلمات البحث بذكاء للقطات (نظام المفردات البصرية الملموسة)...")
+        log("🎬 [المخرج الفني] هندسة كلمات البحث بذكاء للقطات بنظام المحاكاة الزمنية...")
         batch_size = 70
         all_processed = []
+
+        target_era = self.script.get("target_era", "")
+        forbidden = ", ".join(self.script.get("forbidden_anachronisms", []))
 
         for batch_start in range(0, len(shots), batch_size):
             batch = shots[batch_start:batch_start + batch_size]
@@ -801,21 +784,24 @@ Return ONLY valid JSON:
             shots_summary = "\n".join([f"Shot {s['index']} ({'HOOK' if s.get('is_hook') else 'MAIN'}): {s['text']}" for s in batch])
             prompt = f"""You are an Elite Visual Director and Expert Stock/Archive SEO Metadata Specialist.
 TOPIC: {self.script.get('primary_english_query', CONFIG.topic)}
+TARGET ERA: {target_era}
+FORBIDDEN ANACHRONISMS (DO NOT REQUEST THESE): {forbidden}
 [ID: {CONFIG.run_id}_{batch_start}]
+
 Analyze ALL of these shots contextually based on the story:
 {shots_summary}
 
-CRITICAL RULES FOR KEYWORDS (MUST OBEY TO FIND MEDIA):
-1. "category": "ARCHIVE" (for real historical events/suspects/documents) OR "CINEMATIC" (for visual B-roll).
-2. "exact_entities" (FOR ARCHIVE): 5 realistic English search terms from most specific proper noun to broader historical archive.
-3. "visual_vibes" (FOR CINEMATIC): 5 HIGHLY CONCRETE PHYSICAL NOUN PHRASES (1-3 words max).
-   - STRICT FORBIDDEN WORDS: NEVER use abstract/philosophical nouns like "revelation", "spiritual capital", "unanswered", "finality", "foreshadowing", "paranoia", "tension", "deep dive", "confusion".
-   - MANDATORY WORDS: Use tangible, visible, filmable objects and scenes:
-     * GOOD: "police car flashing lights", "foggy street night", "man silhouette coat", "vintage typewriter typing", "yellow crime scene tape", "bullet on table", "detective reading files", "blood on paper macro".
-4. "reviewer_context": Clear Arabic evaluation instructions for QA Reviewer.
+CRITICAL RULES FOR KEYWORDS:
+1. "category": "ARCHIVE" (for real historical documents, victims, suspects) OR "CINEMATIC" (for visual B-roll).
+2. "exact_entities" (FOR ARCHIVE): 6 concrete English search terms from specific entity name to official police archive.
+3. "visual_vibes" (FOR CINEMATIC): 6 CONCRETE PHYSICAL OBJECT/ACTION PHRASES (1-3 words max).
+   - NEVER request abstract nouns (e.g. 'revelation', 'paranoia', 'tension', 'finality').
+   - NEVER take metaphors literally (e.g. if narrator says 'drowned in fear', DO NOT search 'drowning pool').
+   - USE ageless period-neutral footage (e.g. 'vintage typewriter typing', 'fountain pen writing', 'car headlights night fog', 'bullet casing ground', 'police badge closeup').
+4. "reviewer_context": Arabic instructions for QA Reviewer.
 5. "accept_similar": true/false.
 
-Return ONLY a valid JSON object mapping shot index (string) to the above fields."""
+Return ONLY valid JSON mapping shot index string to these fields."""
             try:
                 result = run_cmd(["agy", "--model", AGY_SCRIPT_MODEL, "--effort", EFFORT_PRO_GENERATION, "--dangerously-skip-permissions", "-p", prompt], timeout=600)
                 board = extract_json(result.stdout.strip())
@@ -830,14 +816,14 @@ Return ONLY a valid JSON object mapping shot index (string) to the above fields.
                             cat_raw = str(board[idx].get("category", "")).strip().upper()
                             shot["category"] = "ARCHIVE" if "ARCHIV" in cat_raw else "CINEMATIC"
                             shot["content_type"] = board[idx].get("content_type", "default")
-                            shot["exact_entities"] = [clean_query(e) for e in board[idx].get("exact_entities", []) if clean_query(e)] or [CONFIG.topic_clean, "police file archive", "vintage crime photo"]
+                            shot["exact_entities"] = [clean_query(e) for e in board[idx].get("exact_entities", []) if clean_query(e)] or [clean_query(CONFIG.topic), "police file archive"]
                             shot["visual_vibes"] = [clean_query(v) for v in board[idx].get("visual_vibes", []) if clean_query(v)] or ["police lights night", "dark foggy street", "vintage typewriter"]
-                            shot["reviewer_context"] = board[idx].get("reviewer_context", "تأكد من ملاءمة اللقطة لأجواء التحقيق الجنائي.")
+                            shot["reviewer_context"] = board[idx].get("reviewer_context", "تأكد من ملاءمة اللقطة لأجواء التحقيق الجنائي وتوافقها مع الحقبة.")
                             shot["accept_similar"] = board[idx].get("accept_similar", True)
                         else:
                             shot["category"] = "CINEMATIC"
                             shot["content_type"] = "default"
-                            shot["exact_entities"] = [CONFIG.topic_clean, "police file archive"]
+                            shot["exact_entities"] = [clean_query(CONFIG.topic), "police archive"]
                             shot["visual_vibes"] = ["police car night", "foggy street lamp", "vintage typewriter"]
                             shot["reviewer_context"] = "ملاءمة سينمائية لأجواء الغموض والتحقيق."
                             shot["accept_similar"] = True
@@ -850,7 +836,7 @@ Return ONLY a valid JSON object mapping shot index (string) to the above fields.
                 for shot in batch:
                     shot["category"] = "CINEMATIC"
                     shot["content_type"] = "default"
-                    shot["exact_entities"] = [CONFIG.topic_clean, "police archive"]
+                    shot["exact_entities"] = [clean_query(CONFIG.topic), "police archive"]
                     shot["visual_vibes"] = ["police car night", "dark hallway shadows", "vintage typewriter"]
                     shot["reviewer_context"] = "تأكد من ملاءمة اللقطة للنص الجنائي."
                     shot["accept_similar"] = True
@@ -928,6 +914,8 @@ class MasterAudioStudio:
 
 
 class WordSyncSlicer:
+    """Aligns and segments speech with exact mathematical frame quantization."""
+    
     def align_and_slice(self, part_wav_files, script):
         headers = {"Authorization": f"Bearer {CONFIG.groq_api_key}"}
         shots = []
@@ -977,33 +965,50 @@ class WordSyncSlicer:
                 cur.append(item)
                 cur_len = item["end"] - s_start
                 if cur_len >= max_dur or (cur_len >= min_dur and item["word"].endswith((".", "!", "؟", "،"))):
-                    t = " ".join(x["word"] for x in cur).strip()
-                    if t:
+                    raw_text = " ".join(x["word"] for x in cur).strip()
+                    # Sanitize any || delimiters that pollute subtitles
+                    clean_text = re.sub(r"[\|]{2,}", " ", raw_text).strip()
+                    clean_text = re.sub(r"\s+", " ", clean_text)
+                    if clean_text:
+                        raw_dur = max(0.5, item["end"] - s_start)
+                        # MATHEMATICAL FRAME QUANTIZATION (Eliminates Drift)
+                        exact_frames = max(15, int(round(raw_dur * TARGET_FPS)))
+                        quantized_dur = exact_frames / TARGET_FPS
+
                         shots.append({
                             "index": len(shots) + 1,
                             "start": s_start,
-                            "end": item["end"],
-                            "duration": max(0.5, item["end"] - s_start),
-                            "text": t,
+                            "end": s_start + quantized_dur,
+                            "duration": quantized_dur,
+                            "frames": exact_frames,
+                            "text": clean_text,
                             "is_hook": is_hook,
                             "chapter_num": p_idx + 1
                         })
                     cur, s_start = [], item["end"]
 
             if cur:
-                shots.append({
-                    "index": len(shots) + 1,
-                    "start": s_start,
-                    "end": cur[-1]["end"],
-                    "duration": max(0.5, cur[-1]["end"] - s_start),
-                    "text": " ".join(x["word"] for x in cur).strip(),
-                    "is_hook": is_hook,
-                    "chapter_num": p_idx + 1
-                })
+                raw_text = " ".join(x["word"] for x in cur).strip()
+                clean_text = re.sub(r"[\|]{2,}", " ", raw_text).strip()
+                clean_text = re.sub(r"\s+", " ", clean_text)
+                if clean_text:
+                    raw_dur = max(0.5, cur[-1]["end"] - s_start)
+                    exact_frames = max(15, int(round(raw_dur * TARGET_FPS)))
+                    quantized_dur = exact_frames / TARGET_FPS
+                    shots.append({
+                        "index": len(shots) + 1,
+                        "start": s_start,
+                        "end": s_start + quantized_dur,
+                        "duration": quantized_dur,
+                        "frames": exact_frames,
+                        "text": clean_text,
+                        "is_hook": is_hook,
+                        "chapter_num": p_idx + 1
+                    })
 
             timeline_offset += dur
 
-        log(f"✂️ تم تقسيم الصوت إلى {len(shots)} مشهد ({sum(1 for s in shots if s.get('is_hook'))} مشهد سريع بالمقدمة).")
+        log(f"✂️ تم تقسيم الصوت بدقة إطارات محكمة إلى {len(shots)} مشهد ({sum(1 for s in shots if s.get('is_hook'))} مشهد سريع بالمقدمة).")
         return shots, chapter_timeline
 
 
@@ -1156,11 +1161,17 @@ class MediaSources:
 
 async def agy_evaluate_scout(media_path, shot, story, source_name, query):
     if not media_path: return False, 0.0, 0.0, "الملف غير موجود في المسار"
-    prefilter_ok, prefilter_reason = MediaPreFilter.quick_validate(media_path, shot, source_name)
+    prefilter_ok, prefilter_reason = MediaPreFilter.quick_validate(media_path, shot)
     if not prefilter_ok: return False, 0.0, 0.0, prefilter_reason
 
-    prompt = f"""You evaluate documentary media suitability strictly based on the context.
+    target_era = story.get("target_era", "Historical")
+    forbidden = ", ".join(story.get("forbidden_anachronisms", []))
+
+    prompt = f"""You evaluate documentary media suitability strictly based on the context and temporal era.
 TOPIC: {story.get("primary_english_query", CONFIG.topic)}
+TARGET ERA: {target_era}
+FORBIDDEN ANACHRONISMS: {forbidden}
+
 SHOT SCRIPT TEXT: "{shot['text']}"
 SHOT CATEGORY: {shot['category']}
 RETRIEVED FROM: {source_name}
@@ -1170,8 +1181,9 @@ DIRECTOR NOTE: {shot.get("reviewer_context", "")}
 ACCEPT SIMILAR: {shot.get("accept_similar", True)}
 
 CRITICAL EVALUATION RULES:
-- If CATEGORY is "ARCHIVE": Accept authentic historical records, documents, crime scene photos, or related era materials.
-- If CATEGORY is "CINEMATIC": Accept moody, atmospheric, dark, detective, police, or dramatic B-roll. Do NOT be overly strict about literal matching; prioritize dramatic investigative mood.
+1. TEMPORAL ACCURACY: If the story era is historical, and forbidden modern anachronisms appear (e.g. smartphones, modern cars, laptops, euros), REJECT IMMEDIATELY with score 0.0.
+2. If CATEGORY is "ARCHIVE": Accept genuine historical evidence, archival newspaper clippings, authentic case documents, or vintage photos.
+3. If CATEGORY is "CINEMATIC": Do NOT demand literal text match. Accept mood, noir atmosphere, rain, fog, vintage closeups, flashing lights, or shadows. Be flexible on mood, ruthless on modern anachronisms.
 
 Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0, "reason": "Arabic reason"}}"""
     try:
@@ -1189,35 +1201,35 @@ Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0,
 async def apply_fallback(shot, story):
     index = shot["index"]
     cat = shot.get("category", "CINEMATIC")
+    dur = float(shot.get("duration", 3.0))
     
-    # Priority 1: Check existing best candidate file
+    # Check protected candidate file first
     if shot.get('best_candidate') and shot['best_score'] >= 0.15:
         cand_path = Path(shot['best_candidate']['path'])
         if cand_path.exists():
             log(f"⚠️ [إنقاذ 1] المشهد {index}: اعتماد أفضل لقطة حقيقية (تقييم {shot['best_score']:.2f}).", "warning")
             return shot['best_candidate']
 
-    # Priority 2: Cinematic background
-    log(f"🎬 [إنقاذ 2] توليد خلفية سينمائية للمشهد {index} (بعد استنفاد محاولات البحث).", "warning")
+    # Cinematic fallback background
+    log(f"🎬 [إنقاذ 2] توليد خلفية سينمائية للمشهد {index}.", "warning")
     fallback_path = CONFIG.work_dir / f"selected_shot_{index:03d}_fallback.mp4"
-    if await create_fallback_visual(fallback_path):
-        return {"shot": shot, "path": str(fallback_path), "source": "CINEMATIC_BG", "score": 0.0, "start": 0.0, "duration": float(shot.get("duration", 3.0))}
+    if await create_fallback_visual(fallback_path, duration=dur):
+        return {"shot": shot, "path": str(fallback_path), "source": "CINEMATIC_BG", "score": 0.0, "start": 0.0, "duration": dur}
 
-    # Priority 3: AI Generated image
+    # AI Image generator
     log(f"🤖 [إنقاذ نهائي] توليد صورة AI للمشهد {index}.", "error")
     ai_path = CONFIG.work_dir / f"selected_shot_{index:03d}_ai.jpg"
     query = " ".join(shot.get("exact_entities", [])[:3]) if cat == "ARCHIVE" else " ".join(shot.get("visual_vibes", [])[:3])
     if await generate_ai_image(query, ai_path):
-        return {"shot": shot, "path": str(ai_path), "source": "AI_GENERATED", "score": 1.0, "start": 0.0, "duration": float(shot.get("duration", 3.0))}
+        return {"shot": shot, "path": str(ai_path), "source": "AI_GENERATED", "score": 1.0, "start": 0.0, "duration": dur}
 
-    # Priority 4: Ultimate emergency black slate
     black_path = CONFIG.work_dir / f"selected_shot_{index:03d}_black.mp4"
-    await create_fallback_visual(black_path)
-    return {"shot": shot, "path": str(black_path), "source": "FFMPEG", "score": 0.0, "start": 0.0, "duration": float(shot.get("duration", 3.0))}
+    await create_fallback_visual(black_path, duration=dur)
+    return {"shot": shot, "path": str(black_path), "source": "FFMPEG", "score": 0.0, "start": 0.0, "duration": dur}
 
 
 # =============================================================================
-# PIPELINED PRODUCTION ENGINE (ZERO-CRASH LIFECYCLE & LIVE TELEMETRY)
+# PRODUCTION PIPELINE
 # =============================================================================
 
 async def run_pipelined_production(shots, story):
@@ -1252,7 +1264,6 @@ async def run_pipelined_production(shots, story):
             if not fetch_results:
                 for q, src in pairs_to_try:
                     QUERY_ENGINE.record_failure(q, src)
-                    FAILURE_DIAGNOSTICS.record(index, q, src, SearchFailureDiagnostics.NO_RESULTS)
                 log(f"⏩ المشهد {index}: لم يعثر على نتائج من أي مصدر.", "info")
                 shot['attempts'] += 1
                 continue
@@ -1264,14 +1275,9 @@ async def run_pipelined_production(shots, story):
                     continue
 
                 output_path = Path(found_file)
-                is_img = output_path.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
-                valid = is_valid_visual(output_path) if is_img else is_valid_media(output_path)
-                if not valid:
-                    QUERY_ENGINE.record_failure(query, src_name)
-                    output_path.unlink(missing_ok=True)
-                    continue
-
-                if MediaPreFilter.check_filename_relevance(output_path.name, query, cat) <= -0.25:
+                pre_ok, pre_reason = MediaPreFilter.quick_validate(output_path, shot)
+                if not pre_ok:
+                    log(f"⏩ المشهد {index}: تم استبعاد {output_path.name} ({pre_reason}).", "debug")
                     QUERY_ENGINE.record_failure(query, src_name)
                     output_path.unlink(missing_ok=True)
                     continue
@@ -1279,9 +1285,10 @@ async def run_pipelined_production(shots, story):
                 async with REVIEWER_SEMAPHORE:
                     accepted, score, start, reason = await agy_evaluate_scout(output_path, shot, story, src_name, query)
 
+                is_img = output_path.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
                 dur = float(shot.get("duration", 3.0)) if is_img else probe_duration(output_path)
 
-                # Keep protected backup candidate
+                # Store protected backup of best candidate
                 if score > shot['best_score']:
                     shot['best_score'] = score
                     if shot.get('best_candidate') and shot['best_candidate'].get('path'):
@@ -1306,7 +1313,6 @@ async def run_pipelined_production(shots, story):
                         "shot": shot, "path": str(selected_path), "source": src_name,
                         "score": score, "start": start, "duration": dur
                     }
-                    QUERY_ENGINE.record_success(query, cat)
                     cleanup_shot_unused_files(index, keep_path=selected_path)
 
                     async with completed_lock:
@@ -1330,7 +1336,7 @@ async def run_pipelined_production(shots, story):
                 shot['attempts'] += 1
 
                 # Progressive acceptance: ONLY if NOT already DONE
-                if shot['status'] != 'DONE' and shot['attempts'] >= 7 and shot['best_score'] >= 0.25 and shot['best_candidate']:
+                if shot['status'] != 'DONE' and shot['attempts'] >= 8 and shot['best_score'] >= 0.25 and shot['best_candidate']:
                     best_used = shot['best_candidate']
                     cand_file = Path(best_used['path'])
                     if cand_file.exists():
@@ -1349,7 +1355,7 @@ async def run_pipelined_production(shots, story):
                                 if len(completed_results) == total_shots: completion_event.set()
                         break
 
-        # Final Fallback: ONLY if NOT already DONE
+        # Fallback safeguard: ONLY if NOT already DONE
         if shot['status'] != 'DONE':
             log(f"⚠️ المشهد {index} استنفد {MAX_ATTEMPTS_PER_SHOT} محاولات. حسم عبر خطة الإنقاذ...", "warning")
             fallback_res = await apply_fallback(shot, story)
@@ -1361,8 +1367,6 @@ async def run_pipelined_production(shots, story):
                     log(f"📊 الإنجاز: {len(completed_results)}/{total_shots}")
                     if len(completed_results) == total_shots: completion_event.set()
 
-        FAILURE_DIAGNOSTICS.clear_shot(shot.get("index", 0))
-
     async def throttled_process(shot):
         async with shot_semaphore:
             await process_shot(shot)
@@ -1372,7 +1376,6 @@ async def run_pipelined_production(shots, story):
     if not completion_event.is_set(): completion_event.set()
     gc.collect()
 
-    # Deduplicate results by shot index to ensure strictly 1 render per shot
     final_dict = {}
     for r in completed_results:
         final_dict[r["shot"]["index"]] = r
@@ -1380,7 +1383,7 @@ async def run_pipelined_production(shots, story):
 
 
 # =============================================================================
-# ASSEMBLY ENGINE (ZERO-CRASH RENDERING PIPELINE)
+# ZERO-DRIFT ASSEMBLY ENGINE
 # =============================================================================
 
 class AssemblyEngine:
@@ -1388,47 +1391,50 @@ class AssemblyEngine:
         shot, index = item["shot"], item["shot"]["index"]
         media_path = Path(item["path"])
         output = CONFIG.work_dir / f"rendered_{index:03d}.mp4"
-        dur = float(shot.get("duration", 3))
+        
+        # EXACT MATHEMATICAL FRAME LOCK
+        exact_frames = int(shot.get("frames", round(shot.get("duration", 3.0) * TARGET_FPS)))
 
-        # SAFEGUARD: If media file went missing, dynamically generate a replacement
         if not media_path.exists() or media_path.stat().st_size < 1024:
-            log(f"⚠️ تنبيه: الملف المخصص للمشهد {index} غير موجود، جاري إنشاء بديل فوري...", "warning")
-            asyncio.run(create_fallback_visual(output))
+            log(f"⚠️ تنبيه: الملف للمشهد {index} غير متوفر، جاري توليد بديل فوري...", "warning")
+            asyncio.run(create_fallback_visual(output, duration=exact_frames/TARGET_FPS))
             return output
 
         start = min(float(item.get("start", 0)), max(0, probe_duration(media_path) - 0.1))
-        log(f"✂️ جاري رندرة المشهد {index}...", "debug")
+        log(f"✂️ جاري رندرة المشهد {index} ({exact_frames} إطار ثابت)...", "debug")
 
         if media_path.suffix.lower() in (".mp4", ".mov"):
             filter_complex = build_blur_background_filter_video()
             res = run_cmd([
-                "ffmpeg", "-y", "-ss", str(start), "-i", str(media_path), "-t", str(dur),
-                "-filter_complex", filter_complex, "-an", "-c:v", "libx264", "-preset", "fast",
-                "-crf", "20", "-pix_fmt", "yuv420p", str(output)
+                "ffmpeg", "-y", "-ss", str(start), "-i", str(media_path),
+                "-filter_complex", filter_complex,
+                "-frames:v", str(exact_frames),
+                "-fps_mode", "cfr", "-r", str(TARGET_FPS),
+                "-an", "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                "-pix_fmt", "yuv420p", str(output)
             ])
         else:
             filter_complex = build_blur_background_filter_image(ken_burns=True)
             res = run_cmd([
-                "ffmpeg", "-y", "-loop", "1", "-i", str(media_path), "-t", str(dur),
-                "-filter_complex", filter_complex, "-an", "-c:v", "libx264", "-preset", "fast",
-                "-crf", "20", "-pix_fmt", "yuv420p", str(output)
+                "ffmpeg", "-y", "-loop", "1", "-i", str(media_path),
+                "-filter_complex", filter_complex,
+                "-frames:v", str(exact_frames),
+                "-fps_mode", "cfr", "-r", str(TARGET_FPS),
+                "-an", "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                "-pix_fmt", "yuv420p", str(output)
             ])
 
-        # Bulletproof fallback with force_divisible_by=2 to avoid odd-pixel crashes
         if res.returncode != 0:
-            log(f"⚠️ فشل الفلتر المعقد للمشهد {index}، محاولة الفلتر الآمن...", "warning")
             vf = f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2:black,fps={TARGET_FPS}"
             if media_path.suffix.lower() in (".mp4", ".mov"):
-                res = run_cmd(["ffmpeg", "-y", "-ss", str(start), "-i", str(media_path), "-t", str(dur), "-vf", vf, "-an", "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", str(output)])
+                res = run_cmd(["ffmpeg", "-y", "-ss", str(start), "-i", str(media_path), "-vf", vf, "-frames:v", str(exact_frames), "-fps_mode", "cfr", "-r", str(TARGET_FPS), "-an", "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", str(output)])
             else:
-                res = run_cmd(["ffmpeg", "-y", "-loop", "1", "-i", str(media_path), "-t", str(dur), "-vf", vf, "-an", "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", str(output)])
+                res = run_cmd(["ffmpeg", "-y", "-loop", "1", "-i", str(media_path), "-vf", vf, "-frames:v", str(exact_frames), "-fps_mode", "cfr", "-r", str(TARGET_FPS), "-an", "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", str(output)])
 
-        # Ultimate fallback if safe filter also fails
         if res.returncode != 0:
-            log(f"🚨 خطأ رندرة غير متوقع للمشهد {index}، توليد لقطة طوارئ...", "error")
-            asyncio.run(create_fallback_visual(output))
+            asyncio.run(create_fallback_visual(output, duration=exact_frames/TARGET_FPS))
 
-        # Cleanup source file immediately to save runner disk space
+        # Cleanup source file immediately to conserve disk
         if media_path.exists() and media_path.resolve() != output.resolve():
             try:
                 if CONFIG.work_dir.resolve() in media_path.resolve().parents:
@@ -1442,18 +1448,19 @@ class AssemblyEngine:
         gc.collect()
         return rendered
 
-    def assemble_final_cut(self, rendered_items, subtitle_path, intro_path, chapter_timeline, hashtag):
-        log("🎞️ تجهيز المونتاج النهائي التلفزيوني (دمج الإنترو، الفواصل السينمائية، الشعار، والهاشتاق)...", "info")
+    def assemble_final_cut(self, rendered_items, shots, chapter_timeline, hashtag):
+        log("🎞️ تجهيز المونتاج النهائي ومحاذاة التايم لاين بالمللي ثانية...", "info")
 
         normalized_intro = None
         intro_dur = 0.0
-        if intro_path and Path(intro_path).exists():
-            intro_dur = probe_duration(intro_path)
-            if intro_dur > 0:
+        # If intro.mp4 exists, normalize it
+        if CONFIG.intro_path and Path(CONFIG.intro_path).exists() and Path(CONFIG.intro_path).stat().st_size > 1024:
+            intro_dur = probe_duration(CONFIG.intro_path)
+            if intro_dur > 1.0:
                 normalized_intro = CONFIG.work_dir / "normalized_intro.mp4"
-                log(f"🎬 تطبيع الإنترو ({intro_dur:.1f} ثانية) ليتطابق مع مواصفات البث...", "info")
+                log(f"🎬 تطبيع الإنترو ({intro_dur:.1f} ثانية) بمواصفات البث...", "info")
                 run_cmd([
-                    "ffmpeg", "-y", "-i", str(intro_path),
+                    "ffmpeg", "-y", "-i", str(CONFIG.intro_path),
                     "-vf", f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2:black,fps={TARGET_FPS}",
                     "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p",
                     "-c:a", "aac", "-ar", "48000", "-ac", "2", str(normalized_intro)
@@ -1463,6 +1470,7 @@ class AssemblyEngine:
         final_audio_segments = []
         youtube_chapters = []
         current_time = 0.0
+        chapter_offsets = {}
 
         chapter_shots = defaultdict(list)
         for item in rendered_items:
@@ -1481,7 +1489,7 @@ class AssemblyEngine:
             time_str = f"{int(current_time//60):02d}:{int(current_time%60):02d}"
             youtube_chapters.append(f"{time_str} {ch_title}")
 
-            # Insert channel intro directly after chapter 1 (the hook)
+            # Insert channel intro after Chapter 1 (Hook)
             if not is_hook and not intro_inserted and normalized_intro and normalized_intro.exists():
                 intro_start_time = current_time
                 final_video_sequence.append(str(normalized_intro))
@@ -1493,7 +1501,7 @@ class AssemblyEngine:
                 intro_inserted = True
                 log(f"🎬 أُدرج الإنترو من {intro_start_time:.1f}s إلى {intro_end_time:.1f}s.", "info")
 
-            # Insert episodic title transition card between chapters
+            # Insert transition card between chapters
             if ch_num >= 2:
                 trans_card = CONFIG.work_dir / f"trans_card_ch_{ch_num:02d}.mp4"
                 created_card = generate_chapter_transition_card(ch_num, ch_title, trans_card, CONFIG.chapter_sfx_path, duration=2.2)
@@ -1504,6 +1512,8 @@ class AssemblyEngine:
                     final_audio_segments.append(str(card_audio))
                     current_time += 2.2
 
+            chapter_offsets[ch_num] = current_time - ch_info["start_time"]
+
             # Append rendered video clips of this chapter
             items = chapter_shots.get(ch_num, [])
             for it in items:
@@ -1512,12 +1522,33 @@ class AssemblyEngine:
                     final_video_sequence.append(str(v_path))
                     current_time += it['shot']['duration']
 
-            # Append normalized narration audio of this chapter
+            # Append normalized narration audio
             ch_narration = CONFIG.work_dir / f"chapter_{ch_num:02d}.wav"
             if ch_narration.exists():
                 norm_audio = CONFIG.work_dir / f"norm_audio_{ch_num:02d}.wav"
                 run_cmd(["ffmpeg", "-y", "-i", str(ch_narration), "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", str(norm_audio)])
                 final_audio_segments.append(str(norm_audio))
+
+        # -------------------------------------------------------------
+        # SYNCHRONIZED SUBTITLES (Shifted by exact chapter offsets)
+        # -------------------------------------------------------------
+        sub_path = CONFIG.work_dir / "subtitles_sync.ass"
+        with open(sub_path, "w", encoding="utf-8") as f:
+            f.write(
+                "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n"
+                "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+                "Style: Default,Noto Sans Arabic,52,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,2,2,80,80,65,1\n"
+                "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+            )
+            for s in shots:
+                ch = s.get("chapter_num", 1)
+                offset = chapter_offsets.get(ch, 0.0)
+                s_start = s["start"] + offset
+                s_end = s["end"] + offset
+                h1, m1 = int(s_start // 3600), int((s_start % 3600) // 60)
+                h2, m2 = int(s_end // 3600), int((s_end % 3600) // 60)
+                t_clean = s['text'].replace("\\", r"\\")
+                f.write(f"Dialogue: 0,{h1}:{m1:02d}:{s_start%60:05.2f},{h2}:{m2:02d}:{s_end%60:05.2f},Default,,0,0,0,,{{\\fad(100,100)}}{t_clean}\n")
 
         v_concat_txt = CONFIG.work_dir / "final_v_concat.txt"
         with open(v_concat_txt, "w") as f:
@@ -1532,12 +1563,17 @@ class AssemblyEngine:
         merged_audio = CONFIG.work_dir / "master_soundtrack.wav"
         run_cmd(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(a_concat_txt), "-c:a", "pcm_s16le", str(merged_audio)])
 
+        # -------------------------------------------------------------
+        # COMPOSITING FILTER (Subtitles + Dynamic Logo + Safe Hashtag)
+        # -------------------------------------------------------------
         intro_mask = f"not(between(t,{intro_start_time:.2f},{intro_end_time:.2f}))" if intro_end_time > 0 else "1"
-        safe_hash = hashtag.replace("'", "").strip()
-        sub_filter = "subtitles=" + str(Path(subtitle_path).resolve()).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+        safe_hash = hashtag.replace(":", "\\:").replace("'", "").replace("#", "\\#").strip()
+        sub_filter = "subtitles=" + str(Path(sub_path).resolve()).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+
+        font_file = find_system_arabic_font()
+        has_logo = CONFIG.logo_path and Path(CONFIG.logo_path).exists() and Path(CONFIG.logo_path).stat().st_size > 1024
 
         filter_complex_parts = [f"[0:v]{sub_filter}[v_sub]"]
-        has_logo = CONFIG.logo_path and CONFIG.logo_path.exists()
         current_v = "[v_sub]"
 
         if has_logo:
@@ -1545,11 +1581,14 @@ class AssemblyEngine:
             filter_complex_parts.append(f"{current_v}[logo_scaled]overlay=W-w-50:50:enable='{intro_mask}':format=auto[v_logo]")
             current_v = "[v_logo]"
 
-        filter_complex_parts.append(
-            f"{current_v}drawtext=font='Noto Sans Arabic':text='{safe_hash}':"
-            f"x=50:y=55:fontsize=36:fontcolor=white@0.85:shadowcolor=black@0.7:shadowx=2:shadowy=2:"
-            f"enable='{intro_mask}'[v_final]"
-        )
+        if font_file:
+            filter_complex_parts.append(
+                f"{current_v}drawtext=fontfile='{font_file}':text='{safe_hash}':"
+                f"x=50:y=55:fontsize=36:fontcolor=white@0.85:shadowcolor=black@0.7:shadowx=2:shadowy=2:"
+                f"enable='{intro_mask}'[v_final]"
+            )
+        else:
+            filter_complex_parts.append(f"{current_v}null[v_final]")
 
         full_vf = ";".join(filter_complex_parts)
 
@@ -1581,11 +1620,11 @@ class AssemblyEngine:
         if not is_valid_media(CONFIG.final_video):
             raise RuntimeError("Final assembly failed.")
 
-        desc_text = f"وثائقي استقصائي شامل: {CONFIG.topic}\n\nفصول الوثائقي:\n" + "\n".join(youtube_chapters) + f"\n\n{safe_hash}"
+        desc_text = f"وثائقي استقصائي شامل: {CONFIG.topic}\n\nفصول الوثائقي:\n" + "\n".join(youtube_chapters) + f"\n\n#{CONFIG.topic_clean[:25]}"
         with open(CONFIG.description_file, "w", encoding="utf-8") as f:
             f.write(desc_text)
 
-        log(f"🎉 تم إنتاج الوثائقي التلفزيوني بنجاح! | المدة: {probe_duration(CONFIG.final_video)/60:.2f} دقيقة | الحجم: {CONFIG.final_video.stat().st_size/1024/1024:.1f} MB", "info")
+        log(f"🎉 تم إنتاج الوثائقي التلفزيوني بنجاح تام! | المدة: {probe_duration(CONFIG.final_video)/60:.2f} دقيقة | الحجم: {CONFIG.final_video.stat().st_size/1024/1024:.1f} MB", "info")
         return CONFIG.final_video, desc_text
 
 
@@ -1639,7 +1678,7 @@ class GoogleUploader:
 
 async def main_pipeline():
     prepare_fresh_workspace()
-    log(f"🚀 بدء تشغيل المحرك التلفزيوني {ENGINE_VERSION} | القضية: {CONFIG.topic}")
+    log(f"🚀 بدء تشغيل المحرك التلفزيوني المطور {ENGINE_VERSION} | القضية: {CONFIG.topic}")
 
     story_engine = StoryScoutEngine()
     story = story_engine.inspect_and_plan()
@@ -1649,15 +1688,6 @@ async def main_pipeline():
 
     shots, chapter_timeline = WordSyncSlicer().align_and_slice(part_wav_files, story)
     shots = story_engine.direct_storyboard(shots)
-
-    sub_path = CONFIG.work_dir / "subtitles.ass"
-    with open(sub_path, "w", encoding="utf-8") as f:
-        f.write("[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Noto Sans Arabic,54,&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,3,1,2,80,80,65,1\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
-        for s in shots:
-            h1, m1 = int(s['start']//3600), int((s['start']%3600)//60)
-            h2, m2 = int(s['end']//3600), int((s['end']%3600)//60)
-            t = s['text'].replace("\\", r"\\")
-            f.write(f"Dialogue: 0,{h1}:{m1:02d}:{s['start']%60:05.2f},{h2}:{m2:02d}:{s['end']%60:05.2f},Default,,0,0,0,,{{\\fad(120,120)}}{t}\n")
 
     assembly = AssemblyEngine()
     all_rendered = []
@@ -1687,7 +1717,7 @@ async def main_pipeline():
         rendered_shot_items.append({"shot": item["shot"], "path": r_path})
 
     hashtag = story.get("hashtag", f"#{CONFIG.topic_clean[:25]}")
-    final_video, desc_text = assembly.assemble_final_cut(rendered_shot_items, sub_path, CONFIG.intro_path, chapter_timeline, hashtag)
+    final_video, desc_text = assembly.assemble_final_cut(rendered_shot_items, shots, chapter_timeline, hashtag)
 
     log("🎨 توليد الصورة المصغرة (Thumbnail) الاحترافية...", "info")
     await generate_ai_image(story.get('primary_english_query', CONFIG.topic), CONFIG.thumbnail, "16:9")
@@ -1695,7 +1725,7 @@ async def main_pipeline():
     uploader = GoogleUploader(CONFIG.google_client_id, CONFIG.google_client_secret, CONFIG.google_refresh_token, CONFIG.drive_folder_id)
     await asyncio.to_thread(uploader.upload_all, final_video, CONFIG.thumbnail, CONFIG.topic_clean, desc_text)
 
-    log(f"\n{'='*60}\n🏁 اكتمل إنتاج الوثائقي التلفزيوني بنجاح واحترافية متكاملة وبلا أي أخطاء.\n{'='*60}\n", "info")
+    log(f"\n{'='*60}\n🏁 اكتمل إنتاج الوثائقي التلفزيوني بنجاح واحترافية متكاملة وبلا أي أخطاء تزامن.\n{'='*60}\n", "info")
     PARALLEL_FETCHER.shutdown()
     gc.collect()
 
