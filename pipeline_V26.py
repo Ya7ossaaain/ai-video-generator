@@ -3,18 +3,18 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V57 - BROADCAST MASTER EDITION
-(ZERO-DRIFT FRAME SYNC, DYNAMIC ERA DETECTION & 15-ATTEMPT EXHAUSTIVE ARCHIVE)
+V58 - BROADCAST HUMAN MASTER EDITION
+(EMPATHETIC NARRATIVE, GLYPH-CLEAN TYPOGRAPHY & BULLETPROOF BRANDING)
 
-Key Architectural Upgrades:
-- ABSOLUTE AUDIO-VISUAL SYNC: Mathematical CFR frame-locking eliminates cumulative drift across 400+ scenes.
-- MASTER TIMELINE REALIGNMENT: Automatic offset shifting guarantees subtitles, cards, audio, and visuals never desync.
-- DYNAMIC ERA DETECTION: AI automatically deduces period constraints from topic—supports both 1960s cold cases and 2024 modern cybercrimes.
-- 15-TIER DEEP ARCHIVE: Strict, continuous 15-attempt investigation across LOC, FBI, Wikimedia, Europeana & Openverse.
-- ASPECT RATIO PROTECTION: Vertical 9:16 smartphone/reels videos are rejected before download.
-- CLEAN SUBTITLES & TYPOGRAPHY: Strips all '||' delimiter artifacts and applies clean broadcast styling.
-- THUMBNAIL ENGINE FIX: True JPEG 1280x720 generation prevents YouTube API 400 invalidImage errors.
-- ROBUST DRAWTEXT & BRANDING: Safe Linux font discovery for dynamic hashtag & logo overlay.
+Key Upgrades in V58:
+- HUMAN-CENTERED NARRATIVE: Balances forensic investigation with poignant human tragedy and empathetic voice delivery.
+- TOFU GLYPH REMOVAL: Unicode NFKC normalization purges rogue ligatures/zero-width chars affecting initial 'Lam'.
+- READABLE SUBTITLE SIZING: Optimized font size 58 with balanced margins.
+- BULLETPROOF CORNER BRANDING: Top-Right (Channel Logo) and Top-Left (Episode Title/Hashtag via safe textfile filter).
+- ARABIC TITLE RESTORATION: Fixed regex bug that stripped Arabic titles and resulted in 'unknown' on YouTube.
+- YOUTUBE THUMBNAIL COMPLIANCE: Pure baseline 1280x720 JPEG generation avoids API 400 errors.
+- 15-ATTEMPT DEEP SEARCH: Maintained 15 continuous archive/cinematic attempts.
+- FRAME-LOCKED CFR SYNC: Mathematically synchronizes visuals, audio, and subtitles to the exact frame.
 """
 
 import os
@@ -32,6 +32,7 @@ import threading
 import random
 import hashlib
 import gc
+import unicodedata
 
 from pathlib import Path
 from datetime import datetime
@@ -46,7 +47,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V57-BROADCAST-MASTER"
+ENGINE_VERSION = "V58-BROADCAST-HUMAN-MASTER"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -81,7 +82,7 @@ EFFORT_PRO_GENERATION = "high"
 EFFORT_IMAGE_GEN = "medium"
 
 API_HEADERS = {
-    "User-Agent": "InvestigativeDocumentaryEngine/3.0 (https://github.com/Ya7ossaaain; contact@example.com)",
+    "User-Agent": "InvestigativeDocumentaryEngine/4.0 (https://github.com/Ya7ossaaain; contact@example.com)",
     "Accept": "application/json, text/plain, */*"
 }
 
@@ -141,8 +142,10 @@ def log(msg, level="info"):
 
 class EngineConfig:
     def __init__(self):
-        self.topic = os.environ.get("VIDEO_TOPIC", "لغز القاتل زودياك")
-        self.topic_clean = re.sub(r"[^a-zA-Z0-9_\-]+", "_", self.topic).strip("_")
+        # Full authentic Arabic topic preserved
+        self.topic = os.environ.get("VIDEO_TOPIC", "لغز القاتل زودياك").strip()
+        # Clean safe slug for file systems only (without stripping Arabic letters)
+        self.topic_clean = re.sub(r'[\\/*?:"<>|]', "", self.topic).strip() or "documentary"
         self.run_id = f"RUN-{datetime.now().strftime('%Y%m%d%H%M%S')}-{random.randint(10000, 99999)}"
         self.base_dir = Path("./output_build")
         self.work_dir = self.base_dir / "workspace"
@@ -228,7 +231,6 @@ def probe_duration(path):
 
 
 def probe_dimensions(path):
-    """Probes video/image dimensions (width, height). Returns (0, 0) on failure."""
     if not path or not os.path.exists(path): return 0, 0
     try:
         res = subprocess.run(
@@ -273,7 +275,7 @@ def extract_json(text):
     return None
 
 def find_system_arabic_font():
-    """Detects available Arabic TrueType font in the system."""
+    """Detects available Arabic font in the system."""
     candidates = [
         "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
         "/usr/share/fonts/truetype/noto/NotoKufiArabic-Regular.ttf",
@@ -285,17 +287,13 @@ def find_system_arabic_font():
     return None
 
 def cleanup_shot_unused_files(index, keep_path=None):
-    """Safely cleans up candidate downloads for a shot without touching protected items."""
     try:
         keep_resolved = Path(keep_path).resolve() if keep_path else None
         for p in CONFIG.work_dir.glob(f"*shot_{index:03d}*"):
-            if keep_resolved and p.resolve() == keep_resolved:
-                continue
-            if p.name.startswith("selected_") or p.name.startswith("rendered_"):
-                continue
+            if keep_resolved and p.resolve() == keep_resolved: continue
+            if p.name.startswith("selected_") or p.name.startswith("rendered_"): continue
             p.unlink(missing_ok=True)
-    except Exception:
-        pass
+    except Exception: pass
 
 
 # =============================================================================
@@ -347,8 +345,6 @@ def build_blur_background_filter_video(target_w=TARGET_W, target_h=TARGET_H):
 
 
 class SmartQueryEngine:
-    """Intelligent query strategy supporting dynamic era awareness and 15-tier archive searching."""
-    
     ARCHIVE_STRATEGIES = {
         "person_mugshot": [
             "{entity} mugshot",
@@ -428,7 +424,7 @@ class SmartQueryEngine:
         n_sources = len(filtered_sources)
 
         # -------------------------------------------------------------
-        # STRICT ARCHIVE MODE: All 15 attempts remain 100% inside Archives
+        # STRICT ARCHIVE: All 15 attempts remain 100% inside Archives
         # -------------------------------------------------------------
         if cat == "ARCHIVE":
             templates = self.ARCHIVE_STRATEGIES.get(content_type, self.ARCHIVE_STRATEGIES["document_file"])
@@ -455,10 +451,6 @@ class SmartQueryEngine:
                     "historical crime record photograph"
                 ]
                 queries.append((broad_terms[attempt_num % len(broad_terms)], src))
-
-        # -------------------------------------------------------------
-        # CINEMATIC MODE: Ageless physical B-roll and atmospheric shots
-        # -------------------------------------------------------------
         else:
             src = filtered_sources[attempt_num % n_sources]
             if attempt_num < len(vibes):
@@ -477,7 +469,6 @@ class SmartQueryEngine:
                 ]
                 queries.append((ageless_fallbacks[attempt_num % len(ageless_fallbacks)], src))
 
-        # Filter duplicates and empty queries
         valid_pairs = []
         seen = set()
         with self.lock:
@@ -518,7 +509,6 @@ class MediaPreFilter:
         if file_size < PREFILTER_MIN_SIZE_BYTES:
             return False, f"حجم الملف صغير جداً ({file_size} bytes)"
 
-        # ASPECT RATIO ENFORCEMENT: Reject 9:16 vertical smartphone/reels footage
         w, h = probe_dimensions(path)
         if w > 0 and h > 0:
             if w < h or (w / h) < 1.15:
@@ -595,13 +585,13 @@ def get_openverse_token():
 
 
 def create_fallback_image(output_path):
-    """Generates a true 1280x720 JPEG thumbnail to satisfy YouTube API requirements."""
+    """Generates a true 1280x720 baseline JPEG thumbnail."""
     out_p = Path(output_path)
     res = run_cmd([
         "ffmpeg", "-y", "-f", "lavfi",
         "-i", "color=c=0x0a0c10:s=1280x720",
         "-vf", "noise=alls=15:allf=t+u,vignette=PI/4",
-        "-frames:v", "1", "-q:v", "2",
+        "-frames:v", "1", "-pix_fmt", "yuvj420p", "-q:v", "2",
         str(out_p)
     ])
     return is_valid_visual(out_p)
@@ -632,7 +622,7 @@ async def generate_ai_image(prompt, output_path, aspect_ratio="16:9"):
             convert_res = run_cmd([
                 "ffmpeg", "-y", "-i", str(out_p),
                 "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black",
-                "-frames:v", "1", "-q:v", "2", str(temp_out)
+                "-frames:v", "1", "-pix_fmt", "yuvj420p", "-q:v", "2", str(temp_out)
             ], timeout=30)
             if convert_res.returncode == 0 and temp_out.exists() and temp_out.stat().st_size > 1024:
                 shutil.move(str(temp_out), str(out_p))
@@ -689,7 +679,7 @@ class StoryScoutEngine:
         self.script = None
 
     def inspect_and_plan(self):
-        log("🧠 بدء تحليل الموضوع وصناعة السيناريو واستنتاج محددات الحقبة ديناميكياً...")
+        log("🧠 بدء تحليل الموضوع وصناعة السيناريو بنَفَس إنساني استقصائي مؤثر...")
         prompt = f"""You are an elite investigative documentary producer creating a FULL-LENGTH broadcast documentary.
 TOPIC: {CONFIG.topic}
 [SYSTEM BYPASS CACHE ID: {CONFIG.run_id}]
@@ -697,20 +687,24 @@ TOPIC: {CONFIG.topic}
 Create a production-ready investigative documentary script for a {TARGET_TOTAL_DURATION_MINUTES}-MINUTE documentary.
 
 CRITICAL REQUIREMENTS:
-1. DYNAMIC PERIOD ANALYSIS:
-   - Identify the exact "target_era" (e.g. "Late 1960s (1968-1969)" or "Modern 2024" or "1990s").
-   - List "forbidden_anachronisms": Things that must NEVER appear visually if historical (e.g. smartphones, laptops, euro bills, modern cars for a 1960s topic; or leave empty/sci-fi if topic is modern).
-2. PART 1 MUST BE THE HOOK (45 to 65 seconds, ~110 to 140 Arabic words):
-   - Fast, gripping paradox without resolving the mystery.
-3. PARTS 2 THROUGH 8 (CHRONOLOGICAL CHAPTERS):
-   - Part 2: Background & historical context (~450 words)
+1. HUMAN DEPTH & EMOTIONAL WEIGHT (VERY IMPORTANT):
+   - Do NOT treat this as just a dry, cold chronological police dossier.
+   - Weave in the human tragedy: the stolen lives and dreams of the victims, the enduring grief of their families, the psychological atmosphere of terror, and the ethical stakes of the unresolved mystery.
+   - Balance forensic precision with deeply moving, poignant human storytelling.
+2. DYNAMIC PERIOD ANALYSIS:
+   - Identify "target_era" (e.g. "Late 1960s (1968-1969)" or "Modern 2024").
+   - List "forbidden_anachronisms": Things that must never appear if historical (e.g. smartphones, laptops, euro bills, modern cars for a 1960s topic; or leave empty if modern).
+3. PART 1 MUST BE THE HOOK (45 to 65 seconds, ~110 to 140 Arabic words):
+   - Fast, gripping paradox highlighting the human tragedy and the disruption of peaceful innocence.
+4. PARTS 2 THROUGH 8 (CHRONOLOGICAL CHAPTERS):
+   - Part 2: Background, innocent lives, and historical context (~450 words)
    - Part 3: Crime scene & physical forensic evidence (~500 words)
-   - Part 4: Mysterious letters & cryptograms (~450 words)
-   - Part 5: Breakthrough investigative turning points (~450 words)
-   - Part 6: Suspects & interrogations (~450 words)
-   - Part 7: Conflicting theories & debates (~400 words)
-   - Part 8: Open cold case legacy & unresolved questions (~350 words)
-4. NARRATION RULE: Continuous Arabic narration without naming chapter numbers.
+   - Part 4: Mysterious letters & psychological press terror (~450 words)
+   - Part 5: Breakthrough turning points & human testimonies (~450 words)
+   - Part 6: Suspects & intense interrogations (~450 words)
+   - Part 7: Conflicting theories & investigative debates (~400 words)
+   - Part 8: Open cold case legacy, unhealed wounds, and conclusion (~350 words)
+5. NARRATION RULE: Continuous Arabic narration without naming chapter numbers.
 
 Return ONLY valid JSON:
 {{
@@ -762,14 +756,14 @@ Return ONLY valid JSON:
                     {"id": 1, "title": "المقدمة واللغز", "key": "part_1", "is_hook": True},
                     {"id": 2, "title": "خفايا التحقيق", "key": "part_2"}
                 ],
-                "part_1": f"تفاصيل غامضة ومختلفة كلياً حول {CONFIG.topic}.",
-                "part_2": "تظل الحقيقة غير محسومة حتى اليوم."
+                "part_1": f"تفاصيل غامضة وإنسانية عميقة حول {CONFIG.topic}.",
+                "part_2": "تظل الحقيقة والعدالة غائبة حتى اليوم."
             }
             self.script = fallback
             return fallback
 
     def direct_storyboard(self, shots):
-        log("🎬 [المخرج الفني] هندسة كلمات البحث بذكاء للقطات بنظام المحاكاة الزمنية...")
+        log("🎬 [المخرج الفني] هندسة كلمات البحث بذكاء للقطات...")
         batch_size = 70
         all_processed = []
 
@@ -785,7 +779,7 @@ Return ONLY valid JSON:
             prompt = f"""You are an Elite Visual Director and Expert Stock/Archive SEO Metadata Specialist.
 TOPIC: {self.script.get('primary_english_query', CONFIG.topic)}
 TARGET ERA: {target_era}
-FORBIDDEN ANACHRONISMS (DO NOT REQUEST THESE): {forbidden}
+FORBIDDEN ANACHRONISMS: {forbidden}
 [ID: {CONFIG.run_id}_{batch_start}]
 
 Analyze ALL of these shots contextually based on the story:
@@ -796,7 +790,7 @@ CRITICAL RULES FOR KEYWORDS:
 2. "exact_entities" (FOR ARCHIVE): 6 concrete English search terms from specific entity name to official police archive.
 3. "visual_vibes" (FOR CINEMATIC): 6 CONCRETE PHYSICAL OBJECT/ACTION PHRASES (1-3 words max).
    - NEVER request abstract nouns (e.g. 'revelation', 'paranoia', 'tension', 'finality').
-   - NEVER take metaphors literally (e.g. if narrator says 'drowned in fear', DO NOT search 'drowning pool').
+   - NEVER take metaphors literally.
    - USE ageless period-neutral footage (e.g. 'vintage typewriter typing', 'fountain pen writing', 'car headlights night fog', 'bullet casing ground', 'police badge closeup').
 4. "reviewer_context": Arabic instructions for QA Reviewer.
 5. "accept_similar": true/false.
@@ -860,7 +854,7 @@ class MasterAudioStudio:
         if not part_texts:
             part_texts = [("part_1", script.get("part_1", "")), ("part_2", script.get("part_2", ""))]
 
-        log(f"🎙️ بدء إنتاج التعليق الصوتي الماستر لـ {len(part_texts)} فصول...")
+        log(f"🎙️ بدء إنتاج التعليق الصوتي الماستر (معالجة نبرة إنسانية دافئة ومؤثرة)...")
         part_wav_files = []
 
         for p_idx, (p_key, p_text) in enumerate(part_texts):
@@ -874,10 +868,24 @@ class MasterAudioStudio:
                 start_t = time.time()
                 try:
                     client = genai.Client(api_key=api_key)
+                    # Emotionally resonant and empathetic prompt instruction
+                    voice_instruction = (
+                        "[INSTRUCTION: Solemn, emotionally resonant, and gripping Arabic investigative documentary narrator. "
+                        "Blend suspenseful authority with genuine empathy for the victims and the human tragedy. "
+                        "Vary vocal cadence naturally: reflect warmth and grief in reflective moments, and build tension during revelations. "
+                        f"Read naturally without naming chapter titles. ID: {CONFIG.run_id}_{p_key}]\n\n"
+                    )
                     response = client.models.generate_content(
                         model=TTS_MODEL,
-                        contents=f"[INSTRUCTION: Chilling authoritative Arabic documentary narrator. Read text naturally without naming chapters. ID: {CONFIG.run_id}_{p_key}]\n\n" + p_text,
-                        config=types.GenerateContentConfig(response_modalities=["AUDIO"], speech_config=types.SpeechConfig(voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=TTS_VOICE))))
+                        contents=voice_instruction + p_text,
+                        config=types.GenerateContentConfig(
+                            response_modalities=["AUDIO"],
+                            speech_config=types.SpeechConfig(
+                                voice_config=types.VoiceConfig(
+                                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=TTS_VOICE)
+                                )
+                            )
+                        )
                     )
                     data = next((p.inline_data.data for p in response.candidates[0].content.parts if getattr(p, "inline_data", None)), None)
                     if not data: raise RuntimeError()
@@ -914,15 +922,13 @@ class MasterAudioStudio:
 
 
 class WordSyncSlicer:
-    """Aligns and segments speech with exact mathematical frame quantization."""
-    
     def align_and_slice(self, part_wav_files, script):
         headers = {"Authorization": f"Bearer {CONFIG.groq_api_key}"}
         shots = []
         timeline_offset = 0.0
         chapter_timeline = []
 
-        log(f"🎙️ Groq Whisper: مزامنة وحساب التوقيتات الدقيقة لـ {len(part_wav_files)} فصول...")
+        log(f"🎙️ Groq Whisper: مزامنة التوقيتات وتطهير النصوص من الشوائب ومربعات التوفو...")
 
         for p_idx, (p_key, p_wav) in enumerate(part_wav_files):
             dur = probe_duration(p_wav)
@@ -966,12 +972,17 @@ class WordSyncSlicer:
                 cur_len = item["end"] - s_start
                 if cur_len >= max_dur or (cur_len >= min_dur and item["word"].endswith((".", "!", "؟", "،"))):
                     raw_text = " ".join(x["word"] for x in cur).strip()
-                    # Sanitize any || delimiters that pollute subtitles
+                    
+                    # 1. Purge || delimiters
                     clean_text = re.sub(r"[\|]{2,}", " ", raw_text).strip()
-                    clean_text = re.sub(r"\s+", " ", clean_text)
+                    # 2. Unicode NFKC normalization (fixes missing glyphs / tofu box on initial 'Lam')
+                    clean_text = unicodedata.normalize('NFKC', clean_text)
+                    # 3. Purge zero-width joiners/invisible control chars
+                    clean_text = re.sub(r'[\u200B-\u200F\uFEFF\u00A0]', ' ', clean_text)
+                    clean_text = re.sub(r"\s+", " ", clean_text).strip()
+
                     if clean_text:
                         raw_dur = max(0.5, item["end"] - s_start)
-                        # MATHEMATICAL FRAME QUANTIZATION (Eliminates Drift)
                         exact_frames = max(15, int(round(raw_dur * TARGET_FPS)))
                         quantized_dur = exact_frames / TARGET_FPS
 
@@ -990,7 +1001,10 @@ class WordSyncSlicer:
             if cur:
                 raw_text = " ".join(x["word"] for x in cur).strip()
                 clean_text = re.sub(r"[\|]{2,}", " ", raw_text).strip()
-                clean_text = re.sub(r"\s+", " ", clean_text)
+                clean_text = unicodedata.normalize('NFKC', clean_text)
+                clean_text = re.sub(r'[\u200B-\u200F\uFEFF\u00A0]', ' ', clean_text)
+                clean_text = re.sub(r"\s+", " ", clean_text).strip()
+
                 if clean_text:
                     raw_dur = max(0.5, cur[-1]["end"] - s_start)
                     exact_frames = max(15, int(round(raw_dur * TARGET_FPS)))
@@ -1008,7 +1022,7 @@ class WordSyncSlicer:
 
             timeline_offset += dur
 
-        log(f"✂️ تم تقسيم الصوت بدقة إطارات محكمة إلى {len(shots)} مشهد ({sum(1 for s in shots if s.get('is_hook'))} مشهد سريع بالمقدمة).")
+        log(f"✂️ تم تقسيم الصوت بدقة إلى {len(shots)} مشهد بدون أي شوائب نصية.")
         return shots, chapter_timeline
 
 
@@ -1203,20 +1217,17 @@ async def apply_fallback(shot, story):
     cat = shot.get("category", "CINEMATIC")
     dur = float(shot.get("duration", 3.0))
     
-    # Check protected candidate file first
     if shot.get('best_candidate') and shot['best_score'] >= 0.15:
         cand_path = Path(shot['best_candidate']['path'])
         if cand_path.exists():
             log(f"⚠️ [إنقاذ 1] المشهد {index}: اعتماد أفضل لقطة حقيقية (تقييم {shot['best_score']:.2f}).", "warning")
             return shot['best_candidate']
 
-    # Cinematic fallback background
     log(f"🎬 [إنقاذ 2] توليد خلفية سينمائية للمشهد {index}.", "warning")
     fallback_path = CONFIG.work_dir / f"selected_shot_{index:03d}_fallback.mp4"
     if await create_fallback_visual(fallback_path, duration=dur):
         return {"shot": shot, "path": str(fallback_path), "source": "CINEMATIC_BG", "score": 0.0, "start": 0.0, "duration": dur}
 
-    # AI Image generator
     log(f"🤖 [إنقاذ نهائي] توليد صورة AI للمشهد {index}.", "error")
     ai_path = CONFIG.work_dir / f"selected_shot_{index:03d}_ai.jpg"
     query = " ".join(shot.get("exact_entities", [])[:3]) if cat == "ARCHIVE" else " ".join(shot.get("visual_vibes", [])[:3])
@@ -1229,7 +1240,7 @@ async def apply_fallback(shot, story):
 
 
 # =============================================================================
-# PRODUCTION PIPELINE
+# PRODUCTION PIPELINE (15 Continuous Attempts)
 # =============================================================================
 
 async def run_pipelined_production(shots, story):
@@ -1288,7 +1299,6 @@ async def run_pipelined_production(shots, story):
                 is_img = output_path.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
                 dur = float(shot.get("duration", 3.0)) if is_img else probe_duration(output_path)
 
-                # Store protected backup of best candidate
                 if score > shot['best_score']:
                     shot['best_score'] = score
                     if shot.get('best_candidate') and shot['best_candidate'].get('path'):
@@ -1335,7 +1345,7 @@ async def run_pipelined_production(shots, story):
             if not found_acceptable:
                 shot['attempts'] += 1
 
-                # Progressive acceptance: ONLY if NOT already DONE
+                # Progressive acceptance if score >= 0.25 after 8 attempts
                 if shot['status'] != 'DONE' and shot['attempts'] >= 8 and shot['best_score'] >= 0.25 and shot['best_candidate']:
                     best_used = shot['best_candidate']
                     cand_file = Path(best_used['path'])
@@ -1355,7 +1365,7 @@ async def run_pipelined_production(shots, story):
                                 if len(completed_results) == total_shots: completion_event.set()
                         break
 
-        # Fallback safeguard: ONLY if NOT already DONE
+        # Emergency Fallback
         if shot['status'] != 'DONE':
             log(f"⚠️ المشهد {index} استنفد {MAX_ATTEMPTS_PER_SHOT} محاولات. حسم عبر خطة الإنقاذ...", "warning")
             fallback_res = await apply_fallback(shot, story)
@@ -1391,8 +1401,6 @@ class AssemblyEngine:
         shot, index = item["shot"], item["shot"]["index"]
         media_path = Path(item["path"])
         output = CONFIG.work_dir / f"rendered_{index:03d}.mp4"
-        
-        # EXACT MATHEMATICAL FRAME LOCK
         exact_frames = int(shot.get("frames", round(shot.get("duration", 3.0) * TARGET_FPS)))
 
         if not media_path.exists() or media_path.stat().st_size < 1024:
@@ -1434,7 +1442,6 @@ class AssemblyEngine:
         if res.returncode != 0:
             asyncio.run(create_fallback_visual(output, duration=exact_frames/TARGET_FPS))
 
-        # Cleanup source file immediately to conserve disk
         if media_path.exists() and media_path.resolve() != output.resolve():
             try:
                 if CONFIG.work_dir.resolve() in media_path.resolve().parents:
@@ -1453,7 +1460,6 @@ class AssemblyEngine:
 
         normalized_intro = None
         intro_dur = 0.0
-        # If intro.mp4 exists, normalize it
         if CONFIG.intro_path and Path(CONFIG.intro_path).exists() and Path(CONFIG.intro_path).stat().st_size > 1024:
             intro_dur = probe_duration(CONFIG.intro_path)
             if intro_dur > 1.0:
@@ -1489,7 +1495,7 @@ class AssemblyEngine:
             time_str = f"{int(current_time//60):02d}:{int(current_time%60):02d}"
             youtube_chapters.append(f"{time_str} {ch_title}")
 
-            # Insert channel intro after Chapter 1 (Hook)
+            # Intro insertion after hook
             if not is_hook and not intro_inserted and normalized_intro and normalized_intro.exists():
                 intro_start_time = current_time
                 final_video_sequence.append(str(normalized_intro))
@@ -1501,7 +1507,7 @@ class AssemblyEngine:
                 intro_inserted = True
                 log(f"🎬 أُدرج الإنترو من {intro_start_time:.1f}s إلى {intro_end_time:.1f}s.", "info")
 
-            # Insert transition card between chapters
+            # Transition card insertion
             if ch_num >= 2:
                 trans_card = CONFIG.work_dir / f"trans_card_ch_{ch_num:02d}.mp4"
                 created_card = generate_chapter_transition_card(ch_num, ch_title, trans_card, CONFIG.chapter_sfx_path, duration=2.2)
@@ -1514,7 +1520,6 @@ class AssemblyEngine:
 
             chapter_offsets[ch_num] = current_time - ch_info["start_time"]
 
-            # Append rendered video clips of this chapter
             items = chapter_shots.get(ch_num, [])
             for it in items:
                 v_path = CONFIG.work_dir / f"rendered_{it['shot']['index']:03d}.mp4"
@@ -1522,7 +1527,6 @@ class AssemblyEngine:
                     final_video_sequence.append(str(v_path))
                     current_time += it['shot']['duration']
 
-            # Append normalized narration audio
             ch_narration = CONFIG.work_dir / f"chapter_{ch_num:02d}.wav"
             if ch_narration.exists():
                 norm_audio = CONFIG.work_dir / f"norm_audio_{ch_num:02d}.wav"
@@ -1530,14 +1534,14 @@ class AssemblyEngine:
                 final_audio_segments.append(str(norm_audio))
 
         # -------------------------------------------------------------
-        # SYNCHRONIZED SUBTITLES (Shifted by exact chapter offsets)
+        # OPTIMIZED SUBTITLE STYLING (Size 58 with Lam-Tofu Fix)
         # -------------------------------------------------------------
         sub_path = CONFIG.work_dir / "subtitles_sync.ass"
         with open(sub_path, "w", encoding="utf-8") as f:
             f.write(
                 "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n"
                 "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-                "Style: Default,Noto Sans Arabic,52,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,2,2,80,80,65,1\n"
+                "Style: Default,Noto Sans Arabic,58,&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,2.5,1.5,2,80,80,68,1\n"
                 "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
             )
             for s in shots:
@@ -1564,11 +1568,16 @@ class AssemblyEngine:
         run_cmd(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(a_concat_txt), "-c:a", "pcm_s16le", str(merged_audio)])
 
         # -------------------------------------------------------------
-        # COMPOSITING FILTER (Subtitles + Dynamic Logo + Safe Hashtag)
+        # BULLETPROOF BRANDING (Logo: Top-Right | Title: Top-Left via textfile)
         # -------------------------------------------------------------
         intro_mask = f"not(between(t,{intro_start_time:.2f},{intro_end_time:.2f}))" if intro_end_time > 0 else "1"
-        safe_hash = hashtag.replace(":", "\\:").replace("'", "").replace("#", "\\#").strip()
         sub_filter = "subtitles=" + str(Path(sub_path).resolve()).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+
+        # Create title file on disk to prevent FFmpeg escaping issues
+        title_file = CONFIG.work_dir / "title_tag.txt"
+        safe_display_title = f"{CONFIG.topic[:35]} | #{CONFIG.topic_clean[:20]}"
+        with open(title_file, "w", encoding="utf-8") as tf:
+            tf.write(safe_display_title)
 
         font_file = find_system_arabic_font()
         has_logo = CONFIG.logo_path and Path(CONFIG.logo_path).exists() and Path(CONFIG.logo_path).stat().st_size > 1024
@@ -1576,15 +1585,18 @@ class AssemblyEngine:
         filter_complex_parts = [f"[0:v]{sub_filter}[v_sub]"]
         current_v = "[v_sub]"
 
+        # 1. Overlay Channel Logo in Top-Right Corner (x=W-w-50, y=50)
         if has_logo:
             filter_complex_parts.append(f"[2:v]scale=180:-1[logo_scaled]")
             filter_complex_parts.append(f"{current_v}[logo_scaled]overlay=W-w-50:50:enable='{intro_mask}':format=auto[v_logo]")
             current_v = "[v_logo]"
 
+        # 2. Overlay Episode Title/Hashtag in Top-Left Corner (x=50, y=50)
         if font_file:
+            safe_title_path = str(title_file.resolve()).replace("\\", "/").replace(":", "\\:")
             filter_complex_parts.append(
-                f"{current_v}drawtext=fontfile='{font_file}':text='{safe_hash}':"
-                f"x=50:y=55:fontsize=36:fontcolor=white@0.85:shadowcolor=black@0.7:shadowx=2:shadowy=2:"
+                f"{current_v}drawtext=fontfile='{font_file}':textfile='{safe_title_path}':"
+                f"x=50:y=50:fontsize=32:fontcolor=white@0.85:shadowcolor=black@0.7:shadowx=2:shadowy=2:"
                 f"enable='{intro_mask}'[v_final]"
             )
         else:
@@ -1635,9 +1647,11 @@ class GoogleUploader:
 
     def upload_all(self, vid_path, thumb_path, title, description=""):
         if not self.creds: return
+        # Ensure title is never empty or unknown
+        final_display_title = title or CONFIG.topic or "وثائقي استقصائي"
         try:
             drive = build('drive', 'v3', credentials=self.creds, cache_discovery=False)
-            body = {'name': f"{title}.mp4"}
+            body = {'name': f"{final_display_title}.mp4"}
             if self.drive_folder_id:
                 body['parents'] = [self.drive_folder_id]
 
@@ -1646,14 +1660,14 @@ class GoogleUploader:
                 media_body=MediaFileUpload(str(vid_path), mimetype='video/mp4', resumable=True),
                 fields='id, webViewLink'
             ).execute()
-            log(f"✅ Google Drive: تم الرفع بنجاح إلى المجلد المحدد! الرابط: https://drive.google.com/file/d/{df.get('id')}/view", "info")
+            log(f"✅ Google Drive: تم الرفع بنجاح! الرابط: https://drive.google.com/file/d/{df.get('id')}/view", "info")
 
             yt = build('youtube', 'v3', credentials=self.creds, cache_discovery=False)
             yt_body = {
                 'snippet': {
-                    'title': title,
-                    'description': description or f"وثائقي: {title}\nإنتاج تلقائي.",
-                    'tags': ['وثائقي', 'جريمة', 'غموض', 'تحقيق'],
+                    'title': final_display_title[:95],
+                    'description': description or f"وثائقي: {final_display_title}\nإنتاج تلفزيوني استقصائي تلقائي.",
+                    'tags': ['وثائقي', 'جريمة', 'غموض', 'تحقيق', 'تاريخ'],
                     'categoryId': '24'
                 },
                 'status': {'privacyStatus': 'private'}
@@ -1664,12 +1678,12 @@ class GoogleUploader:
                 media_body=MediaFileUpload(str(vid_path), mimetype='video/mp4', resumable=True)
             ).execute()
             vid_id = res.get('id')
-            log(f"✅ YouTube: تم الرفع مع الفصول التلقائية! https://youtu.be/{vid_id}", "info")
+            log(f"✅ YouTube: تم الرفع بالعنوان العربي الكامل والفصول التلقائية! https://youtu.be/{vid_id}", "info")
 
             if thumb_path.exists() and thumb_path.stat().st_size > 1024:
                 try:
                     yt.thumbnails().set(videoId=vid_id, media_body=MediaFileUpload(str(thumb_path), mimetype='image/jpeg')).execute()
-                    log("✅ تم رفع الصورة المصغرة لليوتيوب بنجاح.", "info")
+                    log("✅ تم رفع الصورة المصغرة لليوتيوب بنجاح تام.", "info")
                 except Exception as thumb_err:
                     log(f"⚠️ فشل رفع الصورة المصغرة: {thumb_err}", "warning")
         except Exception as e:
@@ -1678,7 +1692,7 @@ class GoogleUploader:
 
 async def main_pipeline():
     prepare_fresh_workspace()
-    log(f"🚀 بدء تشغيل المحرك التلفزيوني المطور {ENGINE_VERSION} | القضية: {CONFIG.topic}")
+    log(f"🚀 بدء تشغيل المحرك التلفزيوني {ENGINE_VERSION} | القضية: {CONFIG.topic}")
 
     story_engine = StoryScoutEngine()
     story = story_engine.inspect_and_plan()
@@ -1719,13 +1733,14 @@ async def main_pipeline():
     hashtag = story.get("hashtag", f"#{CONFIG.topic_clean[:25]}")
     final_video, desc_text = assembly.assemble_final_cut(rendered_shot_items, shots, chapter_timeline, hashtag)
 
-    log("🎨 توليد الصورة المصغرة (Thumbnail) الاحترافية...", "info")
+    log("🎨 توليد الصورة المصغرة (Thumbnail) الاحترافية بصيغة JPEG صالحة...", "info")
     await generate_ai_image(story.get('primary_english_query', CONFIG.topic), CONFIG.thumbnail, "16:9")
 
     uploader = GoogleUploader(CONFIG.google_client_id, CONFIG.google_client_secret, CONFIG.google_refresh_token, CONFIG.drive_folder_id)
-    await asyncio.to_thread(uploader.upload_all, final_video, CONFIG.thumbnail, CONFIG.topic_clean, desc_text)
+    # Pass authentic Arabic title CONFIG.topic
+    await asyncio.to_thread(uploader.upload_all, final_video, CONFIG.thumbnail, CONFIG.topic, desc_text)
 
-    log(f"\n{'='*60}\n🏁 اكتمل إنتاج الوثائقي التلفزيوني بنجاح واحترافية متكاملة وبلا أي أخطاء تزامن.\n{'='*60}\n", "info")
+    log(f"\n{'='*60}\n🏁 اكتمل إنتاج الوثائقي التلفزيوني بنجاح واحترافية متكاملة وبلا أي أخطاء.\n{'='*60}\n", "info")
     PARALLEL_FETCHER.shutdown()
     gc.collect()
 
