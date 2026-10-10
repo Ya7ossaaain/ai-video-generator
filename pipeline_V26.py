@@ -3,8 +3,8 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V60 - GENIUS ARCHIVE & COMPACT SOURCING MASTER
-(ZERO-RATELIMIT DDG, YT-DLP DENO ENGINE, RESILIENT YARN & SURGICAL QUERIES)
+V60.2 - ANCHORED ARCHIVE & CLOUD-RESILIENT MASTER
+(TOPIC-ANCHORED WIKIPEDIA, ARCHIVE.ORG TV ENGINE & BOT-PROOF SOURCING)
 """
 
 import os
@@ -37,7 +37,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V60-GENIUS-ARCHIVE-MASTER"
+ENGINE_VERSION = "V60.2-ANCHORED-ARCHIVE-MASTER"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -71,9 +71,10 @@ EFFORT_REVIEWER = "low"
 EFFORT_PRO_GENERATION = "high"
 EFFORT_IMAGE_GEN = "medium"
 
-API_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+# Wikipedia Policy Compliant User-Agent to avoid WAF blocks
+WIKI_HEADERS = {
+    "User-Agent": "InvestigativeDocEngine/6.0 (https://github.com/Ya7ossaaain; documentary-bot@cloud.org) python-requests/2.31",
+    "Accept": "application/json"
 }
 
 MEDIA_DOWNLOAD_HEADERS = {
@@ -81,19 +82,19 @@ MEDIA_DOWNLOAD_HEADERS = {
     "Accept": "*/*"
 }
 
-ARCHIVE_SOURCES = ["WIKIPEDIA", "DUCKDUCKGO", "FBI_ARCHIVE", "YOUTUBE", "YARN", "OPENVERSE", "LOC", "EUROPEANA"]
+ARCHIVE_SOURCES = ["WIKIPEDIA", "FBI_ARCHIVE", "OPENVERSE", "LOC", "EUROPEANA"]
 CINEMATIC_SOURCES = ["PEXELS", "PIXABAY"]
 
 SOURCE_AFFINITY = {
     "ARCHIVE": {
-        "person_mugshot": ["WIKIPEDIA", "DUCKDUCKGO", "FBI_ARCHIVE", "OPENVERSE", "LOC"],
-        "document_file": ["FBI_ARCHIVE", "WIKIPEDIA", "DUCKDUCKGO", "LOC", "EUROPEANA"],
-        "historic_interview": ["YOUTUBE", "FBI_ARCHIVE", "WIKIPEDIA"],
-        "movie_clip": ["YARN", "YOUTUBE"],
-        "location_photo": ["WIKIPEDIA", "DUCKDUCKGO", "OPENVERSE", "LOC"],
-        "historical_event": ["WIKIPEDIA", "FBI_ARCHIVE", "DUCKDUCKGO", "YOUTUBE"],
-        "newspaper_article": ["LOC", "WIKIPEDIA", "DUCKDUCKGO", "EUROPEANA"],
-        "default": ["WIKIPEDIA", "DUCKDUCKGO", "FBI_ARCHIVE", "OPENVERSE", "LOC"],
+        "person_mugshot": ["WIKIPEDIA", "FBI_ARCHIVE", "OPENVERSE", "LOC"],
+        "document_file": ["WIKIPEDIA", "FBI_ARCHIVE", "LOC", "EUROPEANA"],
+        "historic_interview": ["FBI_ARCHIVE", "WIKIPEDIA", "OPENVERSE"],
+        "movie_clip": ["FBI_ARCHIVE", "PEXELS"],
+        "location_photo": ["WIKIPEDIA", "OPENVERSE", "LOC"],
+        "historical_event": ["WIKIPEDIA", "FBI_ARCHIVE", "LOC", "OPENVERSE"],
+        "newspaper_article": ["LOC", "WIKIPEDIA", "EUROPEANA", "FBI_ARCHIVE"],
+        "default": ["WIKIPEDIA", "FBI_ARCHIVE", "OPENVERSE", "LOC"],
     },
     "CINEMATIC": {
         "nature_water": ["PEXELS", "PIXABAY"],
@@ -154,7 +155,6 @@ class EngineConfig:
         raw_keys = os.environ.get("GEMINI_API_KEYS") or os.environ.get("GEMINI_API_KEY") or ""
         self.gemini_keys = list(dict.fromkeys([k.strip() for k in re.split(r"[,;\n]+", raw_keys) if k.strip()]))
         self.groq_api_key = os.environ.get("GROQ_API_KEY", "")
-        self.youtube_api_key = os.environ.get("YOUTUBE_API_KEY", "")
         self.pexels_key = os.environ.get("PEXELS_API_KEY", "")
         self.pixabay_key = os.environ.get("PIXABAY_API_KEY", "")
         self.europeana_key = os.environ.get("EUROPEANA_API_KEY", "")
@@ -248,10 +248,9 @@ def is_valid_visual(path):
     return w > 0 and h > 0
 
 def clean_query(text):
-    """Surgical 2-3 word distillation to guarantee high hit-rates on archive APIs."""
     clean = re.sub(r"\s+", " ", re.sub(r"[^\x00-\x7F]+", " ", text or "")).strip()
     words = clean.split()
-    fluff = {"investigation", "classified", "memorandum", "official", "diagram", "report", "case", "file"}
+    fluff = {"investigation", "classified", "memorandum", "official", "diagram", "report", "case", "file", "flight"}
     distilled = [w for w in words if w.lower() not in fluff]
     if not distilled: distilled = words
     return " ".join(distilled[:3])[:60]
@@ -368,39 +367,42 @@ class SmartQueryEngine:
         content_type = shot.get("content_type", "default")
         filtered_sources = self.get_ordered_sources(shot)
 
-        topic_words = clean_query(CONFIG.topic).split()[:2]
-        topic_short = " ".join(topic_words)
-        if not entities: entities = [topic_short, f"{topic_short} police"]
-        if not vibes: vibes = ["police lights night", "dark street lamp"]
+        # Extract anchor topic name (e.g. "D.B. Cooper" or "Zodiac killer")
+        topic_words = clean_query(shot.get("topic_anchor", CONFIG.topic)).split()[:2]
+        topic_anchor = " ".join(topic_words)
+        if not topic_anchor: topic_anchor = "investigation"
 
         queries = []
         n_sources = len(filtered_sources)
         src = filtered_sources[attempt_num % n_sources]
 
         if cat == "ARCHIVE":
-            anchor = entities[attempt_num % len(entities)]
-            short_anchor = " ".join(anchor.split()[:2])
-
-            if content_type == "movie_clip":
-                dialogue_quotes = ["I have a bomb", "twenty dollar bills", "parachute", "hijack"]
-                queries.append((dialogue_quotes[attempt_num % len(dialogue_quotes)], "YARN"))
-                queries.append((short_anchor, "YOUTUBE"))
-            elif content_type == "historic_interview":
-                queries.append((f"{short_anchor} interview", "YOUTUBE"))
-                queries.append((short_anchor, "FBI_ARCHIVE"))
+            # MANDATORY TOPIC ANCHOR: Prepend topic_anchor to avoid generic 'bomb' or 'paper' searches
+            sub_entity = entities[attempt_num % len(entities)] if entities else "evidence"
+            sub_clean = " ".join(sub_entity.split()[:2])
+            
+            # Combine topic + specific detail (e.g. "D.B. Cooper bomb" or "D.B. Cooper sketch")
+            if topic_anchor.lower() in sub_clean.lower():
+                anchored_query = sub_clean
             else:
-                if attempt_num == 0:
-                    queries.append((short_anchor, src))
-                elif attempt_num <= 4:
-                    tags = ["photo", "file", "diagram", "press"]
-                    tag = tags[(attempt_num - 1) % len(tags)]
-                    queries.append((f"{short_anchor} {tag}", src))
-                elif attempt_num <= 9:
-                    queries.append((f"{short_anchor}", "WIKIPEDIA"))
-                    queries.append((f"{short_anchor}", "DUCKDUCKGO"))
-                else:
-                    queries.append((short_anchor, "OPENVERSE"))
-                    queries.append(("police investigation night", "PEXELS"))
+                anchored_query = f"{topic_anchor} {sub_clean}"
+
+            if attempt_num == 0:
+                queries.append((topic_anchor, "WIKIPEDIA"))
+                queries.append((anchored_query, src))
+            elif attempt_num <= 4:
+                queries.append((anchored_query, src))
+                queries.append((f"{topic_anchor} photo", "WIKIPEDIA"))
+            elif attempt_num <= 8:
+                queries.append((anchored_query, "FBI_ARCHIVE"))
+                queries.append((f"{topic_anchor} archive", "WIKIPEDIA"))
+            elif attempt_num <= 11:
+                queries.append((f"{topic_anchor} {content_type.replace('_',' ')}", "OPENVERSE"))
+                queries.append((anchored_query, "LOC"))
+            else:
+                # Late-stage safety net: Pexels noir B-roll to prevent black screens
+                queries.append((f"{topic_anchor}", "WIKIPEDIA"))
+                queries.append(("police investigation night", "PEXELS"))
         else:
             if attempt_num < len(vibes):
                 queries.append((vibes[attempt_num], src))
@@ -408,7 +410,8 @@ class SmartQueryEngine:
                 ageless_fallbacks = [
                     "police flashing lights reflection wet night",
                     "fountain pen writing paper macro",
-                    "ticking clock hands macro shadows"
+                    "ticking clock hands macro shadows",
+                    "dark foggy street lamp night"
                 ]
                 queries.append((ageless_fallbacks[attempt_num % len(ageless_fallbacks)], src))
 
@@ -424,7 +427,7 @@ class SmartQueryEngine:
                     seen.add(key)
 
         if not valid_pairs:
-            fallback_q = clean_query(entities[0] if cat == "ARCHIVE" else vibes[0]) or topic_short
+            fallback_q = topic_anchor
             valid_pairs.append((fallback_q, filtered_sources[attempt_num % n_sources]))
 
         return valid_pairs
@@ -487,15 +490,9 @@ class ParallelSourceFetcher:
         try:
             found_file, media_uid = None, None
             if source_name == "WIKIPEDIA":
-                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_wikipedia_image, query, image_path)
-            elif source_name == "DUCKDUCKGO":
-                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_duckduckgo_resilient, query, image_path)
+                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_wikipedia_anchored, query, image_path)
             elif source_name == "FBI_ARCHIVE":
                 found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_fbi_archive, query, Path(f"{base_path}_{source_name}"))
-            elif source_name == "YOUTUBE":
-                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_youtube_clip, query, video_path, shot)
-            elif source_name == "YARN":
-                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_yarn_clip, query, video_path)
             elif source_name == "PEXELS":
                 found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_pexels_video, query, video_path)
             elif source_name == "PIXABAY":
@@ -518,7 +515,7 @@ PARALLEL_FETCHER = ParallelSourceFetcher()
 
 
 # =============================================================================
-# ZERO-BLOCK RESILIENT MEDIA SOURCES
+# ANCHORED HISTORICAL MEDIA SOURCES
 # =============================================================================
 
 class MediaSources:
@@ -542,142 +539,68 @@ class MediaSources:
         return None, None
 
     @staticmethod
-    def fetch_duckduckgo_resilient(q, output_path):
-        """Bypasses Cloudflare 202 Ratelimit using real browser header session and Wikimedia fallback."""
+    def fetch_wikipedia_anchored(q, output_path):
+        """Dual Wikipedia Search: Searches Wikipedia Article Images directly + Wikimedia Commons."""
         q_clean = clean_query(q)
-        if not q_clean: return None, None
+        if not q_clean or len(q_clean) < 3: return None, None
+        
+        # 1. Direct Wikipedia Article PageImages (Highest relevance for actual case photos)
         try:
-            # First attempt: Direct DuckDuckGo JSON with Chrome headers
-            session = requests.Session()
-            session.headers.update({
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "Referer": "https://duckduckgo.com/",
-                "Accept": "*/*"
-            })
-            res_vqd = session.get(f"https://duckduckgo.com/?q={urllib.parse.quote(q_clean)}&t=h_", timeout=8)
-            vqd_match = re.search(r'vqd=([\d\-]+)', res_vqd.text) or re.search(r'vqd="([\d\-]+)"', res_vqd.text)
-            if vqd_match:
-                vqd = vqd_match.group(1)
-                img_url = f"https://duckduckgo.com/i.js?l=us-en&o=json&q={urllib.parse.quote(q_clean)}&vqd={vqd}&f=,,,&p=1"
-                img_res = session.get(img_url, timeout=10)
-                if img_res.status_code == 200:
-                    results = img_res.json().get("results", [])
-                    if results:
-                        return MediaSources._track_and_save(results, output_path, lambda x: (x.get("image"), f"ddg_{hash(x.get('image'))}"))
-        except Exception:
-            pass
-
-        # Intelligent Fallback: Instant Wikipedia article image pull (Zero Ratelimit)
-        try:
-            wiki_res = requests.get(
-                f"https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch={urllib.parse.quote(q_clean)}&gsrlimit=5&prop=pageimages&pithumbsize=1080&format=json",
-                headers=API_HEADERS, timeout=8
-            )
-            if wiki_res.status_code == 200:
-                pages = list(wiki_res.json().get("query", {}).get("pages", {}).values())
-                return MediaSources._track_and_save(pages, output_path, lambda p: (p.get("thumbnail", {}).get("source"), f"wiki_{p.get('pageid')}"))
-        except Exception:
-            pass
-        return None, None
-
-    @staticmethod
-    def fetch_youtube_clip(q, output_path, shot):
-        """Bypass bot-detection using Android/web client and Node/Deno challenge solving."""
-        q_clean = clean_query(q)
-        if not q_clean: return None, None
-        try:
-            dur = max(3.0, float(shot.get("duration", 3.0)))
-            target_query = f"{q_clean} interview"
-            
-            cmd_search = [
-                "yt-dlp",
-                "--extractor-args", "youtube:player_client=android,web",
-                "--no-check-certificates",
-                f"ytsearch1:{target_query}",
-                "--get-id",
-                "--no-playlist", "--quiet"
-            ]
-            res = subprocess.run(cmd_search, stdout=subprocess.PIPE, text=True, timeout=20)
-            lines = res.stdout.strip().split("\n")
-            if not lines or not lines[0]: return None, None
-            video_id = lines[0].strip()
-
-            with CONFIG.used_media_lock:
-                if f"yt_{video_id}" in CONFIG.used_media_ids: return None, None
-
-            video_url = f"https://www.youtube.com/watch?v={video_id}"
-            sec_spec = f"*00:20-00:{int(20+dur):02d}"
-            
-            cmd_dl = [
-                "yt-dlp",
-                "--extractor-args", "youtube:player_client=android,web",
-                "--no-check-certificates",
-                "--download-sections", sec_spec,
-                "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
-                "-o", str(output_path),
-                "--force-keyframes-at-cuts",
-                "--no-playlist", "--quiet",
-                video_url
-            ]
-            dl_res = subprocess.run(cmd_dl, timeout=40)
-            if dl_res.returncode == 0 and Path(output_path).exists() and Path(output_path).stat().st_size > 10240:
-                return str(output_path), f"yt_{video_id}"
-        except Exception:
-            pass
-        return None, None
-
-    @staticmethod
-    def fetch_yarn_clip(q, output_path):
-        """Short spoken dialogue quote matching for yarn.co."""
-        q_clean = clean_query(q)
-        if not q_clean: return None, None
-        try:
-            quote = " ".join(q_clean.split()[:2])
-            url = f"https://yarn.co/yarn-find?text={urllib.parse.quote(quote)}"
-            res = requests.get(url, headers=API_HEADERS, timeout=10)
+            wiki_api = "https://en.wikipedia.org/w/api.php"
+            params = {
+                "action": "query",
+                "generator": "search",
+                "gsrsearch": q_clean,
+                "gsrlimit": 6,
+                "prop": "pageimages",
+                "pithumbsize": 1080,
+                "format": "json"
+            }
+            res = requests.get(wiki_api, headers=WIKI_HEADERS, params=params, timeout=12)
             if res.status_code == 200:
-                clip_ids = re.findall(r'/yarn-clip/([a-zA-Z0-9\-]+)', res.text)
-                if clip_ids:
-                    random.shuffle(clip_ids)
-                    for cid in clip_ids[:2]:
-                        with CONFIG.used_media_lock:
-                            if f"yarn_{cid}" in CONFIG.used_media_ids: continue
-                        video_url = f"https://y.yarn.co/{cid}.mp4"
-                        r = requests.get(video_url, headers=MEDIA_DOWNLOAD_HEADERS, timeout=15)
-                        if r.status_code == 200 and len(r.content) > 10240:
-                            with open(output_path, "wb") as f:
-                                f.write(r.content)
-                            return str(output_path), f"yarn_{cid}"
+                pages = list(res.json().get("query", {}).get("pages", {}).values())
+                def extract_page_thumb(p):
+                    t = p.get("thumbnail", {}).get("source")
+                    return (t, f"wiki_page_{p.get('pageid')}") if t else (None, None)
+                saved, uid = MediaSources._track_and_save(pages, output_path, extract_page_thumb)
+                if saved: return saved, uid
         except Exception:
             pass
-        return None, None
 
-    @staticmethod
-    def fetch_wikipedia_image(q, o):
-        q_clean = clean_query(q)
-        if not q_clean: return None, None
+        # 2. Wikimedia Commons File Search
         try:
             commons_url = "https://commons.wikimedia.org/w/api.php"
-            params = {"action": "query", "generator": "search", "gsrsearch": f"{q_clean}", "gsrnamespace": 6, "gsrlimit": 15, "prop": "imageinfo", "iiprop": "url|mime|size", "format": "json"}
-            res = requests.get(commons_url, headers=API_HEADERS, params=params, timeout=15)
+            params = {
+                "action": "query",
+                "generator": "search",
+                "gsrsearch": q_clean,
+                "gsrlimit": 12,
+                "prop": "imageinfo",
+                "iiprop": "url|mime|size",
+                "format": "json"
+            }
+            res = requests.get(commons_url, headers=WIKI_HEADERS, params=params, timeout=12)
             if res.status_code == 200:
                 pages = list(res.json().get("query", {}).get("pages", {}).values())
                 def extract_commons(p):
                     info_list = p.get("imageinfo") or [{}]
-                    info = info_list[0] if info_list else {}
-                    url = info.get("url")
-                    mime = info.get("mime", "")
-                    if url and ("image" in mime or url.lower().endswith((".jpg", ".jpeg", ".png"))): return url, str(p.get("pageid"))
+                    url = info_list[0].get("url")
+                    mime = info_list[0].get("mime", "")
+                    if url and ("image" in mime or url.lower().endswith((".jpg", ".jpeg", ".png"))):
+                        return url, f"commons_{p.get('pageid')}"
                     return None, None
-                return MediaSources._track_and_save(pages, o, extract_commons)
-        except: pass
+                saved, uid = MediaSources._track_and_save(pages, output_path, extract_commons)
+                if saved: return saved, uid
+        except Exception:
+            pass
+
         return None, None
 
     @staticmethod
     def fetch_fbi_archive(q, base_path):
         try:
             q_clean = clean_query(q)
-            if not q_clean: return None, None
+            if not q_clean or len(q_clean) < 3: return None, None
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
             query = f'({q_clean}) AND (mediatype:image OR mediatype:movies)'
             res = requests.get("https://archive.org/advancedsearch.php", headers=headers, params={"q": query, "fl[]": "identifier", "rows": 15, "output": "json"}, timeout=18)
@@ -753,7 +676,7 @@ class MediaSources:
             q_clean = clean_query(q)
             if not q_clean: return None, None
             params = {"wskey": CONFIG.europeana_key, "query": q_clean, "media": "true", "thumbnail": "true", "rows": 15, "profile": "rich", "qf": "TYPE:IMAGE"}
-            res = requests.get("https://api.europeana.eu/record/v2/search.json", params=params, headers=API_HEADERS, timeout=15)
+            res = requests.get("https://api.europeana.eu/record/v2/search.json", params=params, headers=WIKI_HEADERS, timeout=15)
             if res.status_code == 200:
                 items = res.json().get("items", [])
                 def extract_europeana(item):
@@ -769,8 +692,8 @@ class MediaSources:
         if not token: return None, None
         try:
             q_clean = clean_query(q)
-            if not q_clean: return None, None
-            headers = {"Authorization": f"Bearer {token}", "User-Agent": API_HEADERS["User-Agent"]}
+            if not q_clean or len(q_clean) < 3: return None, None
+            headers = {"Authorization": f"Bearer {token}", "User-Agent": "InvestigativeDocEngine/6.0"}
             res = requests.get("https://api.openverse.org/v1/images/", headers=headers, params={"q": q_clean, "page_size": 15, "license_type": "all-cc"}, timeout=15)
             if res.status_code == 200:
                 results = res.json().get("results", [])
@@ -901,15 +824,15 @@ CRITICAL REQUIREMENTS:
    - Highlight the human tragedy: victims' lives, family grief, and ethical stakes.
    - Balance forensic precision with deeply moving storytelling.
 2. DYNAMIC PERIOD ANALYSIS:
-   - Identify "target_era" (e.g. "Late 1960s (1968-1969)" or "Modern 2024").
-   - List "forbidden_anachronisms": Things that must never appear if historical (e.g. smartphones, laptops, euro bills, modern cars for a 1960s topic; or leave empty if modern).
-   - List "featured_adaptations": Specific famous movies/series made about this topic.
+   - Identify "target_era" (e.g. "Late 1960s" or "1971 Pacific Northwest" or "Modern 2024").
+   - List "forbidden_anachronisms": Things that must never appear if historical (e.g. smartphones, laptops, euro bills, modern cars).
+   - List "primary_historical_anchor": The 1-2 word core English proper noun anchor for searches (e.g. "D.B. Cooper" or "Zodiac killer" or "Chernobyl").
 3. PART 1 MUST BE THE HOOK (45 to 65 seconds, ~110 to 140 Arabic words):
    - Fast, gripping paradox highlighting innocence disrupted by terror.
 4. PARTS 2 THROUGH 8 (CHRONOLOGICAL CHAPTERS):
    - Part 2: Background, innocent lives, and historical context (~450 words)
    - Part 3: Crime scene & physical forensic evidence (~500 words)
-   - Part 4: Mysterious letters & psychological press terror (~450 words)
+   - Part 4: Mysterious letters/hijacking & press terror (~450 words)
    - Part 5: Breakthrough turning points & human testimonies (~450 words)
    - Part 6: Suspects & intense interrogations (~450 words)
    - Part 7: Conflicting theories & investigative debates (~400 words)
@@ -921,8 +844,8 @@ Return ONLY valid JSON:
   "story_type": "investigation",
   "primary_english_query": "",
   "target_era": "",
+  "primary_historical_anchor": "",
   "forbidden_anachronisms": [],
-  "featured_adaptations": [],
   "hashtag": "#{CONFIG.topic_clean[:25]}",
   "chapters": [
     {{"id": 1, "title": "المقدمة واللغز المحير", "key": "part_1", "is_hook": true}},
@@ -946,7 +869,7 @@ Return ONLY valid JSON:
 
             log("\n" + "="*60)
             log(f"🕰️ الحقبة المستنتجة للقضية: {data.get('target_era', 'غير محددة')}")
-            log(f"🎬 الأعمال السينمائية المرتبطة بالقضية: {', '.join(data.get('featured_adaptations', []))}")
+            log(f"⚓ الكيان الأرشيفي المحوري: {data.get('primary_historical_anchor', CONFIG.topic)}")
             log(f"🚫 المحظورات الزمنية الصارمة: {', '.join(data.get('forbidden_anachronisms', []))}")
             for i in range(1, 9):
                 part_key = f"part_{i}"
@@ -962,8 +885,8 @@ Return ONLY valid JSON:
                 "story_type": "investigation",
                 "primary_english_query": clean_query(CONFIG.topic),
                 "target_era": "Historical Investigation",
+                "primary_historical_anchor": clean_query(CONFIG.topic),
                 "forbidden_anachronisms": ["smartphones", "laptops", "modern euro currency"],
-                "featured_adaptations": ["Zodiac (2007)"],
                 "hashtag": f"#{CONFIG.topic_clean[:25]}",
                 "chapters": [
                     {"id": 1, "title": "المقدمة واللغز", "key": "part_1", "is_hook": True},
@@ -1020,13 +943,13 @@ Return ONLY valid JSON:
         return None
 
     def direct_storyboard(self, shots):
-        log("🎬 [المخرج الفني] هندسة كلمات البحث (إلزام نسبة 90% للأرشيف والمصادر التاريخية)...")
+        log("🎬 [المخرج الفني] هندسة كلمات البحث بذكاء للقطات...")
         batch_size = 70
         all_processed = []
 
         target_era = self.script.get("target_era", "")
+        anchor = self.script.get("primary_historical_anchor", clean_query(CONFIG.topic))
         forbidden = ", ".join(self.script.get("forbidden_anachronisms", []))
-        adaptations = ", ".join(self.script.get("featured_adaptations", []))
 
         for batch_start in range(0, len(shots), batch_size):
             batch = shots[batch_start:batch_start + batch_size]
@@ -1036,34 +959,33 @@ Return ONLY valid JSON:
             shots_summary = "\n".join([f"[{s['index']}]: {s['text']}" for s in batch])
             prompt = f"""You are an Elite Visual Director and Expert Archival Video Researcher.
 TOPIC: {self.script.get('primary_english_query', CONFIG.topic)}
+PRIMARY TOPIC ANCHOR: {anchor}
 TARGET ERA: {target_era}
-FEATURED MOVIE ADAPTATIONS: {adaptations}
 FORBIDDEN MODERN ITEMS: {forbidden}
 [ID: {CONFIG.run_id}_{batch_start}]
 
 Analyze ALL of these shots contextually based on the story:
 {shots_summary}
 
-STRICT ARCHIVE DISTRIBUTION RULE (CRITICAL):
+STRICT ARCHIVE DISTRIBUTION RULE:
 - 85% to 90% of scenes MUST BE CATEGORIZED AS "ARCHIVE".
-  Use content_type: "document_file", "historic_interview", "movie_clip", "person_mugshot", "location_photo", "newspaper_article".
-- ONLY 10% to 15% maximum may be "CINEMATIC" (pure atmospheric B-roll like rain, fog, flashing police lights).
+  Use content_type: "document_file", "historic_interview", "person_mugshot", "location_photo", "newspaper_article".
+- ONLY 10% to 15% maximum may be "CINEMATIC".
 
-CRITICAL KEYWORD RULES (SURGICAL 2-3 WORDS):
-1. KEEP ALL ENTITIES SHORT (2-3 words max): Never make long sentence queries! (e.g. 'D.B. Cooper bomb', NOT 'FBI bomb diagram D.B. Cooper case investigation file').
-2. If "content_type" is "movie_clip": USE ONLY 2-word spoken dialogue quotes for Yarn (e.g. 'bomb briefcase', 'twenty dollars').
+CRITICAL RULES FOR SEARCH TERMS (SURGICAL 2-WORDS MAX):
+1. ALWAYS anchor queries to the case: Every entity MUST include or relate to '{anchor}' (e.g. '{anchor} sketch', '{anchor} note', '{anchor} FBI').
+2. NEVER output generic isolated words like 'bomb', 'paper', 'demand'. Always anchor: '{anchor} bomb', '{anchor} demand'.
 3. "exact_entities": 5 concise English search terms (2-3 words max each).
 4. "visual_vibes": 5 concise physical period-neutral phrases (e.g. 'police lights night', 'revolver cylinder spinning').
 5. "reviewer_context": Strict Arabic instructions ensuring authenticity.
 
 MANDATORY JSON FORMAT:
-Map string integer index directly to object:
 {{
   "{batch[0]['index']}": {{
     "category": "ARCHIVE",
     "content_type": "document_file",
-    "exact_entities": ["...", "..."],
-    "visual_vibes": ["...", "..."],
+    "exact_entities": ["{anchor} photo", "{anchor} FBI"],
+    "visual_vibes": ["police lights night", "typewriter paper"],
     "reviewer_context": "تأكد من مطابقة الوثيقة للتحقيق",
     "accept_similar": true
   }}
@@ -1073,24 +995,25 @@ Map string integer index directly to object:
                 board = extract_json(result.stdout.strip())
 
                 if batch_start == 0:
-                    log("\n" + "🎥 "*15 + "[قرارات المخرج الفني - سيادة الأرشيف]" + " 🎥"*15)
+                    log("\n" + "🎥 "*15 + "[قرارات المخرج الفني - سيادة الأرشيف الموثق]" + " 🎥"*15)
 
                 for shot in batch:
                     idx_int = shot["index"]
                     shot_data = self._find_shot_data(board, idx_int)
 
+                    shot["topic_anchor"] = anchor
                     if shot_data and isinstance(shot_data, dict):
                         cat_raw = str(shot_data.get("category", "")).strip().upper()
                         shot["category"] = "CINEMATIC" if ("CINEMAT" in cat_raw and "ARCHIV" not in cat_raw) else "ARCHIVE"
                         shot["content_type"] = shot_data.get("content_type", "document_file" if shot["category"] == "ARCHIVE" else "dark_moody")
-                        shot["exact_entities"] = [clean_query(e) for e in shot_data.get("exact_entities", []) if clean_query(e)] or [clean_query(CONFIG.topic), "police file"]
+                        shot["exact_entities"] = [clean_query(e) for e in shot_data.get("exact_entities", []) if clean_query(e)] or [anchor, f"{anchor} FBI"]
                         shot["visual_vibes"] = [clean_query(v) for v in shot_data.get("visual_vibes", []) if clean_query(v)] or ["police lights night", "dark street lamp"]
                         shot["reviewer_context"] = shot_data.get("reviewer_context", "تأكد من أصلية الوثيقة ومطابقتها للحقبة التاريخية.")
                         shot["accept_similar"] = shot_data.get("accept_similar", True)
                     else:
                         shot["category"] = "ARCHIVE"
                         shot["content_type"] = "document_file"
-                        shot["exact_entities"] = [clean_query(CONFIG.topic), "police archive"]
+                        shot["exact_entities"] = [anchor, f"{anchor} archive"]
                         shot["visual_vibes"] = ["police car night", "dark hallway shadows"]
                         shot["reviewer_context"] = "تأكد من ملاءمة اللقطة للنص الجنائي والحقبة التاريخية."
                         shot["accept_similar"] = True
@@ -1101,9 +1024,10 @@ Map string integer index directly to object:
             except Exception as e:
                 log(f"⚠️ خطأ في معالجة الدفعة: {e}", "warning")
                 for shot in batch:
+                    shot["topic_anchor"] = anchor
                     shot["category"] = "ARCHIVE"
                     shot["content_type"] = "document_file"
-                    shot["exact_entities"] = [clean_query(CONFIG.topic), "police archive"]
+                    shot["exact_entities"] = [anchor, f"{anchor} archive"]
                     shot["visual_vibes"] = ["police car night", "dark hallway shadows"]
                     shot["reviewer_context"] = "تأكد من ملاءمة اللقطة للنص الجنائي."
                     shot["accept_similar"] = True
@@ -1351,7 +1275,8 @@ async def apply_fallback(shot, story):
 
     log(f"🤖 [إنقاذ نهائي] توليد صورة AI للمشهد {index}.", "error")
     ai_path = CONFIG.work_dir / f"selected_shot_{index:03d}_ai.jpg"
-    query = " ".join(shot.get("exact_entities", [])[:3]) if cat == "ARCHIVE" else " ".join(shot.get("visual_vibes", [])[:3])
+    anchor = shot.get("topic_anchor", clean_query(CONFIG.topic))
+    query = f"{anchor} crime archive photograph vintage"
     if await generate_ai_image(query, ai_path):
         return {"shot": shot, "path": str(ai_path), "source": "AI_GENERATED", "score": 1.0, "start": 0.0, "duration": dur}
 
@@ -1377,7 +1302,7 @@ async def run_pipelined_production(shots, story):
         shot['best_score'] = -1.0
         shot['best_candidate'] = None
 
-    log(f"🚀 تشغيل خط الإنتاج الذكي (سيادة الأرشيف 90%) | إجمالي المشاهد: {total_shots} | أقصى محاولات: {MAX_ATTEMPTS_PER_SHOT}")
+    log(f"🚀 تشغيل خط الإنتاج الذكي (سيادة الأرشيف الموثق 90%) | إجمالي المشاهد: {total_shots} | أقصى محاولات: {MAX_ATTEMPTS_PER_SHOT}")
 
     async def process_shot(shot):
         index = shot["index"]
@@ -1614,6 +1539,7 @@ class AssemblyEngine:
             time_str = f"{int(current_time//60):02d}:{int(current_time%60):02d}"
             youtube_chapters.append(f"{time_str} {ch_title}")
 
+            # Intro insertion after hook
             if not is_hook and not intro_inserted and normalized_intro and normalized_intro.exists():
                 intro_start_time = current_time
                 final_video_sequence.append(str(normalized_intro))
@@ -1625,6 +1551,7 @@ class AssemblyEngine:
                 intro_inserted = True
                 log(f"🎬 أُدرج الإنترو من {intro_start_time:.1f}s إلى {intro_end_time:.1f}s.", "info")
 
+            # Transition card insertion
             if ch_num >= 2:
                 trans_card = CONFIG.work_dir / f"trans_card_ch_{ch_num:02d}.mp4"
                 created_card = generate_chapter_transition_card(ch_num, ch_title, trans_card, CONFIG.chapter_sfx_path, duration=2.2)
@@ -1695,11 +1622,13 @@ class AssemblyEngine:
         filter_complex_parts = [f"[0:v]{sub_filter}[v_sub]"]
         current_v = "[v_sub]"
 
+        # Logo: Top-Right
         if has_logo:
             filter_complex_parts.append(f"[2:v]scale=180:-1[logo_scaled]")
             filter_complex_parts.append(f"{current_v}[logo_scaled]overlay=W-w-50:50:enable='{intro_mask}':format=auto[v_logo]")
             current_v = "[v_logo]"
 
+        # Title / Hashtag: Top-Left via textfile
         if font_file:
             safe_title_path = str(title_file.resolve()).replace("\\", "/").replace(":", "\\:")
             filter_complex_parts.append(
