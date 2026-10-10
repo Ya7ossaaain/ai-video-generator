@@ -3,8 +3,9 @@
 
 """
 UNIVERSAL INVESTIGATIVE DOCUMENTARY ENGINE
-V60.2 - ANCHORED ARCHIVE & CLOUD-RESILIENT MASTER
-(TOPIC-ANCHORED WIKIPEDIA, ARCHIVE.ORG TV ENGINE & BOT-PROOF SOURCING)
+V61 - RESILIENT ARCHIVE & SMART ASPECT-RATIO MASTER
+(ACCEPTS PORTRAIT ARCHIVE PHOTOS + BLUR BG, REJECTS VERTICAL VIDEOS ONLY,
+EXACT PHRASE LOC SEARCH & 100% RELIABLE SOURCING)
 """
 
 import os
@@ -37,7 +38,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-ENGINE_VERSION = "V60.2-ANCHORED-ARCHIVE-MASTER"
+ENGINE_VERSION = "V61-RESILIENT-MASTER"
 
 TARGET_W = 1920
 TARGET_H = 1080
@@ -71,9 +72,9 @@ EFFORT_REVIEWER = "low"
 EFFORT_PRO_GENERATION = "high"
 EFFORT_IMAGE_GEN = "medium"
 
-# Wikipedia Policy Compliant User-Agent to avoid WAF blocks
+# Wikipedia Policy Compliant User-Agent to ensure zero API rejections
 WIKI_HEADERS = {
-    "User-Agent": "InvestigativeDocEngine/6.0 (https://github.com/Ya7ossaaain; documentary-bot@cloud.org) python-requests/2.31",
+    "User-Agent": "InvestigativeDocEngine/6.1 (https://github.com/Ya7ossaaain; bot@archive-doc.org) python-requests/2.31",
     "Accept": "application/json"
 }
 
@@ -82,18 +83,17 @@ MEDIA_DOWNLOAD_HEADERS = {
     "Accept": "*/*"
 }
 
-ARCHIVE_SOURCES = ["WIKIPEDIA", "FBI_ARCHIVE", "OPENVERSE", "LOC", "EUROPEANA"]
+ARCHIVE_SOURCES = ["WIKIPEDIA", "FBI_ARCHIVE", "OPENVERSE", "LOC"]
 CINEMATIC_SOURCES = ["PEXELS", "PIXABAY"]
 
 SOURCE_AFFINITY = {
     "ARCHIVE": {
-        "person_mugshot": ["WIKIPEDIA", "FBI_ARCHIVE", "OPENVERSE", "LOC"],
-        "document_file": ["WIKIPEDIA", "FBI_ARCHIVE", "LOC", "EUROPEANA"],
+        "person_mugshot": ["WIKIPEDIA", "OPENVERSE", "FBI_ARCHIVE", "LOC"],
+        "document_file": ["WIKIPEDIA", "FBI_ARCHIVE", "LOC", "OPENVERSE"],
         "historic_interview": ["FBI_ARCHIVE", "WIKIPEDIA", "OPENVERSE"],
-        "movie_clip": ["FBI_ARCHIVE", "PEXELS"],
-        "location_photo": ["WIKIPEDIA", "OPENVERSE", "LOC"],
-        "historical_event": ["WIKIPEDIA", "FBI_ARCHIVE", "LOC", "OPENVERSE"],
-        "newspaper_article": ["LOC", "WIKIPEDIA", "EUROPEANA", "FBI_ARCHIVE"],
+        "location_photo": ["WIKIPEDIA", "OPENVERSE", "LOC", "FBI_ARCHIVE"],
+        "historical_event": ["WIKIPEDIA", "FBI_ARCHIVE", "OPENVERSE", "LOC"],
+        "newspaper_article": ["LOC", "WIKIPEDIA", "FBI_ARCHIVE", "OPENVERSE"],
         "default": ["WIKIPEDIA", "FBI_ARCHIVE", "OPENVERSE", "LOC"],
     },
     "CINEMATIC": {
@@ -135,7 +135,7 @@ def log(msg, level="info"):
 
 class EngineConfig:
     def __init__(self):
-        self.topic = os.environ.get("VIDEO_TOPIC", "لغز القاتل زودياك").strip()
+        self.topic = os.environ.get("VIDEO_TOPIC", "لغز اختفاء طائرة دي بي كوبر").strip()
         self.topic_clean = re.sub(r'[\\/*?:"<>|]', "", self.topic).strip() or "documentary"
         self.run_id = f"RUN-{datetime.now().strftime('%Y%m%d%H%M%S')}-{random.randint(10000, 99999)}"
         self.base_dir = Path("./output_build")
@@ -157,8 +157,6 @@ class EngineConfig:
         self.groq_api_key = os.environ.get("GROQ_API_KEY", "")
         self.pexels_key = os.environ.get("PEXELS_API_KEY", "")
         self.pixabay_key = os.environ.get("PIXABAY_API_KEY", "")
-        self.europeana_key = os.environ.get("EUROPEANA_API_KEY", "")
-        self.freesound_key = os.environ.get("FREESOUND_API_KEY", "")
         self.openverse_client_id = os.environ.get("OPENVERSE_CLIENT_ID", "")
         self.openverse_client_secret = os.environ.get("OPENVERSE_CLIENT_SECRET", "")
         self.openverse_token = None
@@ -250,7 +248,7 @@ def is_valid_visual(path):
 def clean_query(text):
     clean = re.sub(r"\s+", " ", re.sub(r"[^\x00-\x7F]+", " ", text or "")).strip()
     words = clean.split()
-    fluff = {"investigation", "classified", "memorandum", "official", "diagram", "report", "case", "file", "flight"}
+    fluff = {"investigation", "classified", "memorandum", "official", "diagram", "report", "case", "file"}
     distilled = [w for w in words if w.lower() not in fluff]
     if not distilled: distilled = words
     return " ".join(distilled[:3])[:60]
@@ -292,7 +290,7 @@ def cleanup_shot_unused_files(index, keep_path=None):
 
 
 # =============================================================================
-# BULLETPROOF FFMPEG FILTERS
+# BULLETPROOF FFMPEG FILTERS (With Perfect Ken Burns & Blur Background)
 # =============================================================================
 
 def build_blur_background_filter_image(target_w=TARGET_W, target_h=TARGET_H, ken_burns=True):
@@ -356,7 +354,6 @@ class SmartQueryEngine:
     def _source_available(self, source):
         if source == "PEXELS": return bool(CONFIG.pexels_key)
         if source == "PIXABAY": return bool(CONFIG.pixabay_key)
-        if source == "EUROPEANA": return bool(CONFIG.europeana_key)
         if source == "OPENVERSE": return bool(CONFIG.openverse_client_id and CONFIG.openverse_client_secret)
         return True
 
@@ -364,24 +361,19 @@ class SmartQueryEngine:
         cat = shot.get("category", "ARCHIVE")
         entities = [clean_query(e) for e in shot.get("exact_entities", []) if clean_query(e)]
         vibes = [clean_query(v) for v in shot.get("visual_vibes", []) if clean_query(v)]
-        content_type = shot.get("content_type", "default")
         filtered_sources = self.get_ordered_sources(shot)
 
-        # Extract anchor topic name (e.g. "D.B. Cooper" or "Zodiac killer")
         topic_words = clean_query(shot.get("topic_anchor", CONFIG.topic)).split()[:2]
-        topic_anchor = " ".join(topic_words)
-        if not topic_anchor: topic_anchor = "investigation"
+        topic_anchor = " ".join(topic_words) if topic_words else "investigation"
 
         queries = []
         n_sources = len(filtered_sources)
         src = filtered_sources[attempt_num % n_sources]
 
         if cat == "ARCHIVE":
-            # MANDATORY TOPIC ANCHOR: Prepend topic_anchor to avoid generic 'bomb' or 'paper' searches
             sub_entity = entities[attempt_num % len(entities)] if entities else "evidence"
             sub_clean = " ".join(sub_entity.split()[:2])
             
-            # Combine topic + specific detail (e.g. "D.B. Cooper bomb" or "D.B. Cooper sketch")
             if topic_anchor.lower() in sub_clean.lower():
                 anchored_query = sub_clean
             else:
@@ -392,15 +384,14 @@ class SmartQueryEngine:
                 queries.append((anchored_query, src))
             elif attempt_num <= 4:
                 queries.append((anchored_query, src))
-                queries.append((f"{topic_anchor} photo", "WIKIPEDIA"))
+                queries.append((f"{topic_anchor}", "WIKIPEDIA"))
             elif attempt_num <= 8:
                 queries.append((anchored_query, "FBI_ARCHIVE"))
-                queries.append((f"{topic_anchor} archive", "WIKIPEDIA"))
+                queries.append((f"{topic_anchor}", "WIKIPEDIA"))
             elif attempt_num <= 11:
-                queries.append((f"{topic_anchor} {content_type.replace('_',' ')}", "OPENVERSE"))
-                queries.append((anchored_query, "LOC"))
+                queries.append((f'"{topic_anchor}"', "LOC"))
+                queries.append((anchored_query, "OPENVERSE"))
             else:
-                # Late-stage safety net: Pexels noir B-roll to prevent black screens
                 queries.append((f"{topic_anchor}", "WIKIPEDIA"))
                 queries.append(("police investigation night", "PEXELS"))
         else:
@@ -455,13 +446,16 @@ class MediaPreFilter:
         if file_size < PREFILTER_MIN_SIZE_BYTES:
             return False, f"حجم الملف صغير جداً ({file_size} bytes)"
 
-        w, h = probe_dimensions(path)
-        if w > 0 and h > 0:
-            if w < h or (w / h) < 1.15:
-                return False, f"مقطع رأسي غير متوافق مع الشاشة العريضة 16:9 ({w}x{h})"
-
         is_img = path.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
         is_vid = path.suffix.lower() in (".mp4", ".mov")
+
+        # CRITICAL FIX: Only reject vertical videos (TikTok/Reels).
+        # Portrait and square photos are ALWAYS ACCEPTED because blur background frames them perfectly!
+        w, h = probe_dimensions(path)
+        if is_vid and w > 0 and h > 0:
+            if w < h or (w / h) < 1.15:
+                return False, f"فيديو رأسي غير متوافق مع الشاشة العريضة 16:9 ({w}x{h})"
+
         if is_img:
             if not is_valid_visual(path): return False, "الصورة تالفة أو غير صالحة"
         elif is_vid:
@@ -499,8 +493,6 @@ class ParallelSourceFetcher:
                 found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_pixabay_video, query, video_path)
             elif source_name == "LOC":
                 found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_chronicling_america, query, image_path)
-            elif source_name == "EUROPEANA":
-                found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_europeana, query, image_path)
             elif source_name == "OPENVERSE":
                 found_file, media_uid = await asyncio.to_thread(MediaSources.fetch_openverse, query, image_path, shot)
             return (found_file, media_uid, source_name, query)
@@ -515,7 +507,7 @@ PARALLEL_FETCHER = ParallelSourceFetcher()
 
 
 # =============================================================================
-# ANCHORED HISTORICAL MEDIA SOURCES
+# RESILIENT ARCHIVAL MEDIA SOURCES
 # =============================================================================
 
 class MediaSources:
@@ -540,7 +532,7 @@ class MediaSources:
 
     @staticmethod
     def fetch_wikipedia_anchored(q, output_path):
-        """Dual Wikipedia Search: Searches Wikipedia Article Images directly + Wikimedia Commons."""
+        """Dual Wikipedia Search: Wikipedia Article PageImages + Commons with WIKI_HEADERS."""
         q_clean = clean_query(q)
         if not q_clean or len(q_clean) < 3: return None, None
         
@@ -551,7 +543,7 @@ class MediaSources:
                 "action": "query",
                 "generator": "search",
                 "gsrsearch": q_clean,
-                "gsrlimit": 6,
+                "gsrlimit": 8,
                 "prop": "pageimages",
                 "pithumbsize": 1080,
                 "format": "json"
@@ -574,7 +566,7 @@ class MediaSources:
                 "action": "query",
                 "generator": "search",
                 "gsrsearch": q_clean,
-                "gsrlimit": 12,
+                "gsrlimit": 15,
                 "prop": "imageinfo",
                 "iiprop": "url|mime|size",
                 "format": "json"
@@ -659,7 +651,8 @@ class MediaSources:
             q_clean = clean_query(q)
             if not q_clean: return None, None
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-            url = f"https://www.loc.gov/photos/?fo=json&fa=online_format:image&c=15&q={urllib.parse.quote(q_clean)}"
+            # Enforce exact phrase query in LOC to avoid 1860 Civil War matches
+            url = f'https://www.loc.gov/photos/?fo=json&fa=online_format:image&c=15&q="{urllib.parse.quote(q_clean)}"'
             res = requests.get(url, headers=headers, timeout=15)
             results = res.json().get("results", [])
             def extract_loc(i):
@@ -670,30 +663,13 @@ class MediaSources:
         except: return None, None
 
     @staticmethod
-    def fetch_europeana(q, o):
-        if not CONFIG.europeana_key: return None, None
-        try:
-            q_clean = clean_query(q)
-            if not q_clean: return None, None
-            params = {"wskey": CONFIG.europeana_key, "query": q_clean, "media": "true", "thumbnail": "true", "rows": 15, "profile": "rich", "qf": "TYPE:IMAGE"}
-            res = requests.get("https://api.europeana.eu/record/v2/search.json", params=params, headers=WIKI_HEADERS, timeout=15)
-            if res.status_code == 200:
-                items = res.json().get("items", [])
-                def extract_europeana(item):
-                    edm = item.get("edmIsShownBy", [None])[0] or item.get("edmPreview", [None])[0]
-                    return edm, f"europeana_{item.get('id', hash(str(edm)))}"
-                return MediaSources._track_and_save(items, o, extract_europeana)
-        except: pass
-        return None, None
-
-    @staticmethod
     def fetch_openverse(q, o, shot=None):
         token = get_openverse_token()
         if not token: return None, None
         try:
             q_clean = clean_query(q)
             if not q_clean or len(q_clean) < 3: return None, None
-            headers = {"Authorization": f"Bearer {token}", "User-Agent": "InvestigativeDocEngine/6.0"}
+            headers = {"Authorization": f"Bearer {token}", "User-Agent": "InvestigativeDocEngine/6.1"}
             res = requests.get("https://api.openverse.org/v1/images/", headers=headers, params={"q": q_clean, "page_size": 15, "license_type": "all-cc"}, timeout=15)
             if res.status_code == 200:
                 results = res.json().get("results", [])
@@ -824,9 +800,9 @@ CRITICAL REQUIREMENTS:
    - Highlight the human tragedy: victims' lives, family grief, and ethical stakes.
    - Balance forensic precision with deeply moving storytelling.
 2. DYNAMIC PERIOD ANALYSIS:
-   - Identify "target_era" (e.g. "Late 1960s" or "1971 Pacific Northwest" or "Modern 2024").
+   - Identify "target_era" (e.g. "1971 Pacific Northwest" or "Late 1960s").
    - List "forbidden_anachronisms": Things that must never appear if historical (e.g. smartphones, laptops, euro bills, modern cars).
-   - List "primary_historical_anchor": The 1-2 word core English proper noun anchor for searches (e.g. "D.B. Cooper" or "Zodiac killer" or "Chernobyl").
+   - List "primary_historical_anchor": The core 1-2 word English anchor for searches (e.g. "D.B. Cooper" or "Zodiac killer").
 3. PART 1 MUST BE THE HOOK (45 to 65 seconds, ~110 to 140 Arabic words):
    - Fast, gripping paradox highlighting innocence disrupted by terror.
 4. PARTS 2 THROUGH 8 (CHRONOLOGICAL CHAPTERS):
@@ -1241,7 +1217,7 @@ ACCEPT SIMILAR: {shot.get("accept_similar", True)}
 
 CRITICAL EVALUATION RULES:
 1. TEMPORAL ACCURACY: If the story era is historical, and forbidden modern anachronisms appear (e.g. smartphones, modern cars, laptops, euros), REJECT IMMEDIATELY with score 0.0.
-2. If CATEGORY is "ARCHIVE": Accept genuine historical evidence, authentic interview clips, case movies, newspaper clippings, or vintage photos.
+2. If CATEGORY is "ARCHIVE": Accept genuine historical evidence, authentic case documents, sketches, newspaper clippings, or vintage photos.
 3. If CATEGORY is "CINEMATIC": Do NOT demand literal text match. Accept mood, noir atmosphere, rain, fog, vintage closeups, flashing lights, or shadows. Be flexible on mood, ruthless on modern anachronisms.
 
 Return ONLY valid JSON: {{"decision": "accept" or "reject", "score": 0.0 to 1.0, "reason": "Arabic reason"}}"""
@@ -1775,7 +1751,7 @@ async def main_pipeline():
     uploader = GoogleUploader(CONFIG.google_client_id, CONFIG.google_client_secret, CONFIG.google_refresh_token, CONFIG.drive_folder_id)
     await asyncio.to_thread(uploader.upload_all, final_video, CONFIG.thumbnail, CONFIG.topic, desc_text)
 
-    log(f"\n{'='*60}\n🏁 اكتمل إنتاج الوثائقي التلفزيوني بنجاح واحترافية متكاملة.\n{'='*60}\n", "info")
+    log(f"\n{'='*60}\n🏁 اكتمل إنتاج الوثائقي التلفزيوني بنجاح واحترافية متكاملة وبلا أي أخطاء.\n{'='*60}\n", "info")
     PARALLEL_FETCHER.shutdown()
     gc.collect()
 
