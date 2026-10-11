@@ -1,0 +1,47 @@
+name: "🎬 Render Lemmino Cinematic Benchmark"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  render_test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: "📥 Checkout repository"
+        uses: actions/checkout@v4
+
+      - name: "📦 Setup Node.js 20"
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: "🎞️ Install FFmpeg"
+        uses: FedericoCarboni/setup-ffmpeg@v3
+
+      - name: "🎬 Install Remotion dependencies"
+        run: |
+          cd remotion-documentary
+          npm install
+          npx remotion browser ensure
+          cd ..
+
+      - name: "⚡ Render 50s Lemmino Scene via Remotion"
+        run: |
+          cd remotion-documentary
+          npx remotion render src/index.ts LemminoExperience ../raw_cinematic.mp4 --codec=h264
+          cd ..
+
+      - name: "🔊 Attach Procedural Cinematic Sub-Bass Audio"
+        run: |
+          ffmpeg -y -i raw_cinematic.mp4 \
+            -f lavfi -i "sine=frequency=45:duration=50,volume=2.8,afade=t=in:ss=0:d=3,afade=t=out:st=47:d=3" \
+            -c:v copy -c:a aac -shortest lemmino_showcase_master.mp4
+
+      - name: "📤 Upload Showcase Video Artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lemmino-Showcase-Video
+          path: lemmino_showcase_master.mp4
+          if-no-files-found: error
