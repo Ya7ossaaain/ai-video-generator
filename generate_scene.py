@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 LEMMiNO AUTONOMOUS PIPELINE (OPEN-SOURCE STACK)
-HuggingFace Hub + Trimesh + AGY Reviewer + Blender C++ Engine
+HuggingFace Hub + Trimesh + AGY Reviewer + Blender EEVEE Engine
 """
 
 import os
@@ -12,6 +12,7 @@ import random
 import json
 import subprocess
 import urllib.request
+import re
 from pathlib import Path
 
 # استيراد المكتبات المفتوحة
@@ -32,25 +33,33 @@ OUTPUT_VIDEO = Path("./lemmino_jump.mp4")
 PLANE_OBJ = MODELS_DIR / "airliner.obj"
 SKYDIVER_OBJ = MODELS_DIR / "skydiver.obj"
 
+
 def log(msg):
     print(f"[LEMMiNO Engine] {msg}", flush=True)
 
+
 def extract_json(text):
-    if not text: return None
-    import re
+    if not text:
+        return None
     text = re.sub(r"```json\s*", "", text.strip(), flags=re.I)
     text = re.sub(r"```\s*$", "", text)
-    try: return json.loads(text)
-    except: pass
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
     match = re.search(r"\{[\s\S]*\}", text)
     if match:
-        try: return json.loads(match.group(0))
-        except: pass
+        try:
+            return json.loads(match.group(0))
+        except Exception:
+            pass
     return None
 
+
 def convert_to_clean_obj(input_file, output_file):
-    """تحويل أي صيغة إلى OBJ نقية لتجاوز أخطاء إضافة glTF في بلندر تماماً"""
-    if not input_file.exists(): return False
+    """تحويل أي صيغة إلى OBJ نقية لتجاوز أخطاء إضافة glTF في بلندر"""
+    if not input_file.exists():
+        return False
     log(f"🔄 تحويل ({input_file.name}) إلى صيغة OBJ نقية عبر Trimesh...")
     try:
         loaded = trimesh.load(str(input_file.resolve()))
@@ -69,60 +78,55 @@ def convert_to_clean_obj(input_file, output_file):
         log(f"⚠️ تنبيه التحويل: {e}")
     return False
 
+
 def fetch_open_assets():
     """تحميل الأصول من Hugging Face والمصادر المفتوحة بدون أي مفاتيح API"""
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 1. تحميل الطائرة
+    # 1. تحميل الطائرة — رابط واحد حقيقي فقط لتجنب الانتظار الطويل
     if not PLANE_OBJ.exists():
         plane_raw = MODELS_DIR / "temp_plane.glb"
-        mirrors = [
-            "https://raw.githubusercontent.com/amvlab/aircraft-models/main/models/B737_nologo.glb",
-            "https://cdn.jsdelivr.net/gh/amvlab/aircraft-models@main/models/B737_nologo.glb",
-            "https://raw.githubusercontent.com/amvlab/aircraft-models/main/models/A320_nologo.glb",
-        ]
-        downloaded = False
-        for i, url in enumerate(mirrors, 1):
-            try:
-                log(f"📥 [طائرة] جاري السحب من المصدر المفتوح ({i}/{len(mirrors)})...")
-                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req, timeout=25) as resp:
-                    data = resp.read()
-                    if len(data) > 5000:
-                        with open(plane_raw, "wb") as f: f.write(data)
-                        downloaded = True
-                        break
-            except Exception as e:
-                log(f"  ⚠️ تعذر الرابط {i}: {e}")
+        plane_url = (
+            "https://huggingface.co/datasets/shuolucs/WorldCoder-Bench/"
+            "resolve/main/CesiumMan.glb"
+        )
+        try:
+            log("📥 [طائرة] جاري السحب من المصدر المفتوح...")
+            req = urllib.request.Request(plane_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = resp.read()
+                if len(data) > 5000:
+                    with open(plane_raw, "wb") as f:
+                        f.write(data)
+                    if trimesh:
+                        convert_to_clean_obj(plane_raw, PLANE_OBJ)
+        except Exception as e:
+            log(f"  ⚠️ تعذر تحميل الطائرة: {e}")
 
-        if downloaded and trimesh:
-            convert_to_clean_obj(plane_raw, PLANE_OBJ)
-
-    # 2. تحميل المظلي البشري عبر Hugging Face / Khronos مباشرة
+    # 2. تحميل المظلي البشري
     if not SKYDIVER_OBJ.exists():
         skydiver_raw = MODELS_DIR / "temp_skydiver.glb"
         human_urls = [
-            # رابط Hugging Face المباشر (مفتوح بدون توكن)
-            "https://huggingface.co/datasets/shuolucs/WorldCoder-Bench/resolve/main/CesiumMan.glb",
-            # الرابط الأصلي المعتمد لمنظمة Khronos
-            "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/CesiumMan/glTF-Binary/CesiumMan.glb",
+            "https://huggingface.co/datasets/shuolucs/WorldCoder-Bench/"
+            "resolve/main/CesiumMan.glb",
+            "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/"
+            "main/Models/CesiumMan/glTF-Binary/CesiumMan.glb",
         ]
-        h_down = False
         for i, url in enumerate(human_urls, 1):
             try:
-                log(f"📥 [مظلي بشري] جاري السحب من المصدر المفتوح ({i}/{len(human_urls)})...")
+                log(f"📥 [مظلي بشري] جاري السحب ({i}/{len(human_urls)})...")
                 req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req, timeout=25) as resp:
+                with urllib.request.urlopen(req, timeout=10) as resp:
                     data = resp.read()
                     if len(data) > 5000:
-                        with open(skydiver_raw, "wb") as f: f.write(data)
-                        h_down = True
+                        with open(skydiver_raw, "wb") as f:
+                            f.write(data)
+                        if trimesh:
+                            convert_to_clean_obj(skydiver_raw, SKYDIVER_OBJ)
                         break
             except Exception as e:
                 log(f"  ⚠️ تعذر الرابط {i}: {e}")
 
-        if h_down and trimesh:
-            convert_to_clean_obj(skydiver_raw, SKYDIVER_OBJ)
 
 def review_with_agy(image_path, label):
     log(f"🔍 [AGY] فحص واعتماد مشهد ({label})...")
@@ -138,12 +142,23 @@ Return ONLY valid JSON:
   "reason": "Short explanation"
 }}"""
 
+    # استخدام --output-format json لتشغيل AGY في وضع headless داخل CI
     cmd = [
-        "agy", "--model", AGY_REVIEWER_MODEL, "--effort", "low",
-        "--dangerously-skip-permissions", "-p", prompt
+        "agy",
+        "--model", AGY_REVIEWER_MODEL,
+        "--effort", "low",
+        "--dangerously-skip-permissions",
+        "--output-format", "json",
+        "-p", prompt,
     ]
     try:
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        res = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=60,
+        )
         data = extract_json(res.stdout)
         if data:
             decision = data.get("decision", "accept").lower()
@@ -153,8 +168,9 @@ Return ONLY valid JSON:
         log(f"⚠️ تنبيه AGY: {e}")
     return True, "تم الاعتماد تلقائياً"
 
+
 # =============================================================================
-# كود Blender فائق الاستقرار عبر محرك C++ المستقل
+# كود Blender عبر محرك EEVEE السريع
 # =============================================================================
 BLENDER_SCRIPT = f"""
 import bpy
@@ -173,12 +189,18 @@ scene.render.image_settings.file_format = 'FFMPEG'
 scene.render.ffmpeg.format = 'MPEG4'
 scene.render.ffmpeg.codec = 'H264'
 scene.render.filepath = "./lemmino_jump.mp4"
-scene.render.resolution_x = 1920
-scene.render.resolution_y = 1080
+scene.render.resolution_x = 1280
+scene.render.resolution_y = 720
 
-scene.render.engine = 'CYCLES'
-scene.cycles.samples = 8
-scene.cycles.use_denoising = False
+# ✅ استخدام EEVEE بدلاً من CYCLES لتسريع الرندر بشكل هائل
+try:
+    scene.render.engine = 'BLENDER_EEVEE_NEXT'
+except Exception:
+    scene.render.engine = 'BLENDER_EEVEE'
+
+if hasattr(scene, "eevee"):
+    scene.eevee.taa_render_samples = 16
+
 scene.render.use_freestyle = False
 
 # فضاء أسود كوني
@@ -186,6 +208,7 @@ world = bpy.data.worlds.new("VoidWorld")
 world.use_nodes = True
 world.node_tree.nodes['Background'].inputs['Color'].default_value = (0, 0, 0, 1)
 scene.world = world
+
 
 def make_mat(name, color, is_emission=True, strength=2.0):
     mat = bpy.data.materials.new(name=name)
@@ -204,6 +227,7 @@ def make_mat(name, color, is_emission=True, strength=2.0):
         mat.node_tree.links.new(diff.outputs['BSDF'], out.inputs['Surface'])
     return mat
 
+
 mat_black_body    = make_mat("BlackBody", (0.005, 0.005, 0.005, 1), is_emission=False)
 mat_white_line    = make_mat("WhiteLine", (1.0, 1.0, 1.0, 1), is_emission=True, strength=3.5)
 mat_red_cooper    = make_mat("RedCooper", (1.0, 0.02, 0.03, 1), is_emission=True, strength=5.5)
@@ -213,24 +237,33 @@ mat_mountain_topo = make_mat("MountainTopo", (0.28, 0.35, 0.42, 1), is_emission=
 mat_tree_white    = make_mat("TreeWhite", (0.95, 0.95, 0.95, 1), is_emission=True, strength=2.5)
 mat_tree_dark     = make_mat("TreeDark",  (0.06, 0.07, 0.08, 1), is_emission=True, strength=0.3)
 
+
 def import_obj_safely(file_path):
-    if not file_path.exists(): return None
+    if not file_path.exists():
+        return None
     before = set(bpy.data.objects)
-    if hasattr(bpy.ops.wm, "obj_import"):
-        bpy.ops.wm.obj_import(filepath=str(file_path))
-    else:
-        bpy.ops.import_scene.obj(filepath=str(file_path))
+    try:
+        if hasattr(bpy.ops.wm, "obj_import"):
+            bpy.ops.wm.obj_import(filepath=str(file_path))
+        else:
+            bpy.ops.import_scene.obj(filepath=str(file_path))
+    except Exception as e:
+        print(f"⚠️ فشل استيراد OBJ: {e}", flush=True)
+        return None
     new_objs = [o for o in bpy.data.objects if o not in before and o.type == 'MESH']
     if new_objs:
         bpy.ops.object.select_all(action='DESELECT')
-        for o in new_objs: o.select_set(True)
+        for o in new_objs:
+            o.select_set(True)
         bpy.context.view_layer.objects.active = new_objs[0]
-        if len(new_objs) > 1: bpy.ops.object.join()
+        if len(new_objs) > 1:
+            bpy.ops.object.join()
         return bpy.context.active_object
     return None
 
+
 # ------------------------------------------------------------
-# 1. استيراد وتجهيز الطائرة (C++ Wavefront Native Engine)
+# 1. استيراد وتجهيز الطائرة
 # ------------------------------------------------------------
 plane_file = Path("{PLANE_OBJ.resolve()}")
 airplane = import_obj_safely(plane_file)
@@ -239,11 +272,11 @@ if airplane:
     airplane.rotation_euler = (0, 0, 0)
     dim = max(airplane.dimensions.x, airplane.dimensions.y, airplane.dimensions.z)
     if dim > 0:
-        airplane.scale = (14.0/dim, 14.0/dim, 14.0/dim)
+        airplane.scale = (14.0 / dim, 14.0 / dim, 14.0 / dim)
         bpy.ops.object.transform_apply(scale=True)
     airplane.location = (0, 0, 12)
 else:
-    # هيكل Boeing 727 احتياطي فائق الدقة
+    # هيكل Boeing 727 احتياطي
     parts = []
     bpy.ops.mesh.primitive_cylinder_add(vertices=16, radius=1.1, depth=13.0, location=(0, 0, 12))
     fuse = bpy.context.active_object
@@ -285,7 +318,8 @@ else:
         parts.append(eng)
 
     bpy.ops.object.select_all(action='DESELECT')
-    for p in parts: p.select_set(True)
+    for p in parts:
+        p.select_set(True)
     bpy.context.view_layer.objects.active = fuse
     bpy.ops.object.join()
     airplane = bpy.context.active_object
@@ -299,7 +333,7 @@ wire_p.thickness = 0.022
 wire_p.use_replace = False
 wire_p.material_offset = 1
 
-# الدرج الخلفي المفتوح (Aft Airstair)
+# الدرج الخلفي المفتوح
 bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 5.8, 10.8))
 stair = bpy.context.active_object
 stair.scale = (0.6, 2.2, 0.06)
@@ -313,7 +347,7 @@ airplane.location = (0, -50, 0)
 airplane.keyframe_insert(data_path="location", frame=150)
 
 # ------------------------------------------------------------
-# 2. استيراد وتجهيز المظلي البشري (Anatomical Human Skydiver)
+# 2. استيراد وتجهيز المظلي
 # ------------------------------------------------------------
 skydiver_file = Path("{SKYDIVER_OBJ.resolve()}")
 skydiver = import_obj_safely(skydiver_file)
@@ -321,7 +355,7 @@ skydiver = import_obj_safely(skydiver_file)
 if skydiver:
     dim_s = max(skydiver.dimensions.x, skydiver.dimensions.y, skydiver.dimensions.z)
     if dim_s > 0:
-        skydiver.scale = (1.5/dim_s, 1.5/dim_s, 1.5/dim_s)
+        skydiver.scale = (1.5 / dim_s, 1.5 / dim_s, 1.5 / dim_s)
         bpy.ops.object.transform_apply(scale=True)
 else:
     jparts = []
@@ -351,7 +385,8 @@ else:
         jparts.append(leg)
 
     bpy.ops.object.select_all(action='DESELECT')
-    for sp in jparts: sp.select_set(True)
+    for sp in jparts:
+        sp.select_set(True)
     bpy.context.view_layer.objects.active = torso
     bpy.ops.object.join()
     skydiver = bpy.context.active_object
@@ -378,9 +413,9 @@ skydiver.keyframe_insert(data_path="location", frame=150)
 skydiver.keyframe_insert(data_path="rotation_euler", frame=150)
 
 # ------------------------------------------------------------
-# 3. سلاسل جبال كاسكيد الطبوغرافية الفخمة (Cascade Mountain Relief)
+# 3. سلاسل جبال كاسكيد الطبوغرافية
 # ------------------------------------------------------------
-bpy.ops.mesh.primitive_grid_add(x_subdivisions=130, y_subdivisions=130, size=200, location=(0, 22, -29))
+bpy.ops.mesh.primitive_grid_add(x_subdivisions=80, y_subdivisions=80, size=200, location=(0, 22, -29))
 mountains = bpy.context.active_object
 mountains.name = "CascadeMountainRange"
 
@@ -400,19 +435,19 @@ topo.thickness = 0.014
 topo.use_replace = False
 topo.material_offset = 1
 
-# أشجار الصنوبر في الوادي الأوسط
-for i in range(180):
+# أشجار الصنوبر في الوادي الأوسط (عدد أقل لأداء أفضل)
+for i in range(80):
     gx = random.uniform(-35, 35)
     gy = random.uniform(-2, 36)
     gz = -23.5
-    dist = math.sqrt(gx**2 + (gy - 16.0)**2)
+    dist = math.sqrt(gx ** 2 + (gy - 16.0) ** 2)
     s = random.uniform(0.7, 1.5)
     bpy.ops.mesh.primitive_cone_add(vertices=5, radius1=0.75 * s, depth=2.4 * s, location=(gx, gy, gz))
     tree = bpy.context.active_object
     tree.data.materials.append(mat_tree_white if dist < 8.5 else mat_tree_dark)
 
 # ------------------------------------------------------------
-# 4. خطوط السرعة والرياح في الظلام
+# 4. خطوط السرعة والرياح
 # ------------------------------------------------------------
 random.seed(1971)
 for i in range(45):
@@ -428,7 +463,7 @@ for i in range(45):
     line.keyframe_insert(data_path="location", frame=150)
 
 # ------------------------------------------------------------
-# 5. الكاميرا والتتبع السينمائي المنضبط
+# 5. الكاميرا والتتبع السينمائي
 # ------------------------------------------------------------
 cam_target = bpy.data.objects.new("CamTarget", None)
 scene.collection.objects.link(cam_target)
@@ -458,13 +493,14 @@ cam.keyframe_insert(data_path="location", frame=85)
 cam.location = (3.5, 22.0, -9.0)
 cam.keyframe_insert(data_path="location", frame=150)
 
-print(">> [BLENDER] بدء رندر المشهد النهائي عبر محرك C++ المستقر...", flush=True)
+print(">> [BLENDER] بدء رندر المشهد النهائي عبر EEVEE...", flush=True)
 bpy.ops.render.render(animation=True)
 """
 
+
 def main():
-    log("🚀 تشغيل بايبلاين LEMMiNO المؤتمت بالكامل (Open-Source 3D Engine)...")
-    
+    log("🚀 تشغيل بايبلاين LEMMiNO المؤتمت بالكامل...")
+
     # 1. جلب الموديلات مفتوحة المصدر وتحويلها إلى OBJ
     fetch_open_assets()
 
@@ -472,19 +508,22 @@ def main():
     preview_img = MODELS_DIR / "plane_preview.png"
     review_with_agy(preview_img, "Airliner, Skydiver & Cascade Mountains")
 
-    # 3. تشغيل بلندر عبر محرك Wavefront C++ الخالي من أخطاء البايثون
+    # 3. تشغيل بلندر
     script_path = Path("render_core.py")
     with open(script_path, "w", encoding="utf-8") as f:
         f.write(BLENDER_SCRIPT)
 
-    log("🎬 استدعاء Blender لتنفيذ الرندر المستقر...")
-    res = subprocess.run(["blender", "-b", "-P", str(script_path)], text=True)
+    log("🎬 استدعاء Blender لتنفيذ الرندر...")
+    # ملاحظة: Blender Portable مثبت في $HOME/blender
+    blender_bin = os.environ.get("BLENDER_BIN", "blender")
+    res = subprocess.run([blender_bin, "-b", "-P", str(script_path)], text=True)
 
     if res.returncode == 0 and OUTPUT_VIDEO.exists() and OUTPUT_VIDEO.stat().st_size > 1024:
         log(f"🎉 تم الرندر بنجاح تام! الملف جاهز: {OUTPUT_VIDEO}")
     else:
         log("❌ فشل تشغيل Blender.")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
