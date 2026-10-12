@@ -1,0 +1,29 @@
+name: Render LEMMiNO Animation
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Install Blender & Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y blender
+
+    - name: Execute CLI Headless Render
+      run: |
+        blender -b -P generate_scene.py
+
+    - name: Upload Video Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: lemmino-video
+        path: lemmino_jump.mp4
