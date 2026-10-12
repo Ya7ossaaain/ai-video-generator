@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LEMMINO INVESTIGATIVE BENCHMARK ENGINE
-Fully Integrated: Antigravity (agy CLI) + Gemini 3.8 Flash TTS (Charon) + Blender Workbench + FFmpeg
+LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28.4 - PRODUCTION READY)
+Antigravity (agy CLI) + Gemini 3.8 Flash TTS + Pure Blender Headless + Forensic UI + FFmpeg
 """
 
 import os
@@ -17,7 +17,6 @@ import re
 from pathlib import Path
 import requests
 
-# إجبار بايثون على إظهار الطباعة فوراً في سيرفرات GitHub
 sys.stdout.reconfigure(line_buffering=True)
 
 from google import genai
@@ -39,7 +38,6 @@ GEMINI_KEY = GEMINI_KEYS[0] if GEMINI_KEYS else ""
 SKETCHFAB_KEY = os.environ.get("SKETCHFAB_API_KEY", "").strip()
 OPENTOPO_KEY = os.environ.get("OPENTOPOGRAPHY_API_KEY", "").strip()
 
-# النماذج كما في كودك V28 تماماً
 AGY_SCRIPT_MODEL = "gemini-3.1-pro"
 EFFORT_PRO_GENERATION = "high"
 TTS_MODEL = "gemini-3.8-flash-tts"
@@ -56,7 +54,7 @@ def run_cmd(cmd, desc=""):
     log_print(f"🎬 [تنفيذ]: {desc}...")
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if res.returncode != 0:
-        log_print(f"⚠️ تنبيه ({desc}): {res.stderr[-300:]}")
+        log_print(f"⚠️ تنبيه ({desc}): {res.stderr[-400:]}")
     return res
 
 def extract_json(text):
@@ -72,7 +70,7 @@ def extract_json(text):
     return None
 
 # =============================================================================
-# 2. استدعاء أداة AGY الأصلية كما في كودك V28
+# 2. استدعاء AGY عبر جلسة المصادقة السحابية
 # =============================================================================
 def agy_generate_script():
     log_print("🧠 [AGY] استدعاء أداة AGY لصياغة السيناريو الاستقصائي...")
@@ -99,23 +97,26 @@ Return ONLY valid JSON:
     "point4": "Refused to confirm or deny identity"
   }
 }"""
-    # البحث عن agy في الـ PATH أو المسار الافتراضي لـ Antigravity
     agy_bin = shutil.which("agy") or os.path.expanduser("~/.local/bin/agy")
     
+    # تمرير بيئة المصادقة السحابية لـ AGY
+    env_vars = os.environ.copy()
+    env_vars["SSH_CONNECTION"] = "127.0.0.1 0 127.0.0.1 22"
+    env_vars["AGY_OAUTH_TOKEN"] = os.environ.get("AGY_CREDENTIALS", "")
+
     cmd = [agy_bin, "--model", AGY_SCRIPT_MODEL, "--effort", EFFORT_PRO_GENERATION,
            "--dangerously-skip-permissions", "-p", prompt]
     try:
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120, env=env_vars)
         data = extract_json(res.stdout)
         if data and "narration" in data:
             log_print("✅ [AGY] تم استلام السيناريو بنجاح عبر Antigravity CLI.")
             return data
         else:
-            log_print(f"⚠️ استجابة AGY غير مكتملة، استخدام البيانات المرجعية: {res.stderr[:200]}")
+            log_print(f"⚠️ تفاصيل AGY: {res.stderr[:250]}")
     except Exception as e:
         log_print(f"⚠️ خطأ أثناء تشغيل agy ({e})")
 
-    # بيانات احتياطية تضمن استمرار الرندر في حال فشل أي أمر
     return {
         "narration": "في الرابع والعشرين من نوفمبر عام ألف وتسعمائة وواحد وسبعين، استقل دان كوبر طائرة البوينغ سبعمائة وسبعة وعشرين من بورتلاند. بعد تهديده بوجود قنبلة، طالب بمائتي ألف دولار وأربع مظلات. في سماء واشنطن الممطرة، فُتح الدرج الخلفي وقفز كوبر في ظلام دامس نحو المجهول، تاركاً وراءه اللغز الأكبر في تاريخ الطيران الأمريكي.",
         "scene3_evidence": {
@@ -138,7 +139,7 @@ Return ONLY valid JSON:
 STORY_DATA = agy_generate_script()
 
 # =============================================================================
-# 3. توليد الصوت عبر Gemini 3.8 Flash TTS بصوت Charon (مطابق لـ V28)
+# 3. GEMINI 3.8 FLASH TTS
 # =============================================================================
 master_narration_wav = SHUTTLE_DIR / "narration_master.wav"
 has_voice = False
@@ -230,26 +231,33 @@ plane_model = fetch_sketchfab_model("boeing 727", models_dir, "plane")
 terrain_dem = fetch_opentopography_dem(models_dir)
 
 # =============================================================================
-# 5. تصيير بلندر بمحرك WORKBENCH فائق السرعة
+# 5. تصيير بلندر بمحرك التظليل السحابي المتوافق 100%
 # =============================================================================
-raw_shot1_prefix = (SHUTTLE_DIR / "shot1_render_output").resolve()
-raw_shot2_prefix = (SHUTTLE_DIR / "shot2_render_output").resolve()
+raw_shot1_prefix = (SHUTTLE_DIR / "shot1_output").resolve()
+raw_shot2_prefix = (SHUTTLE_DIR / "shot2_output").resolve()
 
 shot1_py = SHUTTLE_DIR / "shot1.py"
 shot1_py.write_text(f"""
 import bpy, math
-bpy.ops.wm.read_factory_settings(use_empty=True)
+
+# تفريغ آمن للمشهد دون كسر الإعدادات
+for obj in list(bpy.data.objects):
+    bpy.data.objects.remove(obj, do_unlink=True)
+
 scene = bpy.context.scene
 scene.render.fps = {FPS}
 scene.frame_start, scene.frame_end = 1, {FPS * 30}
 
-scene.render.engine = 'BLENDER_WORKBENCH'
-scene.display.shading.light = 'FLAT'
-scene.display.shading.color_type = 'SINGLE'
-scene.display.shading.single_color = (0.85, 0.02, 0.05)
-
-world = bpy.data.worlds.new("Void")
-scene.world = world
+# لون أحمر ساطع متوافق مع كافة محركات بلندر
+mat_red = bpy.data.materials.new("LemminoRed")
+mat_red.diffuse_color = (0.85, 0.02, 0.05, 1.0)
+mat_red.use_nodes = True
+if mat_red.node_tree:
+    mat_red.node_tree.nodes.clear()
+    emis = mat_red.node_tree.nodes.new('ShaderNodeEmission')
+    emis.inputs['Color'].default_value = (0.85, 0.02, 0.05, 1.0)
+    out = mat_red.node_tree.nodes.new('ShaderNodeOutputMaterial')
+    mat_red.node_tree.links.new(emis.outputs['Emission'], out.inputs['Surface'])
 
 jumper_path = {repr(jumper_model)}
 if jumper_path and bpy.path.exists(jumper_path):
@@ -258,11 +266,15 @@ if jumper_path and bpy.path.exists(jumper_path):
     jumper.location = (0, 0, 5)
     max_d = max(jumper.dimensions) if max(jumper.dimensions) > 0 else 1.0
     jumper.scale = [1.8 / max_d] * 3
+    jumper.data.materials.clear()
+    jumper.data.materials.append(mat_red)
 else:
     bpy.ops.mesh.primitive_cylinder_add(radius=0.4, depth=1.6, location=(0, 0, 5))
     jumper = bpy.context.active_object
+    jumper.data.materials.append(mat_red)
     bpy.ops.mesh.primitive_cube_add(size=0.6, location=(0, -0.3, 5.2))
     pack = bpy.context.active_object
+    pack.data.materials.append(mat_red)
     pack.parent = jumper
 
 jumper.keyframe_insert(data_path="location", frame=1)
@@ -289,26 +301,23 @@ scene.render.resolution_x, scene.render.resolution_y = {TARGET_W}, {TARGET_H}
 scene.render.image_settings.file_format = 'FFMPEG'
 scene.render.ffmpeg.format, scene.render.ffmpeg.codec = 'MPEG4', 'H264'
 scene.render.filepath = {repr(str(raw_shot1_prefix))}
-bpy.ops.render.render(animation=True)
 """)
 
 shot2_py = SHUTTLE_DIR / "shot2.py"
 shot2_py.write_text(f"""
 import bpy, math
-bpy.ops.wm.read_factory_settings(use_empty=True)
+
+for obj in list(bpy.data.objects):
+    bpy.data.objects.remove(obj, do_unlink=True)
+
 scene = bpy.context.scene
 scene.render.fps = {FPS}
 scene.frame_start, scene.frame_end = 1, {FPS * 30}
 
-scene.render.engine = 'BLENDER_WORKBENCH'
-scene.display.shading.light = 'FLAT'
-scene.display.shading.color_type = 'SINGLE'
-scene.display.shading.single_color = (0.3, 0.45, 0.6)
+mat_plane = bpy.data.materials.new("PlaneWhite")
+mat_plane.diffuse_color = (1.0, 1.0, 1.0, 1.0)
 
-world = bpy.data.worlds.new("RadarWorld")
-scene.world = world
-
-bpy.ops.mesh.primitive_grid_add(x_subdivisions=60, y_subdivisions=60, size=35, location=(0, 0, 0))
+bpy.ops.mesh.primitive_grid_add(x_subdivisions=50, y_subdivisions=50, size=35, location=(0, 0, 0))
 terrain = bpy.context.active_object
 
 disp = terrain.modifiers.new(name="Mountains", type='DISPLACE')
@@ -335,6 +344,7 @@ else:
     bpy.ops.mesh.primitive_cone_add(radius1=0.7, depth=2.8, location=(0, -14, 5.5))
     plane = bpy.context.active_object
     plane.rotation_euler = (math.radians(-90), 0, 0)
+plane.data.materials.append(mat_plane)
 
 plane.keyframe_insert(data_path="location", frame=1)
 plane.location.y = 14
@@ -355,13 +365,12 @@ scene.render.resolution_x, scene.render.resolution_y = {TARGET_W}, {TARGET_H}
 scene.render.image_settings.file_format = 'FFMPEG'
 scene.render.ffmpeg.format, scene.render.ffmpeg.codec = 'MPEG4', 'H264'
 scene.render.filepath = {repr(str(raw_shot2_prefix))}
-bpy.ops.render.render(animation=True)
 """)
 
-run_cmd(["blender", "-b", "-P", str(shot1_py)], "رندرة المشهد 1 عبر بلندر")
-run_cmd(["blender", "-b", "-P", str(shot2_py)], "رندرة المشهد 2 عبر بلندر")
+# تشغيل بلندر مع راية الأنيميشن (-a) الرسمية
+run_cmd(["blender", "-b", "-P", str(shot1_py), "-a"], "رندرة المشهد 1 عبر بلندر")
+run_cmd(["blender", "-b", "-P", str(shot2_py), "-a"], "رندرة المشهد 2 عبر بلندر")
 
-# دالة ذكية لإيجاد ملفات بلندر وتسميتها بدقة وتوليد بديل إذا لزم
 def resolve_blender_video(prefix_name, target_filename):
     target_path = (SHUTTLE_DIR / target_filename).resolve()
     matches = list(SHUTTLE_DIR.glob(f"*{prefix_name}*.mp4"))
