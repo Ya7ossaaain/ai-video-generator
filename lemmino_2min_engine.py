@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28.2 - GEMINI 3.8 TTS & BLENDER FRAME FIX)
+LEMMINO INVESTIGATIVE BENCHMARK ENGINE
+Fully Integrated: Antigravity (agy CLI) + Gemini 3.8 Flash TTS (Charon) + Blender Workbench + FFmpeg
 """
 
 import os
@@ -16,6 +17,9 @@ import re
 from pathlib import Path
 import requests
 
+# إجبار بايثون على إظهار الطباعة فوراً في سيرفرات GitHub
+sys.stdout.reconfigure(line_buffering=True)
+
 from google import genai
 from google.genai import types
 
@@ -28,7 +32,6 @@ FINAL_VIDEO = (BASE_DIR / "lemmino_2min_benchmark.mp4").resolve()
 
 TARGET_W, TARGET_H, FPS = 1920, 1080, 30
 
-# استرجاع المفاتيح
 raw_gemini_keys = os.environ.get("GEMINI_API_KEYS") or os.environ.get("GEMINI_API_KEY") or ""
 GEMINI_KEYS = list(dict.fromkeys([k.strip() for k in re.split(r"[,;\n]+", raw_gemini_keys) if k.strip()]))
 GEMINI_KEY = GEMINI_KEYS[0] if GEMINI_KEYS else ""
@@ -36,7 +39,9 @@ GEMINI_KEY = GEMINI_KEYS[0] if GEMINI_KEYS else ""
 SKETCHFAB_KEY = os.environ.get("SKETCHFAB_API_KEY", "").strip()
 OPENTOPO_KEY = os.environ.get("OPENTOPOGRAPHY_API_KEY", "").strip()
 
-# النموذج والصوت كما في كودك V28 تماماً
+# النماذج كما في كودك V28 تماماً
+AGY_SCRIPT_MODEL = "gemini-3.1-pro"
+EFFORT_PRO_GENERATION = "high"
 TTS_MODEL = "gemini-3.8-flash-tts"
 TTS_VOICE = "Charon"
 
@@ -44,11 +49,14 @@ if BASE_DIR.exists():
     shutil.rmtree(BASE_DIR, ignore_errors=True)
 SHUTTLE_DIR.mkdir(parents=True, exist_ok=True)
 
+def log_print(msg):
+    print(msg, flush=True)
+
 def run_cmd(cmd, desc=""):
-    print(f"🎬 [تنفيذ]: {desc}...")
+    log_print(f"🎬 [تنفيذ]: {desc}...")
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if res.returncode != 0:
-        print(f"⚠️ تنبيه ({desc}): {res.stderr[-300:]}")
+        log_print(f"⚠️ تنبيه ({desc}): {res.stderr[-300:]}")
     return res
 
 def extract_json(text):
@@ -64,13 +72,13 @@ def extract_json(text):
     return None
 
 # =============================================================================
-# 2. استدعاء AGY
+# 2. استدعاء أداة AGY الأصلية كما في كودك V28
 # =============================================================================
 def agy_generate_script():
-    print("🧠 [AGY] استدعاء أداة AGY لصياغة السيناريو الاستقصائي...")
-    prompt = """You are an elite documentary director in the exact style of LEMMINO.
+    log_print("🧠 [AGY] استدعاء أداة AGY لصياغة السيناريو الاستقصائي...")
+    prompt = """You are an elite investigative documentary director in the exact style of LEMMINO.
 Topic: The Mystery of D.B. Cooper.
-Generate a production script in Arabic for narration, and specific forensic details for on-screen graphics.
+Generate a broadcast script in Arabic for narration, and specific forensic details for on-screen graphics.
 
 Return ONLY valid JSON:
 {
@@ -91,20 +99,23 @@ Return ONLY valid JSON:
     "point4": "Refused to confirm or deny identity"
   }
 }"""
-    agy_bin = shutil.which("agy") or shutil.which("antigravity")
-    if agy_bin:
-        try:
-            cmd = [agy_bin, "--model", "gemini-3.1-pro", "--effort", "high", "--dangerously-skip-permissions", "-p", prompt]
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
-            data = extract_json(res.stdout)
-            if data and "narration" in data:
-                print("✅ [AGY] تم استلام السيناريو بنجاح.")
-                return data
-        except Exception as e:
-            print(f"⚠️ خطأ أثناء استدعاء agy: {e}")
-    else:
-        print("ℹ️ أداة agy لم تكن في الـ PATH، استخدام السيناريو الاستقصائي المعتمد...")
+    # البحث عن agy في الـ PATH أو المسار الافتراضي لـ Antigravity
+    agy_bin = shutil.which("agy") or os.path.expanduser("~/.local/bin/agy")
+    
+    cmd = [agy_bin, "--model", AGY_SCRIPT_MODEL, "--effort", EFFORT_PRO_GENERATION,
+           "--dangerously-skip-permissions", "-p", prompt]
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        data = extract_json(res.stdout)
+        if data and "narration" in data:
+            log_print("✅ [AGY] تم استلام السيناريو بنجاح عبر Antigravity CLI.")
+            return data
+        else:
+            log_print(f"⚠️ استجابة AGY غير مكتملة، استخدام البيانات المرجعية: {res.stderr[:200]}")
+    except Exception as e:
+        log_print(f"⚠️ خطأ أثناء تشغيل agy ({e})")
 
+    # بيانات احتياطية تضمن استمرار الرندر في حال فشل أي أمر
     return {
         "narration": "في الرابع والعشرين من نوفمبر عام ألف وتسعمائة وواحد وسبعين، استقل دان كوبر طائرة البوينغ سبعمائة وسبعة وعشرين من بورتلاند. بعد تهديده بوجود قنبلة، طالب بمائتي ألف دولار وأربع مظلات. في سماء واشنطن الممطرة، فُتح الدرج الخلفي وقفز كوبر في ظلام دامس نحو المجهول، تاركاً وراءه اللغز الأكبر في تاريخ الطيران الأمريكي.",
         "scene3_evidence": {
@@ -127,14 +138,14 @@ Return ONLY valid JSON:
 STORY_DATA = agy_generate_script()
 
 # =============================================================================
-# 3. GEMINI TTS ENGINE (نموذج 3.8 FLASH TTS كما طلبت تماماً)
+# 3. توليد الصوت عبر Gemini 3.8 Flash TTS بصوت Charon (مطابق لـ V28)
 # =============================================================================
 master_narration_wav = SHUTTLE_DIR / "narration_master.wav"
 has_voice = False
 
 if GEMINI_KEY:
     try:
-        print(f"🎙️ [Gemini TTS] توليد الصوت بنموذج ({TTS_MODEL})...")
+        log_print(f"🎙️ [Gemini TTS] توليد التعليق الصوتي بنموذج {TTS_MODEL} بصوت {TTS_VOICE}...")
         client = genai.Client(api_key=GEMINI_KEY)
         voice_instruction = (
             "[INSTRUCTION: Solemn, emotionally resonant Arabic investigative documentary narrator. "
@@ -158,13 +169,13 @@ if GEMINI_KEY:
             temp_pcm = SHUTTLE_DIR / "temp.pcm"
             temp_pcm.write_bytes(raw_audio)
             run_cmd(["ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", str(temp_pcm),
-                     "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", str(master_narration_wav)], "تحويل الصوت")
+                     "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", str(master_narration_wav)], "تحويل الصوت الماستر")
             temp_pcm.unlink(missing_ok=True)
             has_voice = master_narration_wav.exists() and master_narration_wav.stat().st_size > 1024
             if has_voice:
-                print("✅ [Gemini TTS] تم توليد التعليق الصوتي بنجاح.")
+                log_print("✅ [Gemini TTS] تم توليد الصوت الماستر بنجاح.")
     except Exception as e:
-        print(f"⚠️ خطأ في توليد صوت Gemini ({e})، سيتم استكمال الرندر بالموسيقى التصويرية.")
+        log_print(f"⚠️ خطأ في توليد صوت Gemini ({e})")
 
 # =============================================================================
 # 4. تنزيل الأصول (Sketchfab + OpenTopography)
@@ -172,19 +183,19 @@ if GEMINI_KEY:
 def fetch_sketchfab_model(query, output_dir, tag_name):
     if not SKETCHFAB_KEY: return None
     try:
-        print(f"🔍 [Sketchfab] البحث عن مجسم: '{query}'...")
+        log_print(f"🔍 [Sketchfab] البحث عن مجسم: '{query}'...")
         headers = {"Authorization": f"Token {SKETCHFAB_KEY}"}
         search_url = f"https://api.sketchfab.com/v3/models?q={query}&downloadable=true&licenses=by,by-nc,cc0&sort_by=-likeCount"
-        r = requests.get(search_url, headers=headers, timeout=20)
+        r = requests.get(search_url, headers=headers, timeout=15)
         results = r.json().get("results", [])
         if not results: return None
         uid = results[0]["uid"]
-        d_res = requests.get(f"https://api.sketchfab.com/v3/models/{uid}/download", headers=headers, timeout=20)
+        d_res = requests.get(f"https://api.sketchfab.com/v3/models/{uid}/download", headers=headers, timeout=15)
         download_link = d_res.json().get("gltf", {}).get("url")
         if not download_link: return None
 
         zip_path = output_dir / f"{tag_name}.zip"
-        with requests.get(download_link, stream=True, timeout=60) as dl:
+        with requests.get(download_link, stream=True, timeout=30) as dl:
             with open(zip_path, "wb") as f:
                 for chunk in dl.iter_content(chunk_size=1024*256): f.write(chunk)
         extract_dir = output_dir / tag_name
@@ -199,13 +210,13 @@ def fetch_opentopography_dem(output_dir):
     tif_path = output_dir / "terrain_washington.tif"
     if not OPENTOPO_KEY: return None
     try:
-        print("🗺️ [OpenTopography] تنزيل خريطة الارتفاعات الرقمية من ناسا...")
+        log_print("🗺️ [OpenTopography] تنزيل خريطة الارتفاعات الرقمية من ناسا...")
         params = {
             "demtype": "SRTMGL3", "south": "45.85", "north": "46.10",
             "west": "-122.65", "east": "-122.30", "outputFormat": "GTiff",
             "API_Key": OPENTOPO_KEY
         }
-        res = requests.get("https://portal.opentopography.org/API/globaldem", params=params, timeout=30)
+        res = requests.get("https://portal.opentopography.org/API/globaldem", params=params, timeout=20)
         if res.status_code == 200 and len(res.content) > 5000:
             tif_path.write_bytes(res.content)
             return str(tif_path.resolve())
@@ -214,12 +225,12 @@ def fetch_opentopography_dem(output_dir):
 
 models_dir = SHUTTLE_DIR / "models"
 models_dir.mkdir(parents=True, exist_ok=True)
-jumper_model = fetch_sketchfab_model("skydiver parachute silhouette", models_dir, "jumper")
-plane_model = fetch_sketchfab_model("boeing airliner low poly", models_dir, "plane")
+jumper_model = fetch_sketchfab_model("parachute", models_dir, "jumper")
+plane_model = fetch_sketchfab_model("boeing 727", models_dir, "plane")
 terrain_dem = fetch_opentopography_dem(models_dir)
 
 # =============================================================================
-# 5. تصيير بلندر مع التقاط وتسمية الفيديوهات بدقة
+# 5. تصيير بلندر بمحرك WORKBENCH فائق السرعة
 # =============================================================================
 raw_shot1_prefix = (SHUTTLE_DIR / "shot1_render_output").resolve()
 raw_shot2_prefix = (SHUTTLE_DIR / "shot2_render_output").resolve()
@@ -232,19 +243,13 @@ scene = bpy.context.scene
 scene.render.fps = {FPS}
 scene.frame_start, scene.frame_end = 1, {FPS * 30}
 
+scene.render.engine = 'BLENDER_WORKBENCH'
+scene.display.shading.light = 'FLAT'
+scene.display.shading.color_type = 'SINGLE'
+scene.display.shading.single_color = (0.85, 0.02, 0.05)
+
 world = bpy.data.worlds.new("Void")
 scene.world = world
-world.use_nodes = True
-world.node_tree.nodes["Background"].inputs[0].default_value = (0.008, 0.008, 0.01, 1.0)
-
-mat_red = bpy.data.materials.new("LemminoRed")
-mat_red.use_nodes = True
-mat_red.node_tree.nodes.clear()
-emis = mat_red.node_tree.nodes.new('ShaderNodeEmission')
-emis.inputs['Color'].default_value = (0.85, 0.02, 0.05, 1.0)
-emis.inputs['Strength'].default_value = 2.5
-out = mat_red.node_tree.nodes.new('ShaderNodeOutputMaterial')
-mat_red.node_tree.links.new(emis.outputs['Emission'], out.inputs['Surface'])
 
 jumper_path = {repr(jumper_model)}
 if jumper_path and bpy.path.exists(jumper_path):
@@ -253,15 +258,11 @@ if jumper_path and bpy.path.exists(jumper_path):
     jumper.location = (0, 0, 5)
     max_d = max(jumper.dimensions) if max(jumper.dimensions) > 0 else 1.0
     jumper.scale = [1.8 / max_d] * 3
-    jumper.data.materials.clear()
-    jumper.data.materials.append(mat_red)
 else:
     bpy.ops.mesh.primitive_cylinder_add(radius=0.4, depth=1.6, location=(0, 0, 5))
     jumper = bpy.context.active_object
-    jumper.data.materials.append(mat_red)
     bpy.ops.mesh.primitive_cube_add(size=0.6, location=(0, -0.3, 5.2))
     pack = bpy.context.active_object
-    pack.data.materials.append(mat_red)
     pack.parent = jumper
 
 jumper.keyframe_insert(data_path="location", frame=1)
@@ -288,6 +289,7 @@ scene.render.resolution_x, scene.render.resolution_y = {TARGET_W}, {TARGET_H}
 scene.render.image_settings.file_format = 'FFMPEG'
 scene.render.ffmpeg.format, scene.render.ffmpeg.codec = 'MPEG4', 'H264'
 scene.render.filepath = {repr(str(raw_shot1_prefix))}
+bpy.ops.render.render(animation=True)
 """)
 
 shot2_py = SHUTTLE_DIR / "shot2.py"
@@ -298,24 +300,16 @@ scene = bpy.context.scene
 scene.render.fps = {FPS}
 scene.frame_start, scene.frame_end = 1, {FPS * 30}
 
+scene.render.engine = 'BLENDER_WORKBENCH'
+scene.display.shading.light = 'FLAT'
+scene.display.shading.color_type = 'SINGLE'
+scene.display.shading.single_color = (0.3, 0.45, 0.6)
+
 world = bpy.data.worlds.new("RadarWorld")
 scene.world = world
-world.use_nodes = True
-world.node_tree.nodes["Background"].inputs[0].default_value = (0.012, 0.014, 0.018, 1.0)
 
-mat_grid = bpy.data.materials.new("TopoWire")
-mat_grid.use_nodes = True
-mat_grid.node_tree.nodes.clear()
-wire = mat_grid.node_tree.nodes.new('ShaderNodeWireframe')
-wire.inputs['Size'].default_value = 0.015
-emis = mat_grid.node_tree.nodes.new('ShaderNodeEmission')
-emis.inputs['Color'].default_value = (0.25, 0.35, 0.45, 1.0)
-out = mat_grid.node_tree.nodes.new('ShaderNodeOutputMaterial')
-mat_grid.node_tree.links.new(emis.outputs['Emission'], out.inputs['Surface'])
-
-bpy.ops.mesh.primitive_grid_add(x_subdivisions=80, y_subdivisions=80, size=35, location=(0, 0, 0))
+bpy.ops.mesh.primitive_grid_add(x_subdivisions=60, y_subdivisions=60, size=35, location=(0, 0, 0))
 terrain = bpy.context.active_object
-terrain.data.materials.append(mat_grid)
 
 disp = terrain.modifiers.new(name="Mountains", type='DISPLACE')
 dem_file = {repr(terrain_dem)}
@@ -331,27 +325,16 @@ else:
     disp.texture = tex
     disp.strength = 3.5
 
-mat_plane = bpy.data.materials.new("PlaneWhite")
-mat_plane.use_nodes = True
-mat_plane.node_tree.nodes.clear()
-p_emis = mat_plane.node_tree.nodes.new('ShaderNodeEmission')
-p_emis.inputs['Color'].default_value = (1.0, 1.0, 1.0, 1.0)
-p_out = mat_plane.node_tree.nodes.new('ShaderNodeOutputMaterial')
-mat_plane.node_tree.links.new(p_emis.outputs['Emission'], p_out.inputs['Surface'])
-
 plane_file = {repr(plane_model)}
 if plane_file and bpy.path.exists(plane_file):
     bpy.ops.import_scene.gltf(filepath=plane_file)
     plane = bpy.context.selected_objects[0]
     max_p = max(plane.dimensions) if max(plane.dimensions) > 0 else 1.0
     plane.scale = [2.2 / max_p] * 3
-    plane.data.materials.clear()
-    plane.data.materials.append(mat_plane)
 else:
     bpy.ops.mesh.primitive_cone_add(radius1=0.7, depth=2.8, location=(0, -14, 5.5))
     plane = bpy.context.active_object
     plane.rotation_euler = (math.radians(-90), 0, 0)
-    plane.data.materials.append(mat_plane)
 
 plane.keyframe_insert(data_path="location", frame=1)
 plane.location.y = 14
@@ -372,27 +355,26 @@ scene.render.resolution_x, scene.render.resolution_y = {TARGET_W}, {TARGET_H}
 scene.render.image_settings.file_format = 'FFMPEG'
 scene.render.ffmpeg.format, scene.render.ffmpeg.codec = 'MPEG4', 'H264'
 scene.render.filepath = {repr(str(raw_shot2_prefix))}
+bpy.ops.render.render(animation=True)
 """)
 
 run_cmd(["blender", "-b", "-P", str(shot1_py)], "رندرة المشهد 1 عبر بلندر")
 run_cmd(["blender", "-b", "-P", str(shot2_py)], "رندرة المشهد 2 عبر بلندر")
 
-# دالة ذكية للبحث عن ناتج رندر بلندر مهما أضاف أرقام فريمات وتسميته بدقة
+# دالة ذكية لإيجاد ملفات بلندر وتسميتها بدقة وتوليد بديل إذا لزم
 def resolve_blender_video(prefix_name, target_filename):
     target_path = (SHUTTLE_DIR / target_filename).resolve()
-    # فحص مسار العمل
     matches = list(SHUTTLE_DIR.glob(f"*{prefix_name}*.mp4"))
     if not matches:
-        # فحص المسار العام كإجراء احترازي
         matches = list(BASE_DIR.glob(f"*{prefix_name}*.mp4")) + list(Path(".").glob(f"*{prefix_name}*.mp4"))
     
     if matches:
         matches.sort(key=lambda p: p.stat().st_size, reverse=True)
         shutil.move(str(matches[0]), str(target_path))
-        print(f"✅ تم تأكيد ملف بلندر: {target_path.name}")
+        log_print(f"✅ تم تأكيد ملف بلندر: {target_path.name}")
         return target_path
     
-    print(f"⚠️ إنشاء بديل فوري لـ {target_filename}...")
+    log_print(f"⚠️ إنشاء بديل فوري لـ {target_filename}...")
     run_cmd([
         "ffmpeg", "-y", "-f", "lavfi",
         "-i", f"color=c=0x08080c:s={TARGET_W}x{TARGET_H}:d=30:r={FPS}",
@@ -475,11 +457,11 @@ run_cmd([
     "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
     "-i", str(final_audio),
     "-vf", "noise=alls=7:allf=t,eq=contrast=1.07:saturation=0.92",
-    "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p",
+    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p",
     "-c:a", "aac", "-b:a", "192k", "-shortest",
     str(FINAL_VIDEO)
 ], "التجميع النهائي للفيديو (120 ثانية)")
 
-print(f"\n{'='*60}")
-print(f"🎉 تم الانتهاء بنجاح من إنتاج الفيديو: {FINAL_VIDEO}")
-print(f"{'='*60}\n")
+log_print(f"\n{'='*60}")
+log_print(f"🎉 تم الانتهاء بنجاح من إنتاج الفيديو: {FINAL_VIDEO}")
+log_print(f"{'='*60}\n")
