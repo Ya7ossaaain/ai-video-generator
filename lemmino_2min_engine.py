@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28.6 - FIXED & ASSET TRACKING)
-- AGY Model: gemini-3.8-flash
-- Blender: Fixed os.path.exists
-- Full Live Asset Tracking Dashboard
+LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28.7 - PERFECT AGY EFFORT & RELEVANCE 3D)
+- AGY: gemini-3.8-flash with mandatory --effort high
+- Sketchfab: Accurate relevance sorting (-relevance)
+- Blender: Pure robust headless render
 """
 
 import os
@@ -40,8 +40,9 @@ GEMINI_KEY = GEMINI_KEYS[0] if GEMINI_KEYS else ""
 SKETCHFAB_KEY = os.environ.get("SKETCHFAB_API_KEY", "").strip()
 OPENTOPO_KEY = os.environ.get("OPENTOPOGRAPHY_API_KEY", "").strip()
 
-# النماذج المطابقة لحسابك تماماً
+# النماذج المعتمدة
 AGY_SCRIPT_MODEL = "gemini-3.8-flash"
+EFFORT_PRO_GENERATION = "high"  # إلزامي مع gemini-3.8-flash
 TTS_MODEL = "gemini-3.8-flash-tts"
 TTS_VOICE = "Charon"
 
@@ -80,10 +81,10 @@ ASSET_STATUS = {
 }
 
 # =============================================================================
-# 2. استدعاء أداة AGY بنموذج gemini-3.8-flash
+# 2. استدعاء AGY مع --effort high الإلزامي
 # =============================================================================
 def agy_generate_script():
-    log_print("🧠 [AGY] استدعاء أداة AGY بنموذج gemini-3.8-flash...")
+    log_print("🧠 [AGY] استدعاء أداة AGY بنموذج gemini-3.8-flash وخيار --effort high...")
     prompt = """You are an elite investigative documentary director in the exact style of LEMMINO.
 Topic: The Mystery of D.B. Cooper.
 Generate a broadcast script in Arabic for narration, and specific forensic details for on-screen graphics.
@@ -113,14 +114,20 @@ Return ONLY valid JSON:
     env_vars["SSH_CONNECTION"] = "127.0.0.1 0 127.0.0.1 22"
     env_vars["AGY_OAUTH_TOKEN"] = os.environ.get("AGY_CREDENTIALS", "")
 
-    # استخدام نموذج gemini-3.8-flash المتاح بدون وسيطة --effort
-    cmd = [agy_bin, "--model", AGY_SCRIPT_MODEL, "--dangerously-skip-permissions", "-p", prompt]
+    # تمرير --effort high الإلزامي لنموذج gemini-3.8-flash
+    cmd = [
+        agy_bin,
+        "--model", AGY_SCRIPT_MODEL,
+        "--effort", EFFORT_PRO_GENERATION,
+        "--dangerously-skip-permissions",
+        "-p", prompt
+    ]
     try:
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120, env=env_vars)
         data = extract_json(res.stdout)
         if data and "narration" in data:
             log_print("✅ [AGY] تم توليد السيناريو بنجاح عبر Antigravity CLI.")
-            ASSET_STATUS["agy_script"] = f"✅ نجح توليده عبر AGY ({AGY_SCRIPT_MODEL})"
+            ASSET_STATUS["agy_script"] = f"✅ نجح توليده عبر AGY ({AGY_SCRIPT_MODEL} / effort: high)"
             return data
         else:
             log_print(f"⚠️ تفاصيل AGY: {res.stderr[:250]}")
@@ -194,16 +201,17 @@ else:
     ASSET_STATUS["gemini_tts"] = "❌ مفتاح GEMINI_API_KEY مفقود"
 
 # =============================================================================
-# 4. تنزيل الأصول وتتبع حالتها بدقة
+# 4. تنزيل الأصول مع الترتيب بالأهمية المطابقة (-relevance)
 # =============================================================================
 def fetch_sketchfab_model(query, output_dir, tag_name):
     if not SKETCHFAB_KEY:
         ASSET_STATUS[f"{tag_name}_3d"] = "❌ مفتاح SKETCHFAB_API_KEY مفقود"
         return None
     try:
-        log_print(f"🔍 [Sketchfab] جاري البحث عن مجسم ثلاثي أبعاد: '{query}'...")
+        log_print(f"🔍 [Sketchfab] جاري البحث بالأهمية المطابقة عن: '{query}'...")
         headers = {"Authorization": f"Token {SKETCHFAB_KEY}"}
-        search_url = f"https://api.sketchfab.com/v3/models?q={query}&downloadable=true&licenses=by,by-nc,cc0&sort_by=-likeCount"
+        # استخدام -relevance بدلاً من -likeCount لجلب الموديل المطابق بدقة
+        search_url = f"https://api.sketchfab.com/v3/models?q={query}&downloadable=true&licenses=by,by-nc,cc0&sort_by=-relevance"
         r = requests.get(search_url, headers=headers, timeout=15)
         
         if r.status_code != 200:
@@ -213,7 +221,7 @@ def fetch_sketchfab_model(query, output_dir, tag_name):
         results = r.json().get("results", [])
         if not results:
             log_print(f"⚠️ لم يتم العثور على نتائج مجانية قابلة للتنزيل لـ '{query}'")
-            ASSET_STATUS[f"{tag_name}_3d"] = "⚠️ لم يُعثر على موديل مجاني متاح للتحميل مباشرة -> بديل هندسي"
+            ASSET_STATUS[f"{tag_name}_3d"] = "⚠️ لم يُعثر على موديل مجاني متاح للتحميل -> بديل هندسي"
             return None
 
         uid = results[0]["uid"]
@@ -260,7 +268,7 @@ def fetch_opentopography_dem(output_dir):
             "west": "-122.65", "east": "-122.30", "outputFormat": "GTiff",
             "API_Key": OPENTOPO_KEY
         }
-        res = requests.get("https://portal.opentopography.org/API/globaldem", params=params, timeout=20)
+        res = requests.get("https://portal.opentopography.org/API/globaldem", params=params, timeout=25)
         if res.status_code == 200 and len(res.content) > 5000:
             tif_path.write_bytes(res.content)
             size_kb = len(res.content) // 1024
@@ -278,10 +286,10 @@ models_dir.mkdir(parents=True, exist_ok=True)
 
 # تنزيل الأصول
 jumper_model = fetch_sketchfab_model("parachute", models_dir, "jumper")
-plane_model = fetch_sketchfab_model("boeing 727", models_dir, "plane")
+plane_model = fetch_sketchfab_model("airplane boeing", models_dir, "plane")
 terrain_dem = fetch_opentopography_dem(models_dir)
 
-# طباعة لوحة فحص حالة الأصول لتعرف حالة كل أصل بوضوح تام!
+# طباعة لوحة تقرير حالة الأصول
 log_print("\n" + "="*60)
 log_print("📊 لوحة تقرير حالة الأصول (Asset Acquisition Report):")
 log_print(f"  🧠 السيناريو (AGY Script)    : {ASSET_STATUS['agy_script']}")
@@ -292,7 +300,7 @@ log_print(f"  🏔️ تضاريس ناسا (OpenTopography): {ASSET_STATUS['ter
 log_print("="*60 + "\n")
 
 # =============================================================================
-# 5. تصيير بلندر (تم تصحيح os.path.exists ليعمل 100%)
+# 5. تصيير بلندر (مع os.path.exists)
 # =============================================================================
 raw_shot1_prefix = (SHUTTLE_DIR / "shot1_output").resolve()
 raw_shot2_prefix = (SHUTTLE_DIR / "shot2_output").resolve()
@@ -301,7 +309,6 @@ shot1_py = SHUTTLE_DIR / "shot1.py"
 shot1_py.write_text(f"""
 import bpy, math, os
 
-# تفريغ آمن للمشهد
 for obj in list(bpy.data.objects):
     bpy.data.objects.remove(obj, do_unlink=True)
 
@@ -320,7 +327,6 @@ if mat_red.node_tree:
     mat_red.node_tree.links.new(emis.outputs['Emission'], out.inputs['Surface'])
 
 jumper_path = {repr(jumper_model)}
-# تصحيح الخطأ: استخدام os.path.exists بدلاً من bpy.path.exists
 if jumper_path and os.path.exists(jumper_path):
     bpy.ops.import_scene.gltf(filepath=jumper_path)
     jumper = bpy.context.selected_objects[0]
@@ -383,7 +389,6 @@ terrain = bpy.context.active_object
 
 disp = terrain.modifiers.new(name="Mountains", type='DISPLACE')
 dem_file = {repr(terrain_dem)}
-# تصحيح الخطأ: استخدام os.path.exists
 if dem_file and os.path.exists(dem_file):
     tex = bpy.data.textures.new("DEM_Tex", type='IMAGE')
     img = bpy.data.images.load(dem_file)
@@ -429,7 +434,6 @@ scene.render.ffmpeg.format, scene.render.ffmpeg.codec = 'MPEG4', 'H264'
 scene.render.filepath = {repr(str(raw_shot2_prefix))}
 """)
 
-# تشغيل بلندر مع راية الأنيميشن (-a)
 run_cmd(["blender", "-b", "-P", str(shot1_py), "-a"], "رندرة المشهد 1 عبر بلندر")
 run_cmd(["blender", "-b", "-P", str(shot2_py), "-a"], "رندرة المشهد 2 عبر بلندر")
 
