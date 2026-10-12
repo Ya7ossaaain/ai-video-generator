@@ -1,4 +1,4 @@
-name: Render LEMMiNO Animation
+name: Render LEMMiNO Animation with AGY Reviewer
 
 on:
   push:
@@ -10,18 +10,66 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # 1. سحب ملفات المشروع
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    - name: Install Blender & Dependencies
+    # 2. إعداد بيئة بايثون
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    # 3. تثبيت Blender والمتطلبات
+    - name: Install Blender & System Tools
       run: |
         sudo apt-get update
-        sudo apt-get install -y blender
+        sudo apt-get install -y blender curl jq
 
-    - name: Execute CLI Headless Render
+    # 4. تثبيت وتسجيل الدخول إلى agy عبر AGY_CREDENTIALS
+    - name: Setup & Authenticate Antigravity (agy CLI)
+      env:
+        AGY_CREDENTIALS: ${{ secrets.AGY_CREDENTIALS }}
       run: |
-        blender -b -P generate_scene.py
+        # أ) تثبيت agy إذا لم يكن مثبتاً مسبقاً
+        if ! command -v agy &> /dev/null; then
+          echo "⬇️ جاري تثبيت agy CLI..."
+          curl -fsSL https://antigravity.google/cli/install.sh | bash || true
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/bin:$PATH"
+        fi
 
+        # ب) تهيئة مجلدات التخزين لـ agy
+        mkdir -p ~/.config/antigravity ~/.config/agy ~/.gemini
+
+        # ج) معالجة السر سواء كان JSON خام، أو مشفر بـ Base64، أو توكن نصي
+        if [ -n "$AGY_CREDENTIALS" ]; then
+          if echo "$AGY_CREDENTIALS" | grep -q "^{"; then
+            echo "🔑 تم الكشف عن بيانات الاعتماد كملف JSON مباشر..."
+            echo "$AGY_CREDENTIALS" > ~/.config/antigravity/credentials.json
+            echo "$AGY_CREDENTIALS" > ~/.config/agy/credentials.json
+          elif echo "$AGY_CREDENTIALS" | base64 -d >/dev/null 2>&1; then
+            echo "🔑 تم الكشف عن بيانات الاعتماد مشفرة بـ Base64، جاري فك التشفير..."
+            echo "$AGY_CREDENTIALS" | base64 -d > ~/.config/antigravity/credentials.json
+            echo "$AGY_CREDENTIALS" | base64 -d > ~/.config/agy/credentials.json
+          else
+            echo "🔑 تم الكشف عن بيانات الاعتماد كرمز توكن..."
+            echo "$AGY_CREDENTIALS" > ~/.config/antigravity/token
+            echo "$AGY_CREDENTIALS" > ~/.config/agy/token
+          fi
+          echo "✅ تم إعداد بيانات اعتماد agy بنجاح."
+        else
+          echo "⚠️ تحذير: لم يتم العثور على سر AGY_CREDENTIALS في Repository Secrets!"
+        fi
+
+    # 5. تشغيل البايبلاين (الفحص بالذكاء الاصطناعي + بناء المشهد + رندر بلندر)
+    - name: Execute Full Autonomous Pipeline
+      env:
+        AGY_CREDENTIALS: ${{ secrets.AGY_CREDENTIALS }}
+      run: |
+        python3 generate_scene.py
+
+    # 6. رفع الفيديو النهائي المكتمل
     - name: Upload Video Artifact
       uses: actions/upload-artifact@v4
       with:
