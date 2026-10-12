@@ -98,30 +98,13 @@ scene.render.filepath = "./lemmino_jump.mp4"
 scene.render.resolution_x = 1920
 scene.render.resolution_y = 1080
 
+# إعدادات Cycles فائقة السرعة والاستقرار
 scene.render.engine = 'CYCLES'
 scene.cycles.samples = 8
 scene.cycles.use_denoising = False
 
-# ============================================================
-# ضبط Freestyle بأمان تام لمنع الـ Crash (إصلاح سطر 1314)
-# ============================================================
-scene.render.use_freestyle = True
-scene.render.line_thickness = 1.2
-
-view_layer = scene.view_layers[0]
-view_layer.use_freestyle = True
-freestyle_settings = view_layer.freestyle_settings
-
-# إنشاء الـ LineSet والـ LineStyle صراحةً
-lineset = freestyle_settings.linesets.new("LemminoLineSet")
-lineset.select_silhouette = True
-lineset.select_crease = True
-lineset.select_border = True
-
-linestyle = bpy.data.linestyles.new("LemminoLineStyle")
-linestyle.color = (1.0, 1.0, 1.0)
-linestyle.thickness = 1.2
-lineset.linestyle = linestyle
+# إلغاء Freestyle تماماً لمنع أي Crash
+scene.render.use_freestyle = False
 
 # خلفية سوداء تامة
 world = bpy.data.worlds.new("VoidWorld")
@@ -147,22 +130,24 @@ def make_mat(name, color, is_emission=True, strength=2.0):
     return mat
 
 mat_black_body = make_mat("BlackBody", (0.005, 0.005, 0.005, 1), is_emission=False)
+mat_white_line = make_mat("WhiteLine", (1.0, 1.0, 1.0, 1), is_emission=True, strength=3.5)
 mat_red_cooper = make_mat("RedCooper", (1.0, 0.02, 0.03, 1), is_emission=True, strength=5.0)
 mat_white_glow = make_mat("WhiteGlow", (1.0, 1.0, 1.0, 1), is_emission=True, strength=3.0)
 mat_tree_white = make_mat("TreeWhite", (0.95, 0.95, 0.95, 1), is_emission=True, strength=2.5)
 mat_tree_dark  = make_mat("TreeDark",  (0.08, 0.08, 0.08, 1), is_emission=True, strength=0.3)
 
 # ------------------------------------------------------------
-# 1. طائرة Boeing 727
+# 1. طائرة Boeing 727 بخطوط CAD الهندسية الأنيقة
 # ------------------------------------------------------------
 plane_parts = []
 
-bpy.ops.mesh.primitive_cylinder_add(radius=1.1, depth=13.0, location=(0, 0, 12))
+# الهيكل بـ 16 ضلعاً فقط لتبدو الخطوط كأضلاع طائرة حقيقية
+bpy.ops.mesh.primitive_cylinder_add(vertices=16, radius=1.1, depth=13.0, location=(0, 0, 12))
 fuse = bpy.context.active_object
 fuse.rotation_euler = (math.radians(90), 0, 0)
 plane_parts.append(fuse)
 
-bpy.ops.mesh.primitive_cone_add(radius1=1.1, depth=3.5, location=(0, -8.25, 12))
+bpy.ops.mesh.primitive_cone_add(vertices=16, radius1=1.1, depth=3.5, location=(0, -8.25, 12))
 nose = bpy.context.active_object
 nose.rotation_euler = (math.radians(-90), 0, 0)
 plane_parts.append(nose)
@@ -191,11 +176,12 @@ tail_h.scale = (5.5, 1.5, 0.08)
 plane_parts.append(tail_h)
 
 for side in [-1.45, 1.45]:
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.48, depth=2.8, location=(side, 4.0, 12.6))
+    bpy.ops.mesh.primitive_cylinder_add(vertices=12, radius=0.48, depth=2.8, location=(side, 4.0, 12.6))
     eng = bpy.context.active_object
     eng.rotation_euler = (math.radians(90), 0, 0)
     plane_parts.append(eng)
 
+# الدرج الخلفي الهابط المتوهج
 bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 6.0, 10.8))
 stair = bpy.context.active_object
 stair.scale = (0.6, 2.2, 0.06)
@@ -207,7 +193,16 @@ for p in plane_parts: p.select_set(True)
 bpy.context.view_layer.objects.active = fuse
 bpy.ops.object.join()
 airplane = bpy.context.active_object
+
+# إعداد خامة الجسم الأسود مع طبقة خطوط الـ Blueprint البيضاء
 airplane.data.materials.append(mat_black_body)
+airplane.data.materials.append(mat_white_line)
+
+wire_mod = airplane.modifiers.new("CAD_Lines", 'WIREFRAME')
+wire_mod.thickness = 0.022
+wire_mod.use_replace = False
+wire_mod.material_offset = 1
+
 stair.parent = airplane
 
 airplane.location = (0, 0, 0)
@@ -216,7 +211,7 @@ airplane.location = (0, -50, 0)
 airplane.keyframe_insert(data_path="location", frame=150)
 
 # ------------------------------------------------------------
-# 2. المظلي الأحمر
+# 2. المظلي الأحمر بنسب بشرية دقيقة
 # ------------------------------------------------------------
 skydiver_parts = []
 
@@ -271,7 +266,7 @@ skydiver.keyframe_insert(data_path="location", frame=150)
 skydiver.keyframe_insert(data_path="rotation_euler", frame=150)
 
 # ------------------------------------------------------------
-# 3. خطوط الرياح
+# 3. خطوط الرياح النفقية
 # ------------------------------------------------------------
 random.seed(1971)
 for i in range(45):
@@ -301,7 +296,7 @@ for i in range(200):
     tree.data.materials.append(mat_tree_white if dist < 8.5 else mat_tree_dark)
 
 # ------------------------------------------------------------
-# 5. الكاميرا والتتبع
+# 5. الكاميرا والتتبع المحكم
 # ------------------------------------------------------------
 cam_target = bpy.data.objects.new("CamTarget", None)
 scene.collection.objects.link(cam_target)
