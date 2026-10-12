@@ -80,7 +80,7 @@ right_wing.scale = (8.5, 2.0, 0.08)
 right_wing.rotation_euler = (math.radians(3), math.radians(-3), math.radians(-28))
 plane_objects.append(right_wing)
 
-# ذيل الـ T-Tail الشهير
+# ذيل الـ T-Tail
 bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 4.4, 9.8))
 fin = bpy.context.active_object
 fin.scale = (0.15, 2.4, 2.8)
@@ -99,7 +99,7 @@ for s in [-1.2, 1.2]:
     eng.rotation_euler = (math.radians(90), 0, 0)
     plane_objects.append(eng)
 
-# تفصيلة عجلات الهبوط المفتوحة (Landing Gear)
+# عجلات الهبوط المفتوحة (Landing Gear)
 for gx in [-1.5, 0, 1.5]:
     gy = -3.5 if gx == 0 else 0.8
     bpy.ops.mesh.primitive_cylinder_add(radius=0.25, depth=0.15, location=(gx, gy, 6.7))
@@ -123,7 +123,7 @@ bpy.ops.object.join()
 plane = bpy.context.active_object
 plane.data.materials.append(mat_body_black)
 
-# خط الحواف الخارجي النقي
+# خط الحواف الخارجي
 wire_mod = plane.modifiers.new("LineArt", 'WIREFRAME')
 wire_mod.thickness = 0.025
 wire_mod.use_replace = False
@@ -132,7 +132,7 @@ wire_mod.material_offset = 1
 
 stair.parent = plane
 
-# حركة الطائرة: تعبر الشاشة بسلاسة
+# حركة الطائرة
 plane.location = (0, 0, 0)
 plane.keyframe_insert(data_path="location", frame=1)
 plane.location = (0, -45, 0)
@@ -143,30 +143,25 @@ plane.keyframe_insert(data_path="location", frame=150)
 # ============================================================
 jumper_parts = []
 
-# رأس المظلي
 bpy.ops.mesh.primitive_uv_sphere_add(radius=0.22, location=(0, 0, 0.65))
 jumper_parts.append(bpy.context.active_object)
 
-# الجذع المنحني
 bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.15))
 torso = bpy.context.active_object
 torso.scale = (0.55, 0.35, 0.75)
 jumper_parts.append(torso)
 
-# حقيبة المظلة
 bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0.18, 0.2))
 pack = bpy.context.active_object
 pack.scale = (0.42, 0.18, 0.55)
 jumper_parts.append(pack)
 
-# اليدان مفرودتان لوضعية السقوط الحر
 for s in [-1, 1]:
     bpy.ops.mesh.primitive_cylinder_add(radius=0.09, depth=0.9, location=(s * 0.6, -0.15, 0.35))
     arm = bpy.context.active_object
     arm.rotation_euler = (math.radians(-20), math.radians(s * 50), 0)
     jumper_parts.append(arm)
 
-# الرجلان مفرودتان ومثنيتان
 for s in [-1, 1]:
     bpy.ops.mesh.primitive_cylinder_add(radius=0.11, depth=1.0, location=(s * 0.35, 0.25, -0.55))
     leg = bpy.context.active_object
@@ -181,24 +176,20 @@ bpy.ops.object.join()
 skydiver = bpy.context.active_object
 skydiver.data.materials.append(mat_red_cooper)
 
-# مسار القفز والسقوط بدقة
-# البداية عند الدرج الخلفي
+# مسار القفز والسقوط
 skydiver.location = (0, 5.8, 7.0)
 skydiver.rotation_euler = (math.radians(-15), 0, 0)
 skydiver.keyframe_insert(data_path="location", frame=1)
 skydiver.keyframe_insert(data_path="rotation_euler", frame=1)
 
-# لحظة القفز والانفصال (إطار 25)
 skydiver.location = (0, 7.0, 6.6)
 skydiver.keyframe_insert(data_path="location", frame=25)
 
-# السقوط الحر في المنتصف مع الدوران (إطار 85)
 skydiver.location = (0.5, 9.0, -4.0)
 skydiver.rotation_euler = (math.radians(160), math.radians(45), math.radians(30))
 skydiver.keyframe_insert(data_path="location", frame=85)
 skydiver.keyframe_insert(data_path="rotation_euler", frame=85)
 
-# الهبوط في قلب الهالة البيضاء للغابة (إطار 150)
 skydiver.location = (0, 11.0, -18.0)
 skydiver.rotation_euler = (math.radians(320), math.radians(90), math.radians(60))
 skydiver.keyframe_insert(data_path="location", frame=150)
@@ -233,17 +224,14 @@ for i in range(150):
     
     bpy.ops.mesh.primitive_cone_add(vertices=5, radius1=0.8 * s, depth=2.4 * s, location=(gx, gy, gz))
     tree = bpy.context.active_object
-    # الأشجار في المركز بيضاء متوهجة تماماً كفيديو LEMMiNO
     tree.data.materials.append(mat_forest_center if dist < 9.5 else mat_forest_dark)
 
 # ============================================================
-# 7. الكاميرا السينمائية مع نظام التتبع المغلق (Track-To System)
+# 7. الكاميرا السينمائية مع نظام التتبع الصحيح (Constraints)
 # ============================================================
-# نقطة استهداف وهمية تتبعها الكاميرا دائماً دون أن تفلت
 target = bpy.data.objects.new("CamTarget", None)
 scene.collection.objects.link(target)
 
-# تحريك نقطة الاستهداف مع الحدث الرئيسي
 target.location = (0, 3, 7.5)
 target.keyframe_insert(data_path="location", frame=1)
 target.location = (0, 7.5, 0.0)
@@ -252,18 +240,18 @@ target.location = (0, 11.0, -17.0)
 target.keyframe_insert(data_path="location", frame=150)
 
 cam_data = bpy.data.cameras.new("MainCam")
-cam_data.lens = 45  # بعد بؤري يمنع تشوه الأبعاد
+cam_data.lens = 45
 cam = bpy.data.objects.new("MainCam", cam_data)
 scene.collection.objects.link(cam)
 scene.camera = cam
 
-# تثبيت عين الكاميرا على الهدف (مستحيل أن تتجه للفراغ)
-track = cam.modifiers.new("TrackTarget", 'TRACK_TO')
+# التصحيح هنا: استخدام constraints بدلاً من modifiers
+track = cam.constraints.new(type='TRACK_TO')
 track.target = target
 track.track_axis = 'TRACK_NEGATIVE_Z'
 track.up_axis = 'UP_Y'
 
-# مسار الكاميرا السينمائي الموزون بعيداً عن أي اصطدام
+# مسار الكاميرا السينمائي الموزون
 cam.location = (11.0, 16.0, 11.5)
 cam.keyframe_insert(data_path="location", frame=1)
 
@@ -273,5 +261,5 @@ cam.keyframe_insert(data_path="location", frame=85)
 cam.location = (4.0, 18.0, -11.0)
 cam.keyframe_insert(data_path="location", frame=150)
 
-print(">> تم بناء المشهد باحترافية وتطابق تام. بدء الرندر...")
+print(">> تم تصحيح الكود بالكامل وبدء الرندر بنجاح...")
 bpy.ops.render.render(animation=True)
