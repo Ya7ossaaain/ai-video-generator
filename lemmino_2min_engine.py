@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28.5 - AGY FIXED WITHOUT --effort)
+LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28.6 - FIXED & ASSET TRACKING)
+- AGY Model: gemini-3.8-flash
+- Blender: Fixed os.path.exists
+- Full Live Asset Tracking Dashboard
 """
 
 import os
@@ -37,7 +40,8 @@ GEMINI_KEY = GEMINI_KEYS[0] if GEMINI_KEYS else ""
 SKETCHFAB_KEY = os.environ.get("SKETCHFAB_API_KEY", "").strip()
 OPENTOPO_KEY = os.environ.get("OPENTOPOGRAPHY_API_KEY", "").strip()
 
-AGY_SCRIPT_MODEL = "gemini-3.1-pro"
+# النماذج المطابقة لحسابك تماماً
+AGY_SCRIPT_MODEL = "gemini-3.8-flash"
 TTS_MODEL = "gemini-3.8-flash-tts"
 TTS_VOICE = "Charon"
 
@@ -67,11 +71,19 @@ def extract_json(text):
         except: pass
     return None
 
+ASSET_STATUS = {
+    "agy_script": "⏳ قيد الانتظار",
+    "gemini_tts": "⏳ قيد الانتظار",
+    "jumper_3d": "⏳ قيد الانتظار",
+    "plane_3d": "⏳ قيد الانتظار",
+    "terrain_dem": "⏳ قيد الانتظار"
+}
+
 # =============================================================================
-# 2. استدعاء أداة AGY الأصلية (تم حذف --effort لتوافق gemini-3.1-pro)
+# 2. استدعاء أداة AGY بنموذج gemini-3.8-flash
 # =============================================================================
 def agy_generate_script():
-    log_print("🧠 [AGY] استدعاء أداة AGY لصياغة السيناريو الاستقصائي...")
+    log_print("🧠 [AGY] استدعاء أداة AGY بنموذج gemini-3.8-flash...")
     prompt = """You are an elite investigative documentary director in the exact style of LEMMINO.
 Topic: The Mystery of D.B. Cooper.
 Generate a broadcast script in Arabic for narration, and specific forensic details for on-screen graphics.
@@ -101,19 +113,21 @@ Return ONLY valid JSON:
     env_vars["SSH_CONNECTION"] = "127.0.0.1 0 127.0.0.1 22"
     env_vars["AGY_OAUTH_TOKEN"] = os.environ.get("AGY_CREDENTIALS", "")
 
-    # تم حذف --effort لتوافق gemini-3.1-pro بنجاح
+    # استخدام نموذج gemini-3.8-flash المتاح بدون وسيطة --effort
     cmd = [agy_bin, "--model", AGY_SCRIPT_MODEL, "--dangerously-skip-permissions", "-p", prompt]
     try:
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120, env=env_vars)
         data = extract_json(res.stdout)
         if data and "narration" in data:
             log_print("✅ [AGY] تم توليد السيناريو بنجاح عبر Antigravity CLI.")
+            ASSET_STATUS["agy_script"] = f"✅ نجح توليده عبر AGY ({AGY_SCRIPT_MODEL})"
             return data
         else:
             log_print(f"⚠️ تفاصيل AGY: {res.stderr[:250]}")
     except Exception as e:
         log_print(f"⚠️ خطأ أثناء تشغيل agy ({e})")
 
+    ASSET_STATUS["agy_script"] = "⚠️ تم استخدام السيناريو الاستقصائي البديل المدمج"
     return {
         "narration": "في الرابع والعشرين من نوفمبر عام ألف وتسعمائة وواحد وسبعين، استقل دان كوبر طائرة البوينغ سبعمائة وسبعة وعشرين من بورتلاند. بعد تهديده بوجود قنبلة، طالب بمائتي ألف دولار وأربع مظلات. في سماء واشنطن الممطرة، فُتح الدرج الخلفي وقفز كوبر في ظلام دامس نحو المجهول، تاركاً وراءه اللغز الأكبر في تاريخ الطيران الأمريكي.",
         "scene3_evidence": {
@@ -171,26 +185,46 @@ if GEMINI_KEY:
             temp_pcm.unlink(missing_ok=True)
             has_voice = master_narration_wav.exists() and master_narration_wav.stat().st_size > 1024
             if has_voice:
+                ASSET_STATUS["gemini_tts"] = f"✅ تم التوليد بنجاح ({master_narration_wav.stat().st_size // 1024} KB)"
                 log_print("✅ [Gemini TTS] تم توليد الصوت الماستر بنجاح.")
     except Exception as e:
         log_print(f"⚠️ خطأ في توليد صوت Gemini ({e})")
+        ASSET_STATUS["gemini_tts"] = f"❌ فشل ({e})"
+else:
+    ASSET_STATUS["gemini_tts"] = "❌ مفتاح GEMINI_API_KEY مفقود"
 
 # =============================================================================
-# 4. تنزيل الأصول (Sketchfab + OpenTopography)
+# 4. تنزيل الأصول وتتبع حالتها بدقة
 # =============================================================================
 def fetch_sketchfab_model(query, output_dir, tag_name):
-    if not SKETCHFAB_KEY: return None
+    if not SKETCHFAB_KEY:
+        ASSET_STATUS[f"{tag_name}_3d"] = "❌ مفتاح SKETCHFAB_API_KEY مفقود"
+        return None
     try:
-        log_print(f"🔍 [Sketchfab] البحث عن مجسم: '{query}'...")
+        log_print(f"🔍 [Sketchfab] جاري البحث عن مجسم ثلاثي أبعاد: '{query}'...")
         headers = {"Authorization": f"Token {SKETCHFAB_KEY}"}
         search_url = f"https://api.sketchfab.com/v3/models?q={query}&downloadable=true&licenses=by,by-nc,cc0&sort_by=-likeCount"
         r = requests.get(search_url, headers=headers, timeout=15)
+        
+        if r.status_code != 200:
+            ASSET_STATUS[f"{tag_name}_3d"] = f"❌ فشل الاتصال بموقع Sketchfab (كود {r.status_code})"
+            return None
+
         results = r.json().get("results", [])
-        if not results: return None
+        if not results:
+            log_print(f"⚠️ لم يتم العثور على نتائج مجانية قابلة للتنزيل لـ '{query}'")
+            ASSET_STATUS[f"{tag_name}_3d"] = "⚠️ لم يُعثر على موديل مجاني متاح للتحميل مباشرة -> بديل هندسي"
+            return None
+
         uid = results[0]["uid"]
+        model_name = results[0]["name"]
+        log_print(f"📦 تم العثور على الموديل: '{model_name}' (UID: {uid})")
+
         d_res = requests.get(f"https://api.sketchfab.com/v3/models/{uid}/download", headers=headers, timeout=15)
         download_link = d_res.json().get("gltf", {}).get("url")
-        if not download_link: return None
+        if not download_link:
+            ASSET_STATUS[f"{tag_name}_3d"] = "❌ لم يوفر الموديل رابط تحميل glTF صالحاً"
+            return None
 
         zip_path = output_dir / f"{tag_name}.zip"
         with requests.get(download_link, stream=True, timeout=30) as dl:
@@ -199,16 +233,28 @@ def fetch_sketchfab_model(query, output_dir, tag_name):
         extract_dir = output_dir / tag_name
         with zipfile.ZipFile(zip_path, 'r') as zip_ref: zip_ref.extractall(extract_dir)
 
-        for p in extract_dir.rglob("*.gltf"): return str(p.resolve())
-        for p in extract_dir.rglob("*.glb"): return str(p.resolve())
-    except: pass
+        for p in extract_dir.rglob("*.gltf"):
+            size_kb = p.stat().st_size // 1024
+            ASSET_STATUS[f"{tag_name}_3d"] = f"✅ تم التنزيل بنجاح: '{model_name}' ({size_kb} KB)"
+            log_print(f"✅ [Sketchfab] تم تنزيل المجسم واستخراجه بنجاح: {p.name}")
+            return str(p.resolve())
+            
+        for p in extract_dir.rglob("*.glb"):
+            size_kb = p.stat().st_size // 1024
+            ASSET_STATUS[f"{tag_name}_3d"] = f"✅ تم التنزيل بنجاح: '{model_name}' ({size_kb} KB)"
+            log_print(f"✅ [Sketchfab] تم تنزيل المجسم واستخراجه بنجاح: {p.name}")
+            return str(p.resolve())
+    except Exception as e:
+        ASSET_STATUS[f"{tag_name}_3d"] = f"❌ خطأ أثناء التحميل ({e})"
     return None
 
 def fetch_opentopography_dem(output_dir):
     tif_path = output_dir / "terrain_washington.tif"
-    if not OPENTOPO_KEY: return None
+    if not OPENTOPO_KEY:
+        ASSET_STATUS["terrain_dem"] = "❌ مفتاح OPENTOPOGRAPHY_API_KEY مفقود"
+        return None
     try:
-        log_print("🗺️ [OpenTopography] تنزيل خريطة الارتفاعات الرقمية من ناسا...")
+        log_print("🗺️ [OpenTopography] تنزيل خريطة الارتفاعات الرقمية من ناسا (SRTM DEM)...")
         params = {
             "demtype": "SRTMGL3", "south": "45.85", "north": "46.10",
             "west": "-122.65", "east": "-122.30", "outputFormat": "GTiff",
@@ -217,26 +263,45 @@ def fetch_opentopography_dem(output_dir):
         res = requests.get("https://portal.opentopography.org/API/globaldem", params=params, timeout=20)
         if res.status_code == 200 and len(res.content) > 5000:
             tif_path.write_bytes(res.content)
+            size_kb = len(res.content) // 1024
+            ASSET_STATUS["terrain_dem"] = f"✅ تم تنزيل تضاريس ناسا بنجاح ({size_kb} KB)"
+            log_print(f"✅ [OpenTopography] تم تنزيل الخريطة بنجاح ({size_kb} KB)")
             return str(tif_path.resolve())
-    except: pass
+        else:
+            ASSET_STATUS["terrain_dem"] = f"❌ خطأ في السيرفر (كود {res.status_code})"
+    except Exception as e:
+        ASSET_STATUS["terrain_dem"] = f"❌ خطأ أثناء التنزيل ({e})"
     return None
 
 models_dir = SHUTTLE_DIR / "models"
 models_dir.mkdir(parents=True, exist_ok=True)
+
+# تنزيل الأصول
 jumper_model = fetch_sketchfab_model("parachute", models_dir, "jumper")
 plane_model = fetch_sketchfab_model("boeing 727", models_dir, "plane")
 terrain_dem = fetch_opentopography_dem(models_dir)
 
+# طباعة لوحة فحص حالة الأصول لتعرف حالة كل أصل بوضوح تام!
+log_print("\n" + "="*60)
+log_print("📊 لوحة تقرير حالة الأصول (Asset Acquisition Report):")
+log_print(f"  🧠 السيناريو (AGY Script)    : {ASSET_STATUS['agy_script']}")
+log_print(f"  🎙️ التعليق الصوتي (Gemini TTS): {ASSET_STATUS['gemini_tts']}")
+log_print(f"  🪂 مجسم المظلي (Sketchfab)    : {ASSET_STATUS['jumper_3d']}")
+log_print(f"  ✈️ مجسم الطائرة (Sketchfab)   : {ASSET_STATUS['plane_3d']}")
+log_print(f"  🏔️ تضاريس ناسا (OpenTopography): {ASSET_STATUS['terrain_dem']}")
+log_print("="*60 + "\n")
+
 # =============================================================================
-# 5. تصيير بلندر بمحرك التظليل السحابي
+# 5. تصيير بلندر (تم تصحيح os.path.exists ليعمل 100%)
 # =============================================================================
 raw_shot1_prefix = (SHUTTLE_DIR / "shot1_output").resolve()
 raw_shot2_prefix = (SHUTTLE_DIR / "shot2_output").resolve()
 
 shot1_py = SHUTTLE_DIR / "shot1.py"
 shot1_py.write_text(f"""
-import bpy, math
+import bpy, math, os
 
+# تفريغ آمن للمشهد
 for obj in list(bpy.data.objects):
     bpy.data.objects.remove(obj, do_unlink=True)
 
@@ -255,7 +320,8 @@ if mat_red.node_tree:
     mat_red.node_tree.links.new(emis.outputs['Emission'], out.inputs['Surface'])
 
 jumper_path = {repr(jumper_model)}
-if jumper_path and bpy.path.exists(jumper_path):
+# تصحيح الخطأ: استخدام os.path.exists بدلاً من bpy.path.exists
+if jumper_path and os.path.exists(jumper_path):
     bpy.ops.import_scene.gltf(filepath=jumper_path)
     jumper = bpy.context.selected_objects[0]
     jumper.location = (0, 0, 5)
@@ -300,7 +366,7 @@ scene.render.filepath = {repr(str(raw_shot1_prefix))}
 
 shot2_py = SHUTTLE_DIR / "shot2.py"
 shot2_py.write_text(f"""
-import bpy, math
+import bpy, math, os
 
 for obj in list(bpy.data.objects):
     bpy.data.objects.remove(obj, do_unlink=True)
@@ -317,7 +383,8 @@ terrain = bpy.context.active_object
 
 disp = terrain.modifiers.new(name="Mountains", type='DISPLACE')
 dem_file = {repr(terrain_dem)}
-if dem_file and bpy.path.exists(dem_file):
+# تصحيح الخطأ: استخدام os.path.exists
+if dem_file and os.path.exists(dem_file):
     tex = bpy.data.textures.new("DEM_Tex", type='IMAGE')
     img = bpy.data.images.load(dem_file)
     tex.image = img
@@ -330,7 +397,7 @@ else:
     disp.strength = 3.5
 
 plane_file = {repr(plane_model)}
-if plane_file and bpy.path.exists(plane_file):
+if plane_file and os.path.exists(plane_file):
     bpy.ops.import_scene.gltf(filepath=plane_file)
     plane = bpy.context.selected_objects[0]
     max_p = max(plane.dimensions) if max(plane.dimensions) > 0 else 1.0
@@ -362,6 +429,7 @@ scene.render.ffmpeg.format, scene.render.ffmpeg.codec = 'MPEG4', 'H264'
 scene.render.filepath = {repr(str(raw_shot2_prefix))}
 """)
 
+# تشغيل بلندر مع راية الأنيميشن (-a)
 run_cmd(["blender", "-b", "-P", str(shot1_py), "-a"], "رندرة المشهد 1 عبر بلندر")
 run_cmd(["blender", "-b", "-P", str(shot2_py), "-a"], "رندرة المشهد 2 عبر بلندر")
 
@@ -374,7 +442,7 @@ def resolve_blender_video(prefix_name, target_filename):
     if matches:
         matches.sort(key=lambda p: p.stat().st_size, reverse=True)
         shutil.move(str(matches[0]), str(target_path))
-        log_print(f"✅ تم تأكيد ملف بلندر: {target_path.name}")
+        log_print(f"✅ تم تأكيد واستخراج فيديو بلندر: {target_path.name}")
         return target_path
     
     log_print(f"⚠️ إنشاء بديل فوري لـ {target_filename}...")
