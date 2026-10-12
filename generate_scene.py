@@ -15,7 +15,6 @@ import urllib.request
 import re
 from pathlib import Path
 
-# استيراد المكتبات المفتوحة
 try:
     from huggingface_hub import hf_hub_download
 except ImportError:
@@ -57,7 +56,6 @@ def extract_json(text):
 
 
 def convert_to_clean_obj(input_file, output_file):
-    """تحويل أي صيغة إلى OBJ نقية لتجاوز أخطاء إضافة glTF في بلندر"""
     if not input_file.exists():
         return False
     log(f"🔄 تحويل ({input_file.name}) إلى صيغة OBJ نقية عبر Trimesh...")
@@ -80,10 +78,8 @@ def convert_to_clean_obj(input_file, output_file):
 
 
 def fetch_open_assets():
-    """تحميل الأصول من Hugging Face والمصادر المفتوحة بدون أي مفاتيح API"""
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 1. تحميل الطائرة
     if not PLANE_OBJ.exists():
         plane_raw = MODELS_DIR / "temp_plane.glb"
         plane_urls = [
@@ -107,7 +103,6 @@ def fetch_open_assets():
             except Exception as e:
                 log(f"  ⚠️ تعذر الرابط {i}: {e}")
 
-    # 2. تحميل المظلي البشري
     if not SKYDIVER_OBJ.exists():
         skydiver_raw = MODELS_DIR / "temp_skydiver.glb"
         human_urls = [
@@ -207,7 +202,6 @@ if hasattr(scene, "eevee"):
 
 scene.render.use_freestyle = False
 
-# فضاء أسود كوني
 world = bpy.data.worlds.new("VoidWorld")
 world.use_nodes = True
 world.node_tree.nodes['Background'].inputs['Color'].default_value = (0, 0, 0, 1)
@@ -280,7 +274,6 @@ if airplane:
         bpy.ops.object.transform_apply(scale=True)
     airplane.location = (0, 0, 12)
 else:
-    # هيكل Boeing 727 احتياطي
     parts = []
     bpy.ops.mesh.primitive_cylinder_add(vertices=16, radius=1.1, depth=13.0, location=(0, 0, 12))
     fuse = bpy.context.active_object
@@ -337,7 +330,6 @@ wire_p.thickness = 0.022
 wire_p.use_replace = False
 wire_p.material_offset = 1
 
-# الدرج الخلفي المفتوح
 bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 5.8, 10.8))
 stair = bpy.context.active_object
 stair.scale = (0.6, 2.2, 0.06)
@@ -439,7 +431,6 @@ topo.thickness = 0.014
 topo.use_replace = False
 topo.material_offset = 1
 
-# أشجار الصنوبر في الوادي الأوسط
 for i in range(80):
     gx = random.uniform(-35, 35)
     gy = random.uniform(-2, 36)
@@ -505,14 +496,11 @@ bpy.ops.render.render(animation=True)
 def main():
     log("🚀 تشغيل بايبلاين LEMMiNO المؤتمت بالكامل...")
 
-    # 1. جلب الموديلات مفتوحة المصدر وتحويلها إلى OBJ
     fetch_open_assets()
 
-    # 2. فحص واعتماد المشهد عبر AGY
     preview_img = MODELS_DIR / "plane_preview.png"
     review_with_agy(preview_img, "Airliner, Skydiver & Cascade Mountains")
 
-    # 3. تشغيل بلندر
     script_path = Path("render_core.py")
     with open(script_path, "w", encoding="utf-8") as f:
         f.write(BLENDER_SCRIPT)
@@ -522,8 +510,8 @@ def main():
     # ✅ ضبط متغيرات البيئة لتفعيل EGL في وضع الخلفية (Headless)
     env = os.environ.copy()
     env["EGL_PLATFORM"] = "surfaceless"
-    env["MESA_GL_VERSION_OVERRIDE"] = "4.1"
     env["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    env["MESA_GL_VERSION_OVERRIDE"] = "4.1"
 
     blender_bin = os.environ.get("BLENDER_BIN", "blender")
     res = subprocess.run(
