@@ -37,9 +37,11 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y \
           curl jq wget xz-utils \
-          libgl1 libegl1 libx11-6 libxi6 \
-          libxxf86vm1 libxrender1 libgomp1 libsm6 \
-          libgbm1 libglvnd0 libglu1-mesa
+          libegl1 libegl-mesa0 libgl1 libgl1-mesa-dri \
+          libglx-mesa0 libgbm1 libglu1-mesa \
+          libx11-6 libxext6 libxi6 libxrender1 \
+          libxfixes3 libxxf86vm1 libsm6 libgomp1 \
+          libglvnd0
 
     - name: Install Blender Portable
       run: |
@@ -83,8 +85,8 @@ jobs:
       env:
         AGY_CREDENTIALS: ${{ secrets.AGY_CREDENTIALS }}
         EGL_PLATFORM: surfaceless
-        MESA_GL_VERSION_OVERRIDE: "4.1"
         LIBGL_ALWAYS_SOFTWARE: "1"
+        MESA_GL_VERSION_OVERRIDE: "4.1"
       run: |
         python3 generate_scene.py
 
