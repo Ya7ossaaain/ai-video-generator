@@ -18,13 +18,36 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Install Blender & System Tools
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Cache Blender
+      uses: actions/cache@v4
+      with:
+        path: ~/blender
+        key: blender-4.2.0-linux-x64
+
+    - name: Install System Tools
       run: |
         sudo apt-get update
-        sudo apt-get install -y blender curl jq
+        sudo apt-get install -y curl jq wget xz-utils
 
-    # تثبيت المكتبتين مفتوحتي المصدر للتعامل مع الـ 3D بدون API Key
-    - name: Install Open-Source 3D Libraries
+    - name: Install Blender Portable
+      run: |
+        if [ ! -d "$HOME/blender" ]; then
+          wget -q https://download.blender.org/release/Blender4.2/blender-4.2.0-linux-x64.tar.xz
+          tar -xf blender-4.2.0-linux-x64.tar.xz
+          mv blender-4.2.0-linux-x64 "$HOME/blender"
+          rm blender-4.2.0-linux-x64.tar.xz
+        fi
+        echo "$HOME/blender" >> "$GITHUB_PATH"
+
+    - name: Install Python Dependencies
       run: |
         pip install --no-cache-dir huggingface_hub trimesh
 
@@ -33,8 +56,8 @@ jobs:
         AGY_CREDENTIALS: ${{ secrets.AGY_CREDENTIALS }}
       run: |
         if ! command -v agy &> /dev/null; then
-          curl -fsSL https://antigravity.google/cli/install.sh | bash || true
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          curl -fsSL https://antigravity.google/cli/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.local/bin:$PATH"
         fi
 
