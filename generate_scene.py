@@ -83,7 +83,7 @@ def fetch_open_assets():
     """تحميل الأصول من Hugging Face والمصادر المفتوحة بدون أي مفاتيح API"""
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 1. تحميل الطائرة — رابط واحد حقيقي فقط لتجنب الانتظار الطويل
+    # 1. تحميل الطائرة
     if not PLANE_OBJ.exists():
         plane_raw = MODELS_DIR / "temp_plane.glb"
         plane_url = (
@@ -142,7 +142,6 @@ Return ONLY valid JSON:
   "reason": "Short explanation"
 }}"""
 
-    # استخدام --output-format json لتشغيل AGY في وضع headless داخل CI
     cmd = [
         "agy",
         "--model", AGY_REVIEWER_MODEL,
@@ -171,6 +170,7 @@ Return ONLY valid JSON:
 
 # =============================================================================
 # كود Blender عبر محرك EEVEE السريع
+# ⚠️ تنبيه: أي f-string داخلي يحتاج تهريب الأقواس {{}} أو تجنب f تماماً
 # =============================================================================
 BLENDER_SCRIPT = f"""
 import bpy
@@ -247,8 +247,9 @@ def import_obj_safely(file_path):
             bpy.ops.wm.obj_import(filepath=str(file_path))
         else:
             bpy.ops.import_scene.obj(filepath=str(file_path))
-    except Exception as e:
-        print(f"⚠️ فشل استيراد OBJ: {e}", flush=True)
+    except Exception as err:
+        # ✅ لا يوجد f-string هنا → لا مشكلة في التقييم المزدوج
+        print("⚠️ فشل استيراد OBJ:", err, flush=True)
         return None
     new_objs = [o for o in bpy.data.objects if o not in before and o.type == 'MESH']
     if new_objs:
@@ -435,7 +436,7 @@ topo.thickness = 0.014
 topo.use_replace = False
 topo.material_offset = 1
 
-# أشجار الصنوبر في الوادي الأوسط (عدد أقل لأداء أفضل)
+# أشجار الصنوبر في الوادي الأوسط
 for i in range(80):
     gx = random.uniform(-35, 35)
     gy = random.uniform(-2, 36)
@@ -514,7 +515,6 @@ def main():
         f.write(BLENDER_SCRIPT)
 
     log("🎬 استدعاء Blender لتنفيذ الرندر...")
-    # ملاحظة: Blender Portable مثبت في $HOME/blender
     blender_bin = os.environ.get("BLENDER_BIN", "blender")
     res = subprocess.run([blender_bin, "-b", "-P", str(script_path)], text=True)
 
