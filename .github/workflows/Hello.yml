@@ -1,67 +1,124 @@
-name: Lemmino 2-Minute Benchmark Engine (AGY + 3D)
+name: render
 
 on:
-  workflow_dispatch: # تشغيل يدوي بنقرة زر
+  workflow_dispatch: # تشغيل يدوي بنقرة زر من Actions
+  push:
+    branches: [ main, master ]
 
 jobs:
-  render-benchmark:
+  render:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 60
 
     steps:
-      - name: 📥 تفقد المستودع (Checkout Code)
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: ⚙️ إعداد بيئة بايثون و Node.js
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: 🟢 إعداد Node.js لتشغيل AGY
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: 🔑 إعداد وتسجيل اعتماد AGY
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Cache Blender
+        id: cache-blender
+        uses: actions/cache@v4
+        with:
+          path: blender-portable
+          key: ${{ runner.os }}-blender-4.2-portable
+
+      - name: Install System Tools (incl. Xvfb)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb ffmpeg fonts-noto-core fonts-noto-extra libgl1-mesa-dev libxi6 libxxf86vm1 libxfixes3 libxrender1
+
+      - name: Install Blender Portable
+        if: steps.cache-blender.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p blender-portable
+          echo "⬇️ جاري تنزيل نسخة بلندر المحمولة..."
+          curl -sSL "https://download.blender.org/release/Blender4.2/blender-4.2.3-linux-x64.tar.xz" -o blender.tar.xz
+          tar -xf blender.tar.xz -C blender-portable --strip-components=1
+          rm blender.tar.xz
+
+      - name: Register Blender to PATH
+        run: |
+          echo "$GITHUB_WORKSPACE/blender-portable" >> $GITHUB_PATH
+          echo "✅ تم تسجيل مسار بلندر بنجاح."
+
+      - name: Install Python Dependencies
+        run: |
+          # 1. تثبيت المكتبات لبايثون النظام
+          python -m pip install --upgrade pip
+          pip install requests google-genai google-api-python-client google-auth
+
+          # 2. ربط مسار مكتبات النظام بمتغير PYTHONPATH لبلندر
+          SYS_SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])")
+          echo "PYTHONPATH=$SYS_SITE_PACKAGES" >> $GITHUB_ENV
+          echo "✅ تم ربط مسار النظام: $SYS_SITE_PACKAGES"
+
+          # 3. تثبيت requests مباشرة داخل بايثون بلندر المعزول لضمان عمله 100%
+          BLENDER_PY=$(find "$GITHUB_WORKSPACE/blender-portable" -path "*/python/bin/python3*" | head -n 1)
+          if [ -n "$BLENDER_PY" ]; then
+            echo "🔧 تثبيت requests داخل بايثون بلندر: $BLENDER_PY"
+            $BLENDER_PY -m ensurepip || true
+            $BLENDER_PY -m pip install requests || true
+          fi
+
+      - name: Setup & Authenticate Antigravity (agy CLI)
         env:
           AGY_CREDS: ${{ secrets.AGY_CREDENTIALS }}
         run: |
-          # تثبيت أداة agy عالمياً إذا كانت متوفرة عبر npm
+          # تثبيت أداة agy عالمياً إذا توفرت عبر npm
           npm install -g agy || true
-          
-          # تهيئة مجلد الإعدادات وتسجيل الاعتماد
           mkdir -p ~/.config/agy ~/.agy
           echo "$AGY_CREDS" > ~/.config/agy/credentials.json
           echo "$AGY_CREDS" > ~/.config/agy/config.json
           echo "$AGY_CREDS" > ~/.agy/credentials.json
           export AGY_CREDENTIALS="$AGY_CREDS"
-          echo "✅ تم تجهيز اعتماد AGY بنجاح."
+          echo "✅ تم إعداد اعتمادات AGY بنجاح."
 
-      - name: 📦 تثبيت Blender و FFmpeg والخطوط العربية
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
-          sudo snap install blender --classic
-
-      - name: 🐍 تثبيت مكتبات بايثون
-        run: |
-          pip install --upgrade pip
-          pip install requests google-genai google-api-python-client google-auth
-
-      - name: 🎬 تشغيل محرك الرندر والاختبار
+      - name: Execute Full Autonomous Pipeline
         env:
+          DISPLAY: ":99"
+          PYTHONPATH: ${{ env.PYTHONPATH }}
           AGY_CREDENTIALS: ${{ secrets.AGY_CREDENTIALS }}
           SKETCHFAB_API_KEY: ${{ secrets.SKETCHFAB_API_KEY }}
           OPENTOPOGRAPHY_API_KEY: ${{ secrets.OPENTOPOGRAPHY_API_KEY }}
           MAPBOX_API_KEY: ${{ secrets.MAPBOX_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
         run: |
+          # تشغيل السيرفر الرسومي الافتراضي بالخلفية
+          Xvfb :99 -screen 0 1280x720x24 &
+          sleep 2
+          
+          # تشغيل محرك الرندر
           python lemmino_2min_engine.py
 
-      - name: 📤 رفع الفيديو الناتج كملف للتحميل (Artifact)
+      - name: Upload Video Artifact
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: Lemmino-2Min-Benchmark-Video
-          path: output_benchmark/lemmino_2min_benchmark.mp4
+          path: |
+            output_benchmark/lemmino_2min_benchmark.mp4
+            output_build/final_documentary.mp4
           retention-days: 7
