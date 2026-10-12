@@ -32,24 +32,33 @@ jobs:
         env:
           AGY_CREDS: ${{ secrets.AGY_CREDENTIALS }}
         run: |
-          # 1. التثبيت الرسمي لأداة Antigravity CLI وإضافتها للـ PATH
+          # 1. تثبيت أداة Antigravity CLI الرسمية وإضافتها للـ PATH
           curl -fsSL https://antigravity.google/cli/install.sh | bash || true
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           export PATH="$HOME/.local/bin:$PATH"
 
-          # 2. إعداد الاعتمادات
-          mkdir -p ~/.config/agy ~/.agy ~/.gemini/antigravity-cli
-          echo "$AGY_CREDS" > ~/.config/agy/credentials.json
-          echo "$AGY_CREDS" > ~/.config/agy/config.json
+          # 2. تسجيل المفتاح في المسار المعتمد لأداة agy في السيرفرات السحابية
+          mkdir -p ~/.gemini/antigravity-cli ~/.config/antigravity ~/.config/agy ~/.agy
+          echo "$AGY_CREDS" > ~/.gemini/antigravity-cli/antigravity-oauth-token
+          chmod 600 ~/.gemini/antigravity-cli/antigravity-oauth-token
+
+          # نسخ احتياطية للمسارات الأخرى
           echo "$AGY_CREDS" > ~/.gemini/antigravity-cli/credentials.json
-          echo "$AGY_CREDS" > ~/.agy/credentials.json
-          export AGY_CREDENTIALS="$AGY_CREDS"
-          echo "✅ تم تثبيت Antigravity CLI وتسجيل اعتمادات AGY بنجاح."
+          echo "$AGY_CREDS" > ~/.config/antigravity/credentials.json
+          echo "$AGY_CREDS" > ~/.config/agy/credentials.json
+
+          # تصدير متغيرات الجلسة السحابية
+          echo "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 22" >> $GITHUB_ENV
+          echo "AGY_OAUTH_TOKEN=$AGY_CREDS" >> $GITHUB_ENV
+          echo "AGY_CREDENTIALS=$AGY_CREDS" >> $GITHUB_ENV
+          echo "✅ تم تفعيل جلسة AGY السحابية بنجاح."
 
       - name: Execute Full Autonomous Pipeline
         env:
           DISPLAY: ":99"
           PYTHONUNBUFFERED: "1"
+          SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 22"
+          AGY_OAUTH_TOKEN: ${{ secrets.AGY_CREDENTIALS }}
           AGY_CREDENTIALS: ${{ secrets.AGY_CREDENTIALS }}
           SKETCHFAB_API_KEY: ${{ secrets.SKETCHFAB_API_KEY }}
           OPENTOPOGRAPHY_API_KEY: ${{ secrets.OPENTOPOGRAPHY_API_KEY }}
