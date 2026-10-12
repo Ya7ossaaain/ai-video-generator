@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28.4 - PRODUCTION READY)
-Antigravity (agy CLI) + Gemini 3.8 Flash TTS + Pure Blender Headless + Forensic UI + FFmpeg
+LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28.5 - AGY FIXED WITHOUT --effort)
 """
 
 import os
@@ -39,7 +38,6 @@ SKETCHFAB_KEY = os.environ.get("SKETCHFAB_API_KEY", "").strip()
 OPENTOPO_KEY = os.environ.get("OPENTOPOGRAPHY_API_KEY", "").strip()
 
 AGY_SCRIPT_MODEL = "gemini-3.1-pro"
-EFFORT_PRO_GENERATION = "high"
 TTS_MODEL = "gemini-3.8-flash-tts"
 TTS_VOICE = "Charon"
 
@@ -70,7 +68,7 @@ def extract_json(text):
     return None
 
 # =============================================================================
-# 2. استدعاء AGY عبر جلسة المصادقة السحابية
+# 2. استدعاء أداة AGY الأصلية (تم حذف --effort لتوافق gemini-3.1-pro)
 # =============================================================================
 def agy_generate_script():
     log_print("🧠 [AGY] استدعاء أداة AGY لصياغة السيناريو الاستقصائي...")
@@ -99,18 +97,17 @@ Return ONLY valid JSON:
 }"""
     agy_bin = shutil.which("agy") or os.path.expanduser("~/.local/bin/agy")
     
-    # تمرير بيئة المصادقة السحابية لـ AGY
     env_vars = os.environ.copy()
     env_vars["SSH_CONNECTION"] = "127.0.0.1 0 127.0.0.1 22"
     env_vars["AGY_OAUTH_TOKEN"] = os.environ.get("AGY_CREDENTIALS", "")
 
-    cmd = [agy_bin, "--model", AGY_SCRIPT_MODEL, "--effort", EFFORT_PRO_GENERATION,
-           "--dangerously-skip-permissions", "-p", prompt]
+    # تم حذف --effort لتوافق gemini-3.1-pro بنجاح
+    cmd = [agy_bin, "--model", AGY_SCRIPT_MODEL, "--dangerously-skip-permissions", "-p", prompt]
     try:
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120, env=env_vars)
         data = extract_json(res.stdout)
         if data and "narration" in data:
-            log_print("✅ [AGY] تم استلام السيناريو بنجاح عبر Antigravity CLI.")
+            log_print("✅ [AGY] تم توليد السيناريو بنجاح عبر Antigravity CLI.")
             return data
         else:
             log_print(f"⚠️ تفاصيل AGY: {res.stderr[:250]}")
@@ -139,7 +136,7 @@ Return ONLY valid JSON:
 STORY_DATA = agy_generate_script()
 
 # =============================================================================
-# 3. GEMINI 3.8 FLASH TTS
+# 3. GEMINI 3.8 FLASH TTS ENGINE
 # =============================================================================
 master_narration_wav = SHUTTLE_DIR / "narration_master.wav"
 has_voice = False
@@ -231,7 +228,7 @@ plane_model = fetch_sketchfab_model("boeing 727", models_dir, "plane")
 terrain_dem = fetch_opentopography_dem(models_dir)
 
 # =============================================================================
-# 5. تصيير بلندر بمحرك التظليل السحابي المتوافق 100%
+# 5. تصيير بلندر بمحرك التظليل السحابي
 # =============================================================================
 raw_shot1_prefix = (SHUTTLE_DIR / "shot1_output").resolve()
 raw_shot2_prefix = (SHUTTLE_DIR / "shot2_output").resolve()
@@ -240,7 +237,6 @@ shot1_py = SHUTTLE_DIR / "shot1.py"
 shot1_py.write_text(f"""
 import bpy, math
 
-# تفريغ آمن للمشهد دون كسر الإعدادات
 for obj in list(bpy.data.objects):
     bpy.data.objects.remove(obj, do_unlink=True)
 
@@ -248,7 +244,6 @@ scene = bpy.context.scene
 scene.render.fps = {FPS}
 scene.frame_start, scene.frame_end = 1, {FPS * 30}
 
-# لون أحمر ساطع متوافق مع كافة محركات بلندر
 mat_red = bpy.data.materials.new("LemminoRed")
 mat_red.diffuse_color = (0.85, 0.02, 0.05, 1.0)
 mat_red.use_nodes = True
@@ -367,7 +362,6 @@ scene.render.ffmpeg.format, scene.render.ffmpeg.codec = 'MPEG4', 'H264'
 scene.render.filepath = {repr(str(raw_shot2_prefix))}
 """)
 
-# تشغيل بلندر مع راية الأنيميشن (-a) الرسمية
 run_cmd(["blender", "-b", "-P", str(shot1_py), "-a"], "رندرة المشهد 1 عبر بلندر")
 run_cmd(["blender", "-b", "-P", str(shot2_py), "-a"], "رندرة المشهد 2 عبر بلندر")
 
