@@ -2,15 +2,16 @@ import bpy
 import math
 import random
 
-# 1. تنظيف المشهد وضبط الإعدادات
+# ============================================================
+# 1. إعداد المشهد ومحرك الرندر
+# ============================================================
 bpy.ops.wm.read_factory_settings(use_empty=True)
 
 scene = bpy.context.scene
 scene.render.fps = 24
 scene.frame_start = 1
-scene.frame_end = 180
+scene.frame_end = 150  # 6.25 ثانية سينمائية مركزة ومثالية
 
-# ضبط الاسم ليتطابق تماماً مع ملف GitHub Actions
 scene.render.image_settings.file_format = 'FFMPEG'
 scene.render.ffmpeg.format = 'MPEG4'
 scene.render.ffmpeg.codec = 'H264'
@@ -22,133 +23,154 @@ scene.render.engine = 'CYCLES'
 scene.cycles.samples = 8
 scene.cycles.use_denoising = False
 
-# 2. إنشاء الخامات
-def create_mat(name, color, is_emission=True, strength=1.0):
+# خلفية سوداء نقية
+world = bpy.data.worlds.new("LemminoVoid")
+world.use_nodes = True
+world.node_tree.nodes['Background'].inputs['Color'].default_value = (0, 0, 0, 1)
+scene.world = world
+
+# ============================================================
+# 2. الخامات التخطيطية النقية (CAD / Blueprint Shaders)
+# ============================================================
+def get_emission_mat(name, color, strength=2.0):
     mat = bpy.data.materials.new(name=name)
     mat.use_nodes = True
     nodes = mat.node_tree.nodes
     nodes.clear()
     out = nodes.new('ShaderNodeOutputMaterial')
-    if is_emission:
-        shader = nodes.new('ShaderNodeEmission')
-        shader.inputs['Color'].default_value = color
-        shader.inputs['Strength'].default_value = strength
-        mat.node_tree.links.new(shader.outputs['Emission'], out.inputs['Surface'])
-    else:
-        shader = nodes.new('ShaderNodeBsdfDiffuse')
-        shader.inputs['Color'].default_value = color
-        mat.node_tree.links.new(shader.outputs['BSDF'], out.inputs['Surface'])
+    em = nodes.new('ShaderNodeEmission')
+    em.inputs['Color'].default_value = color
+    em.inputs['Strength'].default_value = strength
+    mat.node_tree.links.new(em.outputs['Emission'], out.inputs['Surface'])
     return mat
 
-mat_solid_black = create_mat("SolidBlack", (0.01, 0.01, 0.01, 1), is_emission=False)
-mat_white_line  = create_mat("WhiteLine", (1.0, 1.0, 1.0, 1), is_emission=True, strength=3.0)
-mat_red_cooper  = create_mat("RedCooper", (1.0, 0.02, 0.02, 1), is_emission=True, strength=4.0)
-mat_tree_white  = create_mat("TreeWhite", (0.95, 0.95, 0.95, 1), is_emission=True, strength=2.0)
-mat_tree_dark   = create_mat("TreeDark",  (0.12, 0.12, 0.12, 1), is_emission=True, strength=0.6)
+mat_body_black = get_emission_mat("BodyBlack", (0.005, 0.005, 0.005, 1), strength=0.0)
+mat_white_edge = get_emission_mat("WhiteEdge", (1.0, 1.0, 1.0, 1), strength=3.0)
+mat_red_cooper = get_emission_mat("RedCooper", (1.0, 0.03, 0.03, 1), strength=4.5)
+mat_forest_center = get_emission_mat("ForestWhite", (0.9, 0.9, 0.9, 1), strength=2.2)
+mat_forest_dark   = get_emission_mat("ForestDark",  (0.08, 0.08, 0.08, 1), strength=0.4)
 
-world = bpy.data.worlds.new("BlackVoid")
-world.use_nodes = True
-world.node_tree.nodes['Background'].inputs['Color'].default_value = (0, 0, 0, 1)
-scene.world = world
+# ============================================================
+# 3. بناء طائرة الـ 727 وعجلات الهبوط والدرج المفتوح
+# ============================================================
+plane_objects = []
 
-def apply_inverted_hull(obj, thickness=0.035):
-    obj.data.materials.append(mat_solid_black)
-    obj.data.materials.append(mat_white_line)
-    solid = obj.modifiers.new(name="Outline", type='SOLIDIFY')
-    solid.thickness = thickness
-    solid.offset = 1.0
-    solid.material_offset = 1
-    solid.use_flip_normals = True
-
-# 3. بناء طائرة Boeing 727
-plane_parts = []
-
-bpy.ops.mesh.primitive_cylinder_add(radius=1.1, depth=14, location=(0, 0, 16))
+# هيكل الطائرة الرئيسي
+bpy.ops.mesh.primitive_cylinder_add(radius=0.9, depth=11.0, location=(0, 0, 8.0))
 fuselage = bpy.context.active_object
 fuselage.rotation_euler = (math.radians(90), 0, 0)
-plane_parts.append(fuselage)
+plane_objects.append(fuselage)
 
-bpy.ops.mesh.primitive_cone_add(radius1=1.1, depth=3.2, location=(0, -8.5, 16))
+# مقدمة الطائرة
+bpy.ops.mesh.primitive_cone_add(radius1=0.9, depth=2.5, location=(0, -6.5, 8.0))
 nose = bpy.context.active_object
 nose.rotation_euler = (math.radians(-90), 0, 0)
-plane_parts.append(nose)
+plane_objects.append(nose)
 
-bpy.ops.mesh.primitive_cube_add(size=1, location=(-6.5, 0, 15.6))
+# الأجنحة الرئيسية المائلة
+bpy.ops.mesh.primitive_cube_add(size=1, location=(-4.8, 0.2, 7.8))
 left_wing = bpy.context.active_object
-left_wing.scale = (11.0, 2.8, 0.12)
-left_wing.rotation_euler = (math.radians(4), math.radians(4), math.radians(28))
-plane_parts.append(left_wing)
+left_wing.scale = (8.5, 2.0, 0.08)
+left_wing.rotation_euler = (math.radians(3), math.radians(3), math.radians(28))
+plane_objects.append(left_wing)
 
-bpy.ops.mesh.primitive_cube_add(size=1, location=(6.5, 0, 15.6))
+bpy.ops.mesh.primitive_cube_add(size=1, location=(4.8, 0.2, 7.8))
 right_wing = bpy.context.active_object
-right_wing.scale = (11.0, 2.8, 0.12)
-right_wing.rotation_euler = (math.radians(4), math.radians(-4), math.radians(-28))
-plane_parts.append(right_wing)
+right_wing.scale = (8.5, 2.0, 0.08)
+right_wing.rotation_euler = (math.radians(3), math.radians(-3), math.radians(-28))
+plane_objects.append(right_wing)
 
-bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 5.5, 18.2))
-tail_fin = bpy.context.active_object
-tail_fin.scale = (0.2, 3.2, 3.8)
-tail_fin.rotation_euler = (math.radians(-32), 0, 0)
-plane_parts.append(tail_fin)
+# ذيل الـ T-Tail الشهير
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 4.4, 9.8))
+fin = bpy.context.active_object
+fin.scale = (0.15, 2.4, 2.8)
+fin.rotation_euler = (math.radians(-30), 0, 0)
+plane_objects.append(fin)
 
-bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 6.8, 20.0))
-tail_wing = bpy.context.active_object
-tail_wing.scale = (6.0, 1.6, 0.1)
-tail_wing.rotation_euler = (math.radians(-5), 0, 0)
-plane_parts.append(tail_wing)
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 5.3, 11.2))
+h_tail = bpy.context.active_object
+h_tail.scale = (4.8, 1.2, 0.08)
+plane_objects.append(h_tail)
 
-for side in [-1.5, 1.5]:
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.55, depth=3.2, location=(side, 4.2, 16.5))
+# المحركات الجانبية الخلفية
+for s in [-1.2, 1.2]:
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.4, depth=2.4, location=(s, 3.4, 8.5))
     eng = bpy.context.active_object
     eng.rotation_euler = (math.radians(90), 0, 0)
-    plane_parts.append(eng)
+    plane_objects.append(eng)
 
-bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 6.4, 14.7))
-stairs = bpy.context.active_object
-stairs.scale = (0.7, 2.4, 0.08)
-stairs.rotation_euler = (math.radians(-42), 0, 0)
-stairs.data.materials.append(mat_red_cooper)
+# تفصيلة عجلات الهبوط المفتوحة (Landing Gear)
+for gx in [-1.5, 0, 1.5]:
+    gy = -3.5 if gx == 0 else 0.8
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.25, depth=0.15, location=(gx, gy, 6.7))
+    gear = bpy.context.active_object
+    gear.rotation_euler = (0, math.radians(90), 0)
+    plane_objects.append(gear)
 
+# الدرج الخلفي المفتوح (Aft Airstair) بلون أحمر متوهج
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 5.2, 7.1))
+stair = bpy.context.active_object
+stair.scale = (0.5, 1.8, 0.06)
+stair.rotation_euler = (math.radians(-40), 0, 0)
+stair.data.materials.append(mat_red_cooper)
+
+# دمج مجسم الطائرة وتطبيق الخطوط الخارجية البيضاء
 bpy.ops.object.select_all(action='DESELECT')
-for p in plane_parts:
+for p in plane_objects:
     p.select_set(True)
 bpy.context.view_layer.objects.active = fuselage
 bpy.ops.object.join()
-airplane = bpy.context.active_object
-apply_inverted_hull(airplane, thickness=0.035)
-stairs.parent = airplane
+plane = bpy.context.active_object
+plane.data.materials.append(mat_body_black)
 
-airplane.location = (0, 0, 0)
-airplane.keyframe_insert(data_path="location", frame=1)
-airplane.location = (0, -70, 4)
-airplane.keyframe_insert(data_path="location", frame=180)
+# خط الحواف الخارجي النقي
+wire_mod = plane.modifiers.new("LineArt", 'WIREFRAME')
+wire_mod.thickness = 0.025
+wire_mod.use_replace = False
+plane.data.materials.append(mat_white_edge)
+wire_mod.material_offset = 1
 
-# 4. بناء شخصية المظلي
+stair.parent = plane
+
+# حركة الطائرة: تعبر الشاشة بسلاسة
+plane.location = (0, 0, 0)
+plane.keyframe_insert(data_path="location", frame=1)
+plane.location = (0, -45, 0)
+plane.keyframe_insert(data_path="location", frame=150)
+
+# ============================================================
+# 4. بناء شخصية المظلي الأحمر (Skydiving Arch Pose)
+# ============================================================
 jumper_parts = []
 
-bpy.ops.mesh.primitive_uv_sphere_add(radius=0.32, location=(0, 0, 0.9))
+# رأس المظلي
+bpy.ops.mesh.primitive_uv_sphere_add(radius=0.22, location=(0, 0, 0.65))
 jumper_parts.append(bpy.context.active_object)
 
-bpy.ops.mesh.primitive_cube_add(size=1, location=(0, -0.1, 0.2))
+# الجذع المنحني
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.15))
 torso = bpy.context.active_object
-torso.scale = (0.75, 0.45, 1.0)
+torso.scale = (0.55, 0.35, 0.75)
 jumper_parts.append(torso)
 
-bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0.22, 0.3))
-rig = bpy.context.active_object
-rig.scale = (0.55, 0.25, 0.75)
-jumper_parts.append(rig)
+# حقيبة المظلة
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0.18, 0.2))
+pack = bpy.context.active_object
+pack.scale = (0.42, 0.18, 0.55)
+jumper_parts.append(pack)
 
-for side in [-1, 1]:
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.13, depth=1.1, location=(side * 0.75, -0.2, 0.5))
+# اليدان مفرودتان لوضعية السقوط الحر
+for s in [-1, 1]:
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.09, depth=0.9, location=(s * 0.6, -0.15, 0.35))
     arm = bpy.context.active_object
-    arm.rotation_euler = (math.radians(-25), math.radians(side * 55), 0)
+    arm.rotation_euler = (math.radians(-20), math.radians(s * 50), 0)
     jumper_parts.append(arm)
 
-for side in [-1, 1]:
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.15, depth=1.3, location=(side * 0.45, 0.3, -0.7))
+# الرجلان مفرودتان ومثنيتان
+for s in [-1, 1]:
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.11, depth=1.0, location=(s * 0.35, 0.25, -0.55))
     leg = bpy.context.active_object
-    leg.rotation_euler = (math.radians(45), math.radians(side * 20), 0)
+    leg.rotation_euler = (math.radians(35), math.radians(s * 15), 0)
     jumper_parts.append(leg)
 
 bpy.ops.object.select_all(action='DESELECT')
@@ -159,74 +181,97 @@ bpy.ops.object.join()
 skydiver = bpy.context.active_object
 skydiver.data.materials.append(mat_red_cooper)
 
-skydiver.location = (0, 7.2, 14.2)
-skydiver.rotation_euler = (math.radians(-20), 0, 0)
+# مسار القفز والسقوط بدقة
+# البداية عند الدرج الخلفي
+skydiver.location = (0, 5.8, 7.0)
+skydiver.rotation_euler = (math.radians(-15), 0, 0)
 skydiver.keyframe_insert(data_path="location", frame=1)
 skydiver.keyframe_insert(data_path="rotation_euler", frame=1)
 
-skydiver.location = (0, 8.5, 13.6)
+# لحظة القفز والانفصال (إطار 25)
+skydiver.location = (0, 7.0, 6.6)
 skydiver.keyframe_insert(data_path="location", frame=25)
 
-skydiver.location = (1.5, 16.0, -14.0)
-skydiver.rotation_euler = (math.radians(180), math.radians(120), math.radians(45))
-skydiver.keyframe_insert(data_path="location", frame=110)
-skydiver.keyframe_insert(data_path="rotation_euler", frame=110)
+# السقوط الحر في المنتصف مع الدوران (إطار 85)
+skydiver.location = (0.5, 9.0, -4.0)
+skydiver.rotation_euler = (math.radians(160), math.radians(45), math.radians(30))
+skydiver.keyframe_insert(data_path="location", frame=85)
+skydiver.keyframe_insert(data_path="rotation_euler", frame=85)
 
-skydiver.location = (0.2, 28.0, -32.0)
-skydiver.rotation_euler = (math.radians(380), math.radians(240), math.radians(90))
-skydiver.keyframe_insert(data_path="location", frame=180)
-skydiver.keyframe_insert(data_path="rotation_euler", frame=180)
+# الهبوط في قلب الهالة البيضاء للغابة (إطار 150)
+skydiver.location = (0, 11.0, -18.0)
+skydiver.rotation_euler = (math.radians(320), math.radians(90), math.radians(60))
+skydiver.keyframe_insert(data_path="location", frame=150)
+skydiver.keyframe_insert(data_path="rotation_euler", frame=150)
 
-# 5. خطوط السرعة والرياح
-random.seed(1971)
-for i in range(45):
-    sx = random.uniform(-16, 16)
-    sy = random.uniform(-25, 25)
-    sz = random.uniform(8, 22)
-    slen = random.uniform(2.5, 6.0)
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.015, depth=slen, location=(sx, sy, sz))
-    sline = bpy.context.active_object
-    sline.rotation_euler = (math.radians(90), 0, 0)
-    sline.data.materials.append(mat_white_line)
-    sline.keyframe_insert(data_path="location", frame=1)
-    sline.location.y += random.uniform(35, 60)
-    sline.keyframe_insert(data_path="location", frame=180)
+# ============================================================
+# 5. خطوط الرياح النفقية (Tunnel Speed Lines)
+# ============================================================
+random.seed(42)
+for i in range(40):
+    lx = random.uniform(-14, 14)
+    ly = random.uniform(-20, 20)
+    lz = random.uniform(2, 14)
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.012, depth=random.uniform(3, 7), location=(lx, ly, lz))
+    line = bpy.context.active_object
+    line.rotation_euler = (math.radians(90), 0, 0)
+    line.data.materials.append(mat_white_edge)
+    
+    line.keyframe_insert(data_path="location", frame=1)
+    line.location.y += random.uniform(30, 50)
+    line.keyframe_insert(data_path="location", frame=150)
 
-# 6. الغابة الكثيفة
-for i in range(160):
-    tx = random.uniform(-35, 35)
-    ty = random.uniform(5, 55)
-    tz = random.uniform(-36, -34)
-    dist_center = math.sqrt(tx**2 + (ty - 30)**2)
-    scale_val = random.uniform(1.2, 2.4)
-    bpy.ops.mesh.primitive_cone_add(vertices=6, radius1=1.1 * scale_val, depth=2.8 * scale_val, location=(tx, ty, tz))
+# ============================================================
+# 6. سجادة الغابة مع بقعة الضوء المركزية
+# ============================================================
+for i in range(150):
+    gx = random.uniform(-30, 30)
+    gy = random.uniform(-5, 30)
+    gz = -22.0
+    dist = math.sqrt(gx**2 + (gy - 11.0)**2)
+    s = random.uniform(0.9, 2.0)
+    
+    bpy.ops.mesh.primitive_cone_add(vertices=5, radius1=0.8 * s, depth=2.4 * s, location=(gx, gy, gz))
     tree = bpy.context.active_object
-    if dist_center < 12.0:
-        tree.data.materials.append(mat_tree_white)
-    else:
-        tree.data.materials.append(mat_tree_dark)
+    # الأشجار في المركز بيضاء متوهجة تماماً كفيديو LEMMiNO
+    tree.data.materials.append(mat_forest_center if dist < 9.5 else mat_forest_dark)
 
-# 7. الكاميرا السينمائية
-cam_data = bpy.data.cameras.new("DirectorCam")
-cam_data.lens = 50
-cam = bpy.data.objects.new("DirectorCam", cam_data)
-bpy.context.collection.objects.link(cam)
+# ============================================================
+# 7. الكاميرا السينمائية مع نظام التتبع المغلق (Track-To System)
+# ============================================================
+# نقطة استهداف وهمية تتبعها الكاميرا دائماً دون أن تفلت
+target = bpy.data.objects.new("CamTarget", None)
+scene.collection.objects.link(target)
+
+# تحريك نقطة الاستهداف مع الحدث الرئيسي
+target.location = (0, 3, 7.5)
+target.keyframe_insert(data_path="location", frame=1)
+target.location = (0, 7.5, 0.0)
+target.keyframe_insert(data_path="location", frame=85)
+target.location = (0, 11.0, -17.0)
+target.keyframe_insert(data_path="location", frame=150)
+
+cam_data = bpy.data.cameras.new("MainCam")
+cam_data.lens = 45  # بعد بؤري يمنع تشوه الأبعاد
+cam = bpy.data.objects.new("MainCam", cam_data)
+scene.collection.objects.link(cam)
 scene.camera = cam
 
-cam.location = (8.5, 12.5, 18.0)
-cam.rotation_euler = (math.radians(78), 0, math.radians(148))
+# تثبيت عين الكاميرا على الهدف (مستحيل أن تتجه للفراغ)
+track = cam.modifiers.new("TrackTarget", 'TRACK_TO')
+track.target = target
+track.track_axis = 'TRACK_NEGATIVE_Z'
+track.up_axis = 'UP_Y'
+
+# مسار الكاميرا السينمائي الموزون بعيداً عن أي اصطدام
+cam.location = (11.0, 16.0, 11.5)
 cam.keyframe_insert(data_path="location", frame=1)
-cam.keyframe_insert(data_path="rotation_euler", frame=1)
 
-cam.location = (4.2, 13.5, 4.0)
-cam.rotation_euler = (math.radians(65), 0, math.radians(160))
-cam.keyframe_insert(data_path="location", frame=70)
-cam.keyframe_insert(data_path="rotation_euler", frame=70)
+cam.location = (7.5, 17.5, 2.5)
+cam.keyframe_insert(data_path="location", frame=85)
 
-cam.location = (2.0, 20.0, -18.0)
-cam.rotation_euler = (math.radians(48), 0, math.radians(175))
-cam.keyframe_insert(data_path="location", frame=180)
-cam.keyframe_insert(data_path="rotation_euler", frame=180)
+cam.location = (4.0, 18.0, -11.0)
+cam.keyframe_insert(data_path="location", frame=150)
 
-print(">> تم إعداد المشهد بنجاح. بدء التصيير...")
+print(">> تم بناء المشهد باحترافية وتطابق تام. بدء الرندر...")
 bpy.ops.render.render(animation=True)
