@@ -1,99 +1,67 @@
-name: Render LEMMiNO Animation with AGY Reviewer
+name: Lemmino 2-Minute Benchmark Engine (AGY + 3D)
 
 on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
+  workflow_dispatch: # تشغيل يدوي بنقرة زر
 
 jobs:
-  render:
+  render-benchmark:
     runs-on: ubuntu-latest
+    timeout-minutes: 50
 
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+      - name: 📥 تفقد المستودع (Checkout Code)
+        uses: actions/checkout@v4
 
-    - name: Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: ⚙️ إعداد بيئة بايثون و Node.js
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-    - name: Cache pip packages
-      uses: actions/cache@v4
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
+      - name: 🟢 إعداد Node.js لتشغيل AGY
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-    - name: Cache Blender
-      uses: actions/cache@v4
-      with:
-        path: ~/blender
-        key: blender-4.2.0-linux-x64
+      - name: 🔑 إعداد وتسجيل اعتماد AGY
+        env:
+          AGY_CREDS: ${{ secrets.AGY_CREDENTIALS }}
+        run: |
+          # تثبيت أداة agy عالمياً إذا كانت متوفرة عبر npm
+          npm install -g agy || true
+          
+          # تهيئة مجلد الإعدادات وتسجيل الاعتماد
+          mkdir -p ~/.config/agy ~/.agy
+          echo "$AGY_CREDS" > ~/.config/agy/credentials.json
+          echo "$AGY_CREDS" > ~/.config/agy/config.json
+          echo "$AGY_CREDS" > ~/.agy/credentials.json
+          export AGY_CREDENTIALS="$AGY_CREDS"
+          echo "✅ تم تجهيز اعتماد AGY بنجاح."
 
-    # ✅ تثبيت Xvfb لتوفير سياق رسومي افتراضي
-    - name: Install System Tools (incl. Xvfb)
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          curl jq wget xz-utils xvfb \
-          libegl1 libegl-mesa0 libgl1 libgl1-mesa-dri \
-          libglx-mesa0 libgbm1 libglu1-mesa \
-          libx11-6 libxext6 libxi6 libxrender1 \
-          libxfixes3 libxxf86vm1 libsm6 libgomp1 \
-          libglvnd0
+      - name: 📦 تثبيت Blender و FFmpeg والخطوط العربية
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
+          sudo snap install blender --classic
 
-    - name: Install Blender Portable
-      run: |
-        if [ ! -d "$HOME/blender" ]; then
-          wget -q https://download.blender.org/release/Blender4.2/blender-4.2.0-linux-x64.tar.xz
-          tar -xf blender-4.2.0-linux-x64.tar.xz
-          mv blender-4.2.0-linux-x64 "$HOME/blender"
-          rm blender-4.2.0-linux-x64.tar.xz
-        fi
-        echo "$HOME/blender" >> "$GITHUB_PATH"
+      - name: 🐍 تثبيت مكتبات بايثون
+        run: |
+          pip install --upgrade pip
+          pip install requests google-genai google-api-python-client google-auth
 
-    - name: Install Python Dependencies
-      run: |
-        pip install --no-cache-dir huggingface_hub trimesh
+      - name: 🎬 تشغيل محرك الرندر والاختبار
+        env:
+          AGY_CREDENTIALS: ${{ secrets.AGY_CREDENTIALS }}
+          SKETCHFAB_API_KEY: ${{ secrets.SKETCHFAB_API_KEY }}
+          OPENTOPOGRAPHY_API_KEY: ${{ secrets.OPENTOPOGRAPHY_API_KEY }}
+          MAPBOX_API_KEY: ${{ secrets.MAPBOX_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          python lemmino_2min_engine.py
 
-    - name: Setup & Authenticate Antigravity (agy CLI)
-      env:
-        AGY_CREDENTIALS: ${{ secrets.AGY_CREDENTIALS }}
-      run: |
-        if ! command -v agy &> /dev/null; then
-          curl -fsSL https://antigravity.google/cli/install.sh | bash
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.local/bin:$PATH"
-        fi
-
-        mkdir -p ~/.config/antigravity ~/.config/agy ~/.gemini
-        if [ -n "$AGY_CREDENTIALS" ]; then
-          if echo "$AGY_CREDENTIALS" | grep -q "^{"; then
-            echo "$AGY_CREDENTIALS" > ~/.config/antigravity/credentials.json
-            echo "$AGY_CREDENTIALS" > ~/.config/agy/credentials.json
-          elif echo "$AGY_CREDENTIALS" | base64 -d >/dev/null 2>&1; then
-            echo "$AGY_CREDENTIALS" | base64 -d > ~/.config/antigravity/credentials.json
-            echo "$AGY_CREDENTIALS" | base64 -d > ~/.config/agy/credentials.json
-          else
-            echo "$AGY_CREDENTIALS" > ~/.config/antigravity/token
-            echo "$AGY_CREDENTIALS" > ~/.config/agy/token
-          fi
-        fi
-
-    # ✅ تشغيل السكربت عبر Xvfb
-    - name: Execute Full Autonomous Pipeline
-      env:
-        AGY_CREDENTIALS: ${{ secrets.AGY_CREDENTIALS }}
-        DISPLAY: ":99"
-      run: |
-        Xvfb :99 -screen 0 1280x720x24 &
-        sleep 3
-        python3 generate_scene.py
-
-    - name: Upload Video Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: lemmino-video
-        path: lemmino_jump.mp4
+      - name: 📤 رفع الفيديو الناتج كملف للتحميل (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lemmino-2Min-Benchmark-Video
+          path: output_benchmark/lemmino_2min_benchmark.mp4
+          retention-days: 7
