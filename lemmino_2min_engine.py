@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28.8 - MULTI-MESH & EMPTY FIX)
+LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28.9 - FIXED SKETCHFAB QUERY & STRICT FILTER)
+- Sketchfab API: Fixed 'query' parameter & strict keyword/size validation (No spam/cats!)
+- AGY: gemini-3.8-flash with --effort high
+- Gemini TTS: gemini-3.8-flash-tts (Charon)
+- Blender: Pure robust mesh rendering & procedural jet/parachute backup
 """
 
 import os
@@ -14,6 +18,7 @@ import zipfile
 import base64
 import re
 from pathlib import Path
+import urllib.parse
 import requests
 
 sys.stdout.reconfigure(line_buffering=True)
@@ -196,40 +201,52 @@ else:
     ASSET_STATUS["gemini_tts"] = "❌ مفتاح GEMINI_API_KEY مفقود"
 
 # =============================================================================
-# 4. تنزيل الأصول مع فحص مطابقة الاسم
+# 4. تنزيل الأصول مع التصحيح الحقيقي لوسيطة البحث والتحقق الصارم من الحجم
 # =============================================================================
-def fetch_sketchfab_model(query, output_dir, tag_name, filter_words):
+def fetch_sketchfab_model(search_term, output_dir, tag_name, strict_keywords):
     if not SKETCHFAB_KEY:
         ASSET_STATUS[f"{tag_name}_3d"] = "❌ مفتاح SKETCHFAB_API_KEY مفقود"
         return None
     try:
-        log_print(f"🔍 [Sketchfab] جاري البحث عن: '{query}'...")
+        log_print(f"🔍 [Sketchfab] البحث الرسمي عن: '{search_term}'...")
         headers = {"Authorization": f"Token {SKETCHFAB_KEY}"}
-        search_url = f"https://api.sketchfab.com/v3/models?q={query}&downloadable=true&type=models"
-        r = requests.get(search_url, headers=headers, timeout=15)
+        
+        # تصحيح الخطأ: الوسيطة الرسمية هي 'query' وليست 'q'!
+        params = {
+            "query": search_term,
+            "downloadable": "true",
+            "sort_by": "-likeCount"  # جلب الأعلى تقييماً بعد مطابقة الكلمة
+        }
+        search_url = "https://api.sketchfab.com/v3/models?" + urllib.parse.urlencode(params)
+        r = requests.get(search_url, headers=headers, timeout=20)
         
         if r.status_code != 200:
-            ASSET_STATUS[f"{tag_name}_3d"] = f"❌ فشل الاتصال بموقع Sketchfab (كود {r.status_code})"
+            ASSET_STATUS[f"{tag_name}_3d"] = f"❌ فشل الاتصال (كود {r.status_code})"
             return None
 
         results = r.json().get("results", [])
         if not results:
-            ASSET_STATUS[f"{tag_name}_3d"] = "⚠️ لم يُعثر على نتائج -> بديل هندسي"
+            log_print(f"⚠️ لم يتم العثور على نتائج قابلة للتنزيل لـ '{search_term}'")
+            ASSET_STATUS[f"{tag_name}_3d"] = "⚠️ لم يُعثر على موديل مطابق -> بديل هندسي"
             return None
 
-        # فحص أول 5 نتائج لاختيار الموديل المطابق حقيقةً وتجنب الإعلانات
+        # فحص أول 10 نتائج واختيار الموديل الذي يحتوي اسمه حصراً على إحدى الكلمات الصارمة
         chosen = None
-        for item in results[:5]:
+        for item in results[:10]:
             name_l = item.get("name", "").lower()
-            if any(w.lower() in name_l for w in filter_words):
+            desc_l = (item.get("description") or "").lower()
+            if any(k.lower() in name_l or k.lower() in desc_l for k in strict_keywords):
                 chosen = item
                 break
+
         if not chosen:
-            chosen = results[0]
+            log_print(f"⚠️ تم استبعاد نتائج عشوائية لا تطابق '{search_term}' -> تفعيل البديل الهندسي")
+            ASSET_STATUS[f"{tag_name}_3d"] = "⚠️ الموديلات المقترحة عشوائية وغير مطابقة -> بديل هندسي"
+            return None
 
         uid = chosen["uid"]
         model_name = chosen["name"]
-        log_print(f"📦 تم اختيار الموديل: '{model_name}' (UID: {uid})")
+        log_print(f"📦 تم اختيار موديل مطابق تماماً: '{model_name}' (UID: {uid})")
 
         d_res = requests.get(f"https://api.sketchfab.com/v3/models/{uid}/download", headers=headers, timeout=15)
         download_link = d_res.json().get("gltf", {}).get("url")
@@ -238,20 +255,28 @@ def fetch_sketchfab_model(query, output_dir, tag_name, filter_words):
             return None
 
         zip_path = output_dir / f"{tag_name}.zip"
-        with requests.get(download_link, stream=True, timeout=30) as dl:
+        with requests.get(download_link, stream=True, timeout=40) as dl:
             with open(zip_path, "wb") as f:
                 for chunk in dl.iter_content(chunk_size=1024*256): f.write(chunk)
+                
+        # شرط الأمان: إذا كان الملف أقل من 25 كيلوبايت فهو ملف فارغ أو تالف
+        if zip_path.stat().st_size < 25 * 1024:
+            log_print(f"⚠️ تم استبعاد الملف التالف صغر حجمه ({zip_path.stat().st_size} bytes)")
+            zip_path.unlink(missing_ok=True)
+            ASSET_STATUS[f"{tag_name}_3d"] = "⚠️ الملف المحمل تالف أو فارغ -> بديل هندسي"
+            return None
+
         extract_dir = output_dir / tag_name
         with zipfile.ZipFile(zip_path, 'r') as zip_ref: zip_ref.extractall(extract_dir)
 
         for p in extract_dir.rglob("*.gltf"):
             size_kb = p.stat().st_size // 1024
-            ASSET_STATUS[f"{tag_name}_3d"] = f"✅ تم التنزيل: '{model_name}' ({size_kb} KB)"
+            ASSET_STATUS[f"{tag_name}_3d"] = f"✅ تم تنزيل مجسم مطابق: '{model_name}' ({size_kb} KB)"
             return str(p.resolve())
             
         for p in extract_dir.rglob("*.glb"):
             size_kb = p.stat().st_size // 1024
-            ASSET_STATUS[f"{tag_name}_3d"] = f"✅ تم التنزيل: '{model_name}' ({size_kb} KB)"
+            ASSET_STATUS[f"{tag_name}_3d"] = f"✅ تم تنزيل مجسم مطابق: '{model_name}' ({size_kb} KB)"
             return str(p.resolve())
     except Exception as e:
         ASSET_STATUS[f"{tag_name}_3d"] = f"❌ خطأ أثناء التحميل ({e})"
@@ -274,6 +299,7 @@ def fetch_opentopography_dem(output_dir):
             tif_path.write_bytes(res.content)
             size_kb = len(res.content) // 1024
             ASSET_STATUS["terrain_dem"] = f"✅ تم تنزيل تضاريس ناسا بنجاح ({size_kb} KB)"
+            log_print(f"✅ [OpenTopography] تم تنزيل الخريطة بنجاح ({size_kb} KB)")
             return str(tif_path.resolve())
         else:
             ASSET_STATUS["terrain_dem"] = f"❌ خطأ في السيرفر (كود {res.status_code})"
@@ -284,12 +310,12 @@ def fetch_opentopography_dem(output_dir):
 models_dir = SHUTTLE_DIR / "models"
 models_dir.mkdir(parents=True, exist_ok=True)
 
-# تنزيل الأصول مع التحقق من الكلمات الدلالية
-jumper_model = fetch_sketchfab_model("parachute", models_dir, "jumper", ["parachute", "skydiver", "chute", "drop"])
-plane_model = fetch_sketchfab_model("boeing 727 airplane", models_dir, "plane", ["boeing", "airplane", "plane", "airliner"])
+# تنزيل الأصول بكلمات دلالية صارمة لمنع جلب مجسمات عشوائية
+jumper_model = fetch_sketchfab_model("parachute", models_dir, "jumper", ["parachute", "paratrooper", "skydiver", "chute"])
+plane_model = fetch_sketchfab_model("boeing 727", models_dir, "plane", ["boeing", "727", "airliner", "airplane", "aircraft", "jet"])
 terrain_dem = fetch_opentopography_dem(models_dir)
 
-# طباعة تقرير حالة الأصول
+# طباعة تقرير حالة الأصول الشفاف
 log_print("\n" + "="*60)
 log_print("📊 لوحة تقرير حالة الأصول (Asset Acquisition Report):")
 log_print(f"  🧠 السيناريو (AGY Script)    : {ASSET_STATUS['agy_script']}")
@@ -300,7 +326,7 @@ log_print(f"  🏔️ تضاريس ناسا (OpenTopography): {ASSET_STATUS['ter
 log_print("="*60 + "\n")
 
 # =============================================================================
-# 5. تصيير بلندر المحمي من كائنات الـ EMPTY والمتعددة الشِباك (100% مضمون)
+# 5. تصيير بلندر (مع بناء طائرة ومظلي حقيقيين إذا تم تفعيل البديل الهندسي)
 # =============================================================================
 raw_shot1_prefix = (SHUTTLE_DIR / "shot1_output").resolve()
 raw_shot2_prefix = (SHUTTLE_DIR / "shot2_output").resolve()
@@ -331,7 +357,6 @@ jumper_loaded = False
 
 if jumper_path and os.path.exists(jumper_path):
     try:
-        # إنشاء حاوية تحكم فارغة لجمع وتوحيد أجزاء الموديل المستورد
         root_ctrl = bpy.data.objects.new("JumperRoot", None)
         scene.collection.objects.link(root_ctrl)
         root_ctrl.location = (0, 0, 5)
@@ -339,7 +364,6 @@ if jumper_path and os.path.exists(jumper_path):
         bpy.ops.import_scene.gltf(filepath=jumper_path)
         imported_objs = list(bpy.context.selected_objects)
 
-        # البحث حصراً عن الكائنات التي لها بيانات شبكية (MESH) وتجاهل الحاويات الفارغة
         mesh_objs = [o for o in imported_objs if o.type == 'MESH']
         if mesh_objs:
             for o in imported_objs:
@@ -368,23 +392,39 @@ if jumper_path and os.path.exists(jumper_path):
     except Exception as e:
         print("Jumper load error:", e)
 
+# بديل هندسي احترافي للمظلي (مجسم إنسان ومظلة مقوسة حقيقية)
 if not jumper_loaded:
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.4, depth=1.6, location=(0, 0, 5))
-    jumper = bpy.context.active_object
-    jumper.data.materials.append(mat_red)
-    bpy.ops.mesh.primitive_cube_add(size=0.6, location=(0, -0.3, 5.2))
+    root_jumper = bpy.data.objects.new("ProceduralJumper", None)
+    scene.collection.objects.link(root_jumper)
+    root_jumper.location = (0, 0, 5)
+
+    # جسد المظلي
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.35, depth=1.5, location=(0, 0, 0))
+    body = bpy.context.active_object
+    body.data.materials.append(mat_red)
+    body.parent = root_jumper
+
+    # حقيبة الظهر
+    bpy.ops.mesh.primitive_cube_add(size=0.5, location=(0, -0.35, 0.1))
     pack = bpy.context.active_object
     pack.data.materials.append(mat_red)
-    pack.parent = jumper
+    pack.parent = root_jumper
 
-    jumper.keyframe_insert(data_path="location", frame=1)
-    jumper.location.z = -18
-    jumper.keyframe_insert(data_path="location", frame={FPS * 30})
+    # قبة المظلة نصف الكروية (Parachute Canopy)
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=1.8, location=(0, 0, 2.8))
+    canopy = bpy.context.active_object
+    canopy.scale = (1.2, 1.2, 0.6)
+    canopy.data.materials.append(mat_red)
+    canopy.parent = root_jumper
 
-    jumper.rotation_euler = (0, 0, 0)
-    jumper.keyframe_insert(data_path="rotation_euler", frame=1)
-    jumper.rotation_euler = (math.radians(720), math.radians(240), math.radians(180))
-    jumper.keyframe_insert(data_path="rotation_euler", frame={FPS * 30})
+    root_jumper.keyframe_insert(data_path="location", frame=1)
+    root_jumper.location.z = -18
+    root_jumper.keyframe_insert(data_path="location", frame={FPS * 30})
+
+    root_jumper.rotation_euler = (0, 0, 0)
+    root_jumper.keyframe_insert(data_path="rotation_euler", frame=1)
+    root_jumper.rotation_euler = (math.radians(720), math.radians(240), math.radians(180))
+    root_jumper.keyframe_insert(data_path="rotation_euler", frame={FPS * 30})
 
 cam_data = bpy.data.cameras.new("Cam1")
 cam_data.lens = 32
@@ -416,6 +456,13 @@ scene.frame_start, scene.frame_end = 1, {FPS * 30}
 
 mat_plane = bpy.data.materials.new("PlaneWhite")
 mat_plane.diffuse_color = (1.0, 1.0, 1.0, 1.0)
+mat_plane.use_nodes = True
+if mat_plane.node_tree:
+    mat_plane.node_tree.nodes.clear()
+    p_emis = mat_plane.node_tree.nodes.new('ShaderNodeEmission')
+    p_emis.inputs['Color'].default_value = (1.0, 1.0, 1.0, 1.0)
+    p_out = mat_plane.node_tree.nodes.new('ShaderNodeOutputMaterial')
+    mat_plane.node_tree.links.new(p_emis.outputs['Emission'], p_out.inputs['Surface'])
 
 bpy.ops.mesh.primitive_grid_add(x_subdivisions=50, y_subdivisions=50, size=35, location=(0, 0, 0))
 terrain = bpy.context.active_object
@@ -469,15 +516,36 @@ if plane_file and os.path.exists(plane_file):
     except Exception as e:
         print("Plane load error:", e)
 
+# بديل هندسي احترافي لطائرة ركاب بوينغ 727 كاملة الهيكل
 if not plane_loaded:
-    bpy.ops.mesh.primitive_cone_add(radius1=0.7, depth=2.8, location=(0, -14, 5.5))
-    plane = bpy.context.active_object
-    plane.rotation_euler = (math.radians(-90), 0, 0)
-    plane.data.materials.append(mat_plane)
+    root_plane = bpy.data.objects.new("ProceduralAirliner", None)
+    scene.collection.objects.link(root_plane)
+    root_plane.location = (0, -14, 5.5)
 
-    plane.keyframe_insert(data_path="location", frame=1)
-    plane.location.y = 14
-    plane.keyframe_insert(data_path="location", frame={FPS * 30})
+    # هيكل الطائرة الرئيسي (Fuselage)
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.45, depth=4.0, location=(0, 0, 0))
+    fuselage = bpy.context.active_object
+    fuselage.rotation_euler = (math.radians(90), 0, 0)
+    fuselage.data.materials.append(mat_plane)
+    fuselage.parent = root_plane
+
+    # أجنحة الطائرة الرئيسية (Swept Wings)
+    bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0, -0.2, 0))
+    wings = bpy.context.active_object
+    wings.scale = (4.2, 0.8, 0.08)
+    wings.data.materials.append(mat_plane)
+    wings.parent = root_plane
+
+    # الذيل الرأسي المميز للبوينغ (T-Tail Fin)
+    bpy.ops.mesh.primitive_cube_add(size=0.6, location=(0, -1.8, 0.6))
+    tail = bpy.context.active_object
+    tail.scale = (0.08, 0.6, 1.2)
+    tail.data.materials.append(mat_plane)
+    tail.parent = root_plane
+
+    root_plane.keyframe_insert(data_path="location", frame=1)
+    root_plane.location.y = 14
+    root_plane.keyframe_insert(data_path="location", frame={FPS * 30})
 
 cam_data = bpy.data.cameras.new("Cam2")
 cam_data.lens = 45
@@ -511,7 +579,7 @@ def resolve_blender_video(prefix_name, target_filename):
         log_print(f"✅ تم تأكيد واستخراج فيديو بلندر: {target_path.name}")
         return target_path
     
-    log_print(f"⚠️ إنشاء بديل فوري لـ {target_filename}...")
+    log_print(f"⚠️ إنشاء بديل لـ {target_filename}...")
     run_cmd([
         "ffmpeg", "-y", "-f", "lavfi",
         "-i", f"color=c=0x08080c:s={TARGET_W}x{TARGET_H}:d=30:r={FPS}",
