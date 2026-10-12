@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28 FIX)
-Fixed: Absolute Blender Paths + anoisesrc Audio Filter + Native AGY & Gemini TTS Handlers
+LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28.2 - GEMINI 3.8 TTS & BLENDER FRAME FIX)
 """
 
 import os
@@ -29,7 +28,7 @@ FINAL_VIDEO = (BASE_DIR / "lemmino_2min_benchmark.mp4").resolve()
 
 TARGET_W, TARGET_H, FPS = 1920, 1080, 30
 
-# استخراج المفاتيح بنفس طريقة كودك V28 تماماً
+# استرجاع المفاتيح
 raw_gemini_keys = os.environ.get("GEMINI_API_KEYS") or os.environ.get("GEMINI_API_KEY") or ""
 GEMINI_KEYS = list(dict.fromkeys([k.strip() for k in re.split(r"[,;\n]+", raw_gemini_keys) if k.strip()]))
 GEMINI_KEY = GEMINI_KEYS[0] if GEMINI_KEYS else ""
@@ -37,7 +36,8 @@ GEMINI_KEY = GEMINI_KEYS[0] if GEMINI_KEYS else ""
 SKETCHFAB_KEY = os.environ.get("SKETCHFAB_API_KEY", "").strip()
 OPENTOPO_KEY = os.environ.get("OPENTOPOGRAPHY_API_KEY", "").strip()
 
-TTS_MODEL = "gemini-2.0-flash"  # النموذج المعتمد دولياً لتوليد الصوت
+# النموذج والصوت كما في كودك V28 تماماً
+TTS_MODEL = "gemini-3.8-flash-tts"
 TTS_VOICE = "Charon"
 
 if BASE_DIR.exists():
@@ -64,7 +64,7 @@ def extract_json(text):
     return None
 
 # =============================================================================
-# 2. استدعاء AGY بنفس طريقة كود V28
+# 2. استدعاء AGY
 # =============================================================================
 def agy_generate_script():
     print("🧠 [AGY] استدعاء أداة AGY لصياغة السيناريو الاستقصائي...")
@@ -91,7 +91,6 @@ Return ONLY valid JSON:
     "point4": "Refused to confirm or deny identity"
   }
 }"""
-    # فحص مسار agy في النظام
     agy_bin = shutil.which("agy") or shutil.which("antigravity")
     if agy_bin:
         try:
@@ -128,14 +127,14 @@ Return ONLY valid JSON:
 STORY_DATA = agy_generate_script()
 
 # =============================================================================
-# 3. توليد الصوت بنفس طريقة كود V28 (Gemini TTS)
+# 3. GEMINI TTS ENGINE (نموذج 3.8 FLASH TTS كما طلبت تماماً)
 # =============================================================================
 master_narration_wav = SHUTTLE_DIR / "narration_master.wav"
 has_voice = False
 
 if GEMINI_KEY:
     try:
-        print(f"🎙️ [Gemini TTS] توليد الصوت بمفتاح API...")
+        print(f"🎙️ [Gemini TTS] توليد الصوت بنموذج ({TTS_MODEL})...")
         client = genai.Client(api_key=GEMINI_KEY)
         voice_instruction = (
             "[INSTRUCTION: Solemn, emotionally resonant Arabic investigative documentary narrator. "
@@ -163,9 +162,9 @@ if GEMINI_KEY:
             temp_pcm.unlink(missing_ok=True)
             has_voice = master_narration_wav.exists() and master_narration_wav.stat().st_size > 1024
             if has_voice:
-                print("✅ [Gemini TTS] تم توليد الصوت الماستر بنجاح.")
+                print("✅ [Gemini TTS] تم توليد التعليق الصوتي بنجاح.")
     except Exception as e:
-        print(f"⚠️ تعذر توليد الصوت عبر Gemini ({e})، سيتم استكمال الرندر بالموسيقى التصويرية.")
+        print(f"⚠️ خطأ في توليد صوت Gemini ({e})، سيتم استكمال الرندر بالموسيقى التصويرية.")
 
 # =============================================================================
 # 4. تنزيل الأصول (Sketchfab + OpenTopography)
@@ -220,10 +219,10 @@ plane_model = fetch_sketchfab_model("boeing airliner low poly", models_dir, "pla
 terrain_dem = fetch_opentopography_dem(models_dir)
 
 # =============================================================================
-# 5. تصيير بلندر بالمسارات المطلقة (حل مشكلة المسار الصفرية)
+# 5. تصيير بلندر مع التقاط وتسمية الفيديوهات بدقة
 # =============================================================================
-out_shot1 = (SHUTTLE_DIR / "shot1_parachute.mp4").resolve()
-out_shot2 = (SHUTTLE_DIR / "shot2_radar.mp4").resolve()
+raw_shot1_prefix = (SHUTTLE_DIR / "shot1_render_output").resolve()
+raw_shot2_prefix = (SHUTTLE_DIR / "shot2_render_output").resolve()
 
 shot1_py = SHUTTLE_DIR / "shot1.py"
 shot1_py.write_text(f"""
@@ -288,7 +287,7 @@ cam.keyframe_insert(data_path="location", frame={FPS * 30})
 scene.render.resolution_x, scene.render.resolution_y = {TARGET_W}, {TARGET_H}
 scene.render.image_settings.file_format = 'FFMPEG'
 scene.render.ffmpeg.format, scene.render.ffmpeg.codec = 'MPEG4', 'H264'
-scene.render.filepath = {repr(str(out_shot1))}
+scene.render.filepath = {repr(str(raw_shot1_prefix))}
 """)
 
 shot2_py = SHUTTLE_DIR / "shot2.py"
@@ -372,11 +371,38 @@ cam.keyframe_insert(data_path="location", frame={FPS * 30})
 scene.render.resolution_x, scene.render.resolution_y = {TARGET_W}, {TARGET_H}
 scene.render.image_settings.file_format = 'FFMPEG'
 scene.render.ffmpeg.format, scene.render.ffmpeg.codec = 'MPEG4', 'H264'
-scene.render.filepath = {repr(str(out_shot2))}
+scene.render.filepath = {repr(str(raw_shot2_prefix))}
 """)
 
 run_cmd(["blender", "-b", "-P", str(shot1_py)], "رندرة المشهد 1 عبر بلندر")
 run_cmd(["blender", "-b", "-P", str(shot2_py)], "رندرة المشهد 2 عبر بلندر")
+
+# دالة ذكية للبحث عن ناتج رندر بلندر مهما أضاف أرقام فريمات وتسميته بدقة
+def resolve_blender_video(prefix_name, target_filename):
+    target_path = (SHUTTLE_DIR / target_filename).resolve()
+    # فحص مسار العمل
+    matches = list(SHUTTLE_DIR.glob(f"*{prefix_name}*.mp4"))
+    if not matches:
+        # فحص المسار العام كإجراء احترازي
+        matches = list(BASE_DIR.glob(f"*{prefix_name}*.mp4")) + list(Path(".").glob(f"*{prefix_name}*.mp4"))
+    
+    if matches:
+        matches.sort(key=lambda p: p.stat().st_size, reverse=True)
+        shutil.move(str(matches[0]), str(target_path))
+        print(f"✅ تم تأكيد ملف بلندر: {target_path.name}")
+        return target_path
+    
+    print(f"⚠️ إنشاء بديل فوري لـ {target_filename}...")
+    run_cmd([
+        "ffmpeg", "-y", "-f", "lavfi",
+        "-i", f"color=c=0x08080c:s={TARGET_W}x{TARGET_H}:d=30:r={FPS}",
+        "-vf", "noise=alls=15:allf=t+u,vignette=PI/4",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(target_path)
+    ], f"بديل {target_filename}")
+    return target_path
+
+out_shot1 = resolve_blender_video("shot1", "shot1_parachute.mp4")
+out_shot2 = resolve_blender_video("shot2", "shot2_radar.mp4")
 
 # =============================================================================
 # 6. موشن جرافيك الأدلة والمشتبه به (المشاهد 3 و 4)
@@ -417,19 +443,18 @@ vf_shot4 = (
 run_cmd(["ffmpeg", "-y", "-f", "lavfi", "-i", vf_shot4, "-c:v", "libx264", "-pix_fmt", "yuv420p", str(shot4_mp4)], "المشهد 4: ملف المشتبه به")
 
 # =============================================================================
-# 7. تصليح فلتر الصوت (anoisesrc) والتجميع النهائي
+# 7. الصوت والتجميع النهائي
 # =============================================================================
 ambient_audio = (SHUTTLE_DIR / "ambient.wav").resolve()
-# استخدام فلتر anoisesrc الصحيح بدلاً من anoise
 run_cmd([
     "ffmpeg", "-y",
     "-f", "lavfi", "-i", "sine=frequency=52:duration=120,volume=1.2",
     "-f", "lavfi", "-i", "anoisesrc=color=pink:duration=120,lowpass=f=380,volume=0.35",
     "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest[aout]",
     "-map", "[aout]", "-c:a", "pcm_s16le", str(ambient_audio)
-], "توليد الموسيقى التصويرية (Dark Drone)")
+], "توليد الموسيقى التصويرية")
 
-final_audio = SHUTTLE_DIR / "final_soundtrack.wav"
+final_audio = (SHUTTLE_DIR / "final_soundtrack.wav").resolve()
 if has_voice and master_narration_wav.exists():
     run_cmd([
         "ffmpeg", "-y", "-i", str(ambient_audio), "-i", str(master_narration_wav),
@@ -439,11 +464,11 @@ if has_voice and master_narration_wav.exists():
 else:
     final_audio = ambient_audio
 
-concat_file = SHUTTLE_DIR / "timeline.txt"
-concat_file.write_text(f"""file '{out_shot1}'
-file '{out_shot2}'
-file '{shot3_mp4}'
-file '{shot4_mp4}'
+concat_file = (SHUTTLE_DIR / "timeline.txt").resolve()
+concat_file.write_text(f"""file '{out_shot1.resolve()}'
+file '{out_shot2.resolve()}'
+file '{shot3_mp4.resolve()}'
+file '{shot4_mp4.resolve()}'
 """)
 
 run_cmd([
