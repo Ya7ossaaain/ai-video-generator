@@ -1,0 +1,52 @@
+name: Blender - 40s D.B. Cooper Style Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Blender and FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y blender ffmpeg
+          blender --version
+          ffmpeg -version | head -n 2
+
+      - name: Render animation
+        env:
+          BLENDER_OUTPUT_DIR: ${{ github.workspace }}/output
+        run: |
+          mkdir -p output
+          set -o pipefail
+          blender -b --factory-startup --python blender_db_cooper_test.py 2>&1 | tee blender_render.log
+
+      - name: Validate output
+        if: always()
+        run: |
+          if [ -f output/db_cooper_test.mp4 ]; then
+            ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 output/db_cooper_test.mp4
+          else
+            echo "No MP4 produced; recent Blender log follows:"
+            tail -n 120 blender_render.log || true
+            exit 1
+          fi
+
+      - name: Upload video and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-db-cooper-40s-test
+          path: |
+            output/db_cooper_test.mp4
+            blender_render.log
+          if-no-files-found: warn
+          retention-days: 7
