@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28 INTEGRATED)
-Orchestrated by: AGY (Script & Research) + Gemini TTS (Voice) + Sketchfab & OpenTopo (3D Assets) + Blender CLI
+LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28 FIX)
+Fixed: Absolute Blender Paths + anoisesrc Audio Filter + Native AGY & Gemini TTS Handlers
 """
 
 import os
@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import zipfile
 import base64
+import re
 from pathlib import Path
 import requests
 
@@ -20,19 +21,24 @@ from google import genai
 from google.genai import types
 
 # =============================================================================
-# 1. CONFIGURATION & DIRECTORIES
+# 1. الإعدادات والمسارات
 # =============================================================================
-BASE_DIR = Path("./output_benchmark")
-SHUTTLE_DIR = BASE_DIR / "workspace"
-FINAL_VIDEO = BASE_DIR / "lemmino_2min_benchmark.mp4"
+BASE_DIR = Path("./output_benchmark").resolve()
+SHUTTLE_DIR = (BASE_DIR / "workspace").resolve()
+FINAL_VIDEO = (BASE_DIR / "lemmino_2min_benchmark.mp4").resolve()
 
 TARGET_W, TARGET_H, FPS = 1920, 1080, 30
-TTS_MODEL = "gemini-2.5-flash"  # أو gemini-3.8-flash-tts حسب المتاح في حسابك
-TTS_VOICE = "Charon"
+
+# استخراج المفاتيح بنفس طريقة كودك V28 تماماً
+raw_gemini_keys = os.environ.get("GEMINI_API_KEYS") or os.environ.get("GEMINI_API_KEY") or ""
+GEMINI_KEYS = list(dict.fromkeys([k.strip() for k in re.split(r"[,;\n]+", raw_gemini_keys) if k.strip()]))
+GEMINI_KEY = GEMINI_KEYS[0] if GEMINI_KEYS else ""
 
 SKETCHFAB_KEY = os.environ.get("SKETCHFAB_API_KEY", "").strip()
 OPENTOPO_KEY = os.environ.get("OPENTOPOGRAPHY_API_KEY", "").strip()
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+
+TTS_MODEL = "gemini-2.0-flash"  # النموذج المعتمد دولياً لتوليد الصوت
+TTS_VOICE = "Charon"
 
 if BASE_DIR.exists():
     shutil.rmtree(BASE_DIR, ignore_errors=True)
@@ -47,10 +53,10 @@ def run_cmd(cmd, desc=""):
 
 def extract_json(text):
     if not text: return None
-    text = text.replace("```json", "").replace("```", "").strip()
+    text = re.sub(r"```json\s*", "", text.strip(), flags=re.I)
+    text = re.sub(r"```\s*$", "", text)
     try: return json.loads(text)
     except: pass
-    import re
     match = re.search(r"\{[\s\S]*\}|\[[\s\S]*\]", text)
     if match:
         try: return json.loads(match.group(0))
@@ -58,19 +64,17 @@ def extract_json(text):
     return None
 
 # =============================================================================
-# 2. AGY INVESTIGATIVE SCRIPT ENGINE (عقل النظام)
+# 2. استدعاء AGY بنفس طريقة كود V28
 # =============================================================================
 def agy_generate_script():
-    print("🧠 [AGY] استدعاء أداة AGY لصياغة السيناريو الاستقصائي بدقة ليمينو...")
+    print("🧠 [AGY] استدعاء أداة AGY لصياغة السيناريو الاستقصائي...")
     prompt = """You are an elite documentary director in the exact style of LEMMINO.
 Topic: The Mystery of D.B. Cooper.
-Target Duration: 2 Minutes (4 scenes, exactly 30 seconds each).
-
 Generate a production script in Arabic for narration, and specific forensic details for on-screen graphics.
 
 Return ONLY valid JSON:
 {
-  "narration": "نص تعليق صوتي باللغة العربية الفصحى الوقورة الغامضة، مدته تقارب دقيقتين (حوالي 240 إلى 270 كلمة)، يسرد تفاصيل قفزة دي بي كوبر في ليلة 24 نوفمبر 1971، والممر الجوي فيكتور 23، واختفاء أثر الفدية والمشتبه به روبرت راكسترو.",
+  "narration": "في الرابع والعشرين من نوفمبر عام ألف وتسعمائة وواحد وسبعين، استقل دان كوبر طائرة البوينغ سبعمائة وسبعة وعشرين من بورتلاند. بعد تهديده بوجود قنبلة، طالب بمائتي ألف دولار وأربع مظلات. في سماء واشنطن الممطرة، فُتح الدرج الخلفي وقفز كوبر في ظلام دامس نحو المجهول، تاركاً وراءه اللغز الأكبر في تاريخ الطيران الأمريكي.",
   "scene3_evidence": {
     "title": "EVIDENCE ITEM #01 - PASSENGER MANIFEST",
     "passenger": "DAN COOPER",
@@ -87,19 +91,23 @@ Return ONLY valid JSON:
     "point4": "Refused to confirm or deny identity"
   }
 }"""
-    try:
-        cmd = ["agy", "--model", "gemini-3.1-pro", "--effort", "high", "--dangerously-skip-permissions", "-p", prompt]
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180)
-        data = extract_json(res.stdout)
-        if data and "narration" in data:
-            print("✅ [AGY] تم استلام السيناريو والبيانات الجنائية بنجاح.")
-            return data
-    except Exception as e:
-        print(f"⚠️ فشل استدعاء AGY ({e})، جاري استخدام السيناريو الاحتياطي المدمج...")
+    # فحص مسار agy في النظام
+    agy_bin = shutil.which("agy") or shutil.which("antigravity")
+    if agy_bin:
+        try:
+            cmd = [agy_bin, "--model", "gemini-3.1-pro", "--effort", "high", "--dangerously-skip-permissions", "-p", prompt]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+            data = extract_json(res.stdout)
+            if data and "narration" in data:
+                print("✅ [AGY] تم استلام السيناريو بنجاح.")
+                return data
+        except Exception as e:
+            print(f"⚠️ خطأ أثناء استدعاء agy: {e}")
+    else:
+        print("ℹ️ أداة agy لم تكن في الـ PATH، استخدام السيناريو الاستقصائي المعتمد...")
 
-    # في حال حدوث أي خطأ في أداة agy الخارجية، نستخدم السيناريو الافتراضي حتى لا يتعطل الرندر
     return {
-        "narration": "في الرابع والعشرين من نوفمبر عام ألف وتسعمائة وواحد وسبعين، استقل رجل يُدعى دان كوبر طائرة البوينغ سبعمائة وسبعة وعشرين من بورتلاند. بعد تهديده بوجود قنبلة، طالب بمائتي ألف دولار وأربع مظلات. في سماء واشنطن الممطرة، فُتح الدرج الخلفي وقفز كوبر في ظلام دامس نحو المجهول، تاركاً خلفه اللغز الأكبر في تاريخ الطيران الأمريكي.",
+        "narration": "في الرابع والعشرين من نوفمبر عام ألف وتسعمائة وواحد وسبعين، استقل دان كوبر طائرة البوينغ سبعمائة وسبعة وعشرين من بورتلاند. بعد تهديده بوجود قنبلة، طالب بمائتي ألف دولار وأربع مظلات. في سماء واشنطن الممطرة، فُتح الدرج الخلفي وقفز كوبر في ظلام دامس نحو المجهول، تاركاً وراءه اللغز الأكبر في تاريخ الطيران الأمريكي.",
         "scene3_evidence": {
             "title": "EVIDENCE ITEM #01 - PASSENGER MANIFEST",
             "passenger": "DAN COOPER",
@@ -120,23 +128,22 @@ Return ONLY valid JSON:
 STORY_DATA = agy_generate_script()
 
 # =============================================================================
-# 3. GEMINI TTS ENGINE (التعليق الصوتي)
+# 3. توليد الصوت بنفس طريقة كود V28 (Gemini TTS)
 # =============================================================================
 master_narration_wav = SHUTTLE_DIR / "narration_master.wav"
-def generate_gemini_voice(text, out_path):
-    print("🎙️ [Gemini TTS] توليد التعليق الصوتي الوقور عبر Gemini API...")
-    if not GEMINI_KEY:
-        print("⚠️ مفتاح GEMINI_API_KEY غير متوفر، سيتم استخدام موسيقى تصويرية بديلة.")
-        return False
+has_voice = False
+
+if GEMINI_KEY:
     try:
+        print(f"🎙️ [Gemini TTS] توليد الصوت بمفتاح API...")
         client = genai.Client(api_key=GEMINI_KEY)
-        voice_prompt = (
-            "[INSTRUCTION: Solemn, deep, investigative documentary narrator voice in Arabic. "
-            "Pacing should be slow, intense, and dramatic.]\n\n" + text
+        voice_instruction = (
+            "[INSTRUCTION: Solemn, emotionally resonant Arabic investigative documentary narrator. "
+            "Read naturally without naming chapter titles.]\n\n"
         )
         response = client.models.generate_content(
             model=TTS_MODEL,
-            contents=voice_prompt,
+            contents=voice_instruction + STORY_DATA["narration"],
             config=types.GenerateContentConfig(
                 response_modalities=["AUDIO"],
                 speech_config=types.SpeechConfig(
@@ -149,33 +156,31 @@ def generate_gemini_voice(text, out_path):
         data = next((p.inline_data.data for p in response.candidates[0].content.parts if getattr(p, "inline_data", None)), None)
         if data:
             raw_audio = base64.b64decode(data) if isinstance(data, str) else bytes(data)
-            temp_pcm = SHUTTLE_DIR / "temp_audio.pcm"
+            temp_pcm = SHUTTLE_DIR / "temp.pcm"
             temp_pcm.write_bytes(raw_audio)
             run_cmd(["ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", str(temp_pcm),
-                     "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", str(out_path)], "تحويل الصوت إلى WAV")
+                     "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", str(master_narration_wav)], "تحويل الصوت")
             temp_pcm.unlink(missing_ok=True)
-            return True
+            has_voice = master_narration_wav.exists() and master_narration_wav.stat().st_size > 1024
+            if has_voice:
+                print("✅ [Gemini TTS] تم توليد الصوت الماستر بنجاح.")
     except Exception as e:
-        print(f"⚠️ خطأ في توليد صوت Gemini: {e}")
-    return False
-
-has_voice = generate_gemini_voice(STORY_DATA["narration"], master_narration_wav)
+        print(f"⚠️ تعذر توليد الصوت عبر Gemini ({e})، سيتم استكمال الرندر بالموسيقى التصويرية.")
 
 # =============================================================================
-# 4. 3D ASSETS DOWNLOADER (SKETCHFAB & OPENTOPOGRAPHY)
+# 4. تنزيل الأصول (Sketchfab + OpenTopography)
 # =============================================================================
 def fetch_sketchfab_model(query, output_dir, tag_name):
     if not SKETCHFAB_KEY: return None
     try:
-        print(f"🔍 [Sketchfab] البحث عن مجسم ثلاثي أبعاد: '{query}'...")
+        print(f"🔍 [Sketchfab] البحث عن مجسم: '{query}'...")
         headers = {"Authorization": f"Token {SKETCHFAB_KEY}"}
         search_url = f"https://api.sketchfab.com/v3/models?q={query}&downloadable=true&licenses=by,by-nc,cc0&sort_by=-likeCount"
         r = requests.get(search_url, headers=headers, timeout=20)
         results = r.json().get("results", [])
         if not results: return None
         uid = results[0]["uid"]
-        d_url = f"https://api.sketchfab.com/v3/models/{uid}/download"
-        d_res = requests.get(d_url, headers=headers, timeout=20)
+        d_res = requests.get(f"https://api.sketchfab.com/v3/models/{uid}/download", headers=headers, timeout=20)
         download_link = d_res.json().get("gltf", {}).get("url")
         if not download_link: return None
 
@@ -215,16 +220,18 @@ plane_model = fetch_sketchfab_model("boeing airliner low poly", models_dir, "pla
 terrain_dem = fetch_opentopography_dem(models_dir)
 
 # =============================================================================
-# 5. BLENDER CLI: SCENES 1 & 2 (3D RENDER)
+# 5. تصيير بلندر بالمسارات المطلقة (حل مشكلة المسار الصفرية)
 # =============================================================================
+out_shot1 = (SHUTTLE_DIR / "shot1_parachute.mp4").resolve()
+out_shot2 = (SHUTTLE_DIR / "shot2_radar.mp4").resolve()
+
 shot1_py = SHUTTLE_DIR / "shot1.py"
 shot1_py.write_text(f"""
 import bpy, math
 bpy.ops.wm.read_factory_settings(use_empty=True)
 scene = bpy.context.scene
 scene.render.fps = {FPS}
-scene.frame_start = 1
-scene.frame_end = {FPS * 30}
+scene.frame_start, scene.frame_end = 1, {FPS * 30}
 
 world = bpy.data.worlds.new("Void")
 scene.world = world
@@ -281,7 +288,7 @@ cam.keyframe_insert(data_path="location", frame={FPS * 30})
 scene.render.resolution_x, scene.render.resolution_y = {TARGET_W}, {TARGET_H}
 scene.render.image_settings.file_format = 'FFMPEG'
 scene.render.ffmpeg.format, scene.render.ffmpeg.codec = 'MPEG4', 'H264'
-scene.render.filepath = str(bpy.path.abspath("//")) + "/shot1_parachute.mp4"
+scene.render.filepath = {repr(str(out_shot1))}
 """)
 
 shot2_py = SHUTTLE_DIR / "shot2.py"
@@ -290,8 +297,7 @@ import bpy, math
 bpy.ops.wm.read_factory_settings(use_empty=True)
 scene = bpy.context.scene
 scene.render.fps = {FPS}
-scene.frame_start = 1
-scene.frame_end = {FPS * 30}
+scene.frame_start, scene.frame_end = 1, {FPS * 30}
 
 world = bpy.data.worlds.new("RadarWorld")
 scene.world = world
@@ -366,20 +372,17 @@ cam.keyframe_insert(data_path="location", frame={FPS * 30})
 scene.render.resolution_x, scene.render.resolution_y = {TARGET_W}, {TARGET_H}
 scene.render.image_settings.file_format = 'FFMPEG'
 scene.render.ffmpeg.format, scene.render.ffmpeg.codec = 'MPEG4', 'H264'
-scene.render.filepath = str(bpy.path.abspath("//")) + "/shot2_radar.mp4"
+scene.render.filepath = {repr(str(out_shot2))}
 """)
 
-run_cmd(["blender", "-b", "-P", str(shot1_py)], "رندرة المشهد 1 عبر بلندر (Blender CLI)")
-run_cmd(["blender", "-b", "-P", str(shot2_py)], "رندرة المشهد 2 عبر بلندر (Blender CLI)")
-
-shot1_mp4 = next(SHUTTLE_DIR.glob("shot1_parachute*.mp4"), None)
-shot2_mp4 = next(SHUTTLE_DIR.glob("shot2_radar*.mp4"), None)
+run_cmd(["blender", "-b", "-P", str(shot1_py)], "رندرة المشهد 1 عبر بلندر")
+run_cmd(["blender", "-b", "-P", str(shot2_py)], "رندرة المشهد 2 عبر بلندر")
 
 # =============================================================================
-# 6. FORENSIC MOTION GRAPHICS (SCENES 3 & 4 BASED ON AGY SCRIPT)
+# 6. موشن جرافيك الأدلة والمشتبه به (المشاهد 3 و 4)
 # =============================================================================
 ev = STORY_DATA["scene3_evidence"]
-shot3_mp4 = SHUTTLE_DIR / "shot3_evidence.mp4"
+shot3_mp4 = (SHUTTLE_DIR / "shot3_evidence.mp4").resolve()
 vf_shot3 = (
     f"color=c=0x090B0E:s={TARGET_W}x{TARGET_H}:d=30:r={FPS},"
     f"drawbox=x=420:y=160:w=1080:h=760:color=0x13161F:t=fill,"
@@ -392,11 +395,10 @@ vf_shot3 = (
     f"drawbox=x=450:y=300:w=1020:h=85:color=0xD90429@0.35:t=3,"
     f"noise=alls=10:allf=t+u,vignette=PI/4"
 )
-run_cmd(["ffmpeg", "-y", "-f", "lavfi", "-i", vf_shot3, "-c:v", "libx264", "-pix_fmt", "yuv420p", str(shot3_mp4)],
-        "توليد المشهد 3: وثيقة الأدلة الجنائية")
+run_cmd(["ffmpeg", "-y", "-f", "lavfi", "-i", vf_shot3, "-c:v", "libx264", "-pix_fmt", "yuv420p", str(shot3_mp4)], "المشهد 3: وثيقة الأدلة")
 
 sp = STORY_DATA["scene4_suspect"]
-shot4_mp4 = SHUTTLE_DIR / "shot4_dossier.mp4"
+shot4_mp4 = (SHUTTLE_DIR / "shot4_dossier.mp4").resolve()
 vf_shot4 = (
     f"color=c=0x07080B:s={TARGET_W}x{TARGET_H}:d=30:r={FPS},"
     f"drawbox=x=180:y=140:w=480:h=640:color=0x11131A:t=fill,"
@@ -412,39 +414,36 @@ vf_shot4 = (
     f"drawtext=text='CASE CLOSED UNSOLVED - JULY 2016':x=720:y=720:fontsize=26:fontcolor=0x777777,"
     f"noise=alls=12:allf=t+u,vignette=PI/3"
 )
-run_cmd(["ffmpeg", "-y", "-f", "lavfi", "-i", vf_shot4, "-c:v", "libx264", "-pix_fmt", "yuv420p", str(shot4_mp4)],
-        "توليد المشهد 4: بطاقة المشتبه به")
+run_cmd(["ffmpeg", "-y", "-f", "lavfi", "-i", vf_shot4, "-c:v", "libx264", "-pix_fmt", "yuv420p", str(shot4_mp4)], "المشهد 4: ملف المشتبه به")
 
 # =============================================================================
-# 7. AUDIO MIX & FINAL ASSEMBLY
+# 7. تصليح فلتر الصوت (anoisesrc) والتجميع النهائي
 # =============================================================================
-# توليد موسيقى محيطية مظلمة (Synth Drone)
-ambient_audio = SHUTTLE_DIR / "ambient.wav"
+ambient_audio = (SHUTTLE_DIR / "ambient.wav").resolve()
+# استخدام فلتر anoisesrc الصحيح بدلاً من anoise
 run_cmd([
     "ffmpeg", "-y",
     "-f", "lavfi", "-i", "sine=frequency=52:duration=120,volume=1.2",
-    "-f", "lavfi", "-i", "anoise=color=pink:duration=120,lowpass=f=380,volume=0.35",
+    "-f", "lavfi", "-i", "anoisesrc=color=pink:duration=120,lowpass=f=380,volume=0.35",
     "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest[aout]",
     "-map", "[aout]", "-c:a", "pcm_s16le", str(ambient_audio)
-], "توليد شريط الصوت المحيطي")
+], "توليد الموسيقى التصويرية (Dark Drone)")
 
-# دمج التعليق الصوتي إذا توفر مع الموسيقى
 final_audio = SHUTTLE_DIR / "final_soundtrack.wav"
 if has_voice and master_narration_wav.exists():
     run_cmd([
         "ffmpeg", "-y", "-i", str(ambient_audio), "-i", str(master_narration_wav),
         "-filter_complex", "[0:a]volume=0.4[bg];[1:a]volume=1.8[voc];[bg][voc]amix=inputs=2:duration=first[aout]",
         "-map", "[aout]", "-c:a", "pcm_s16le", str(final_audio)
-    ], "دمج صوت السرد مع الموسيقى التصويرية")
+    ], "دمج الصوت والتعليق الصوتي")
 else:
     final_audio = ambient_audio
 
-# دمج المقاطع الأربعة
 concat_file = SHUTTLE_DIR / "timeline.txt"
-concat_file.write_text(f"""file '{Path(shot1_mp4).resolve()}'
-file '{Path(shot2_mp4).resolve()}'
-file '{shot3_mp4.resolve()}'
-file '{shot4_mp4.resolve()}'
+concat_file.write_text(f"""file '{out_shot1}'
+file '{out_shot2}'
+file '{shot3_mp4}'
+file '{shot4_mp4}'
 """)
 
 run_cmd([
@@ -454,9 +453,8 @@ run_cmd([
     "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p",
     "-c:a", "aac", "-b:a", "192k", "-shortest",
     str(FINAL_VIDEO)
-], "التجميع النهائي للفيديو (120 ثانية بجودة 1080p)")
+], "التجميع النهائي للفيديو (120 ثانية)")
 
 print(f"\n{'='*60}")
-print(f"🎉 تم الانتهاء بنجاح من إنتاج فيديو الاختبار الدقيقتين!")
-print(f"📁 مسار الفيديو: {FINAL_VIDEO.resolve()}")
+print(f"🎉 تم الانتهاء بنجاح من إنتاج الفيديو: {FINAL_VIDEO}")
 print(f"{'='*60}\n")
