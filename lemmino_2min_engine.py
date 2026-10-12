@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28.7 - PERFECT AGY EFFORT & RELEVANCE 3D)
-- AGY: gemini-3.8-flash with mandatory --effort high
-- Sketchfab: Accurate relevance sorting (-relevance)
-- Blender: Pure robust headless render
+LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28.8 - MULTI-MESH & EMPTY FIX)
 """
 
 import os
@@ -40,9 +37,8 @@ GEMINI_KEY = GEMINI_KEYS[0] if GEMINI_KEYS else ""
 SKETCHFAB_KEY = os.environ.get("SKETCHFAB_API_KEY", "").strip()
 OPENTOPO_KEY = os.environ.get("OPENTOPOGRAPHY_API_KEY", "").strip()
 
-# النماذج المعتمدة
 AGY_SCRIPT_MODEL = "gemini-3.8-flash"
-EFFORT_PRO_GENERATION = "high"  # إلزامي مع gemini-3.8-flash
+EFFORT_PRO_GENERATION = "high"
 TTS_MODEL = "gemini-3.8-flash-tts"
 TTS_VOICE = "Charon"
 
@@ -81,7 +77,7 @@ ASSET_STATUS = {
 }
 
 # =============================================================================
-# 2. استدعاء AGY مع --effort high الإلزامي
+# 2. استدعاء AGY بنموذج gemini-3.8-flash وخيار --effort high
 # =============================================================================
 def agy_generate_script():
     log_print("🧠 [AGY] استدعاء أداة AGY بنموذج gemini-3.8-flash وخيار --effort high...")
@@ -114,7 +110,6 @@ Return ONLY valid JSON:
     env_vars["SSH_CONNECTION"] = "127.0.0.1 0 127.0.0.1 22"
     env_vars["AGY_OAUTH_TOKEN"] = os.environ.get("AGY_CREDENTIALS", "")
 
-    # تمرير --effort high الإلزامي لنموذج gemini-3.8-flash
     cmd = [
         agy_bin,
         "--model", AGY_SCRIPT_MODEL,
@@ -201,17 +196,16 @@ else:
     ASSET_STATUS["gemini_tts"] = "❌ مفتاح GEMINI_API_KEY مفقود"
 
 # =============================================================================
-# 4. تنزيل الأصول مع الترتيب بالأهمية المطابقة (-relevance)
+# 4. تنزيل الأصول مع فحص مطابقة الاسم
 # =============================================================================
-def fetch_sketchfab_model(query, output_dir, tag_name):
+def fetch_sketchfab_model(query, output_dir, tag_name, filter_words):
     if not SKETCHFAB_KEY:
         ASSET_STATUS[f"{tag_name}_3d"] = "❌ مفتاح SKETCHFAB_API_KEY مفقود"
         return None
     try:
-        log_print(f"🔍 [Sketchfab] جاري البحث بالأهمية المطابقة عن: '{query}'...")
+        log_print(f"🔍 [Sketchfab] جاري البحث عن: '{query}'...")
         headers = {"Authorization": f"Token {SKETCHFAB_KEY}"}
-        # استخدام -relevance بدلاً من -likeCount لجلب الموديل المطابق بدقة
-        search_url = f"https://api.sketchfab.com/v3/models?q={query}&downloadable=true&licenses=by,by-nc,cc0&sort_by=-relevance"
+        search_url = f"https://api.sketchfab.com/v3/models?q={query}&downloadable=true&type=models"
         r = requests.get(search_url, headers=headers, timeout=15)
         
         if r.status_code != 200:
@@ -220,18 +214,27 @@ def fetch_sketchfab_model(query, output_dir, tag_name):
 
         results = r.json().get("results", [])
         if not results:
-            log_print(f"⚠️ لم يتم العثور على نتائج مجانية قابلة للتنزيل لـ '{query}'")
-            ASSET_STATUS[f"{tag_name}_3d"] = "⚠️ لم يُعثر على موديل مجاني متاح للتحميل -> بديل هندسي"
+            ASSET_STATUS[f"{tag_name}_3d"] = "⚠️ لم يُعثر على نتائج -> بديل هندسي"
             return None
 
-        uid = results[0]["uid"]
-        model_name = results[0]["name"]
-        log_print(f"📦 تم العثور على الموديل: '{model_name}' (UID: {uid})")
+        # فحص أول 5 نتائج لاختيار الموديل المطابق حقيقةً وتجنب الإعلانات
+        chosen = None
+        for item in results[:5]:
+            name_l = item.get("name", "").lower()
+            if any(w.lower() in name_l for w in filter_words):
+                chosen = item
+                break
+        if not chosen:
+            chosen = results[0]
+
+        uid = chosen["uid"]
+        model_name = chosen["name"]
+        log_print(f"📦 تم اختيار الموديل: '{model_name}' (UID: {uid})")
 
         d_res = requests.get(f"https://api.sketchfab.com/v3/models/{uid}/download", headers=headers, timeout=15)
         download_link = d_res.json().get("gltf", {}).get("url")
         if not download_link:
-            ASSET_STATUS[f"{tag_name}_3d"] = "❌ لم يوفر الموديل رابط تحميل glTF صالحاً"
+            ASSET_STATUS[f"{tag_name}_3d"] = "❌ لم يتوفر رابط تحميل glTF صالح"
             return None
 
         zip_path = output_dir / f"{tag_name}.zip"
@@ -243,14 +246,12 @@ def fetch_sketchfab_model(query, output_dir, tag_name):
 
         for p in extract_dir.rglob("*.gltf"):
             size_kb = p.stat().st_size // 1024
-            ASSET_STATUS[f"{tag_name}_3d"] = f"✅ تم التنزيل بنجاح: '{model_name}' ({size_kb} KB)"
-            log_print(f"✅ [Sketchfab] تم تنزيل المجسم واستخراجه بنجاح: {p.name}")
+            ASSET_STATUS[f"{tag_name}_3d"] = f"✅ تم التنزيل: '{model_name}' ({size_kb} KB)"
             return str(p.resolve())
             
         for p in extract_dir.rglob("*.glb"):
             size_kb = p.stat().st_size // 1024
-            ASSET_STATUS[f"{tag_name}_3d"] = f"✅ تم التنزيل بنجاح: '{model_name}' ({size_kb} KB)"
-            log_print(f"✅ [Sketchfab] تم تنزيل المجسم واستخراجه بنجاح: {p.name}")
+            ASSET_STATUS[f"{tag_name}_3d"] = f"✅ تم التنزيل: '{model_name}' ({size_kb} KB)"
             return str(p.resolve())
     except Exception as e:
         ASSET_STATUS[f"{tag_name}_3d"] = f"❌ خطأ أثناء التحميل ({e})"
@@ -273,7 +274,6 @@ def fetch_opentopography_dem(output_dir):
             tif_path.write_bytes(res.content)
             size_kb = len(res.content) // 1024
             ASSET_STATUS["terrain_dem"] = f"✅ تم تنزيل تضاريس ناسا بنجاح ({size_kb} KB)"
-            log_print(f"✅ [OpenTopography] تم تنزيل الخريطة بنجاح ({size_kb} KB)")
             return str(tif_path.resolve())
         else:
             ASSET_STATUS["terrain_dem"] = f"❌ خطأ في السيرفر (كود {res.status_code})"
@@ -284,12 +284,12 @@ def fetch_opentopography_dem(output_dir):
 models_dir = SHUTTLE_DIR / "models"
 models_dir.mkdir(parents=True, exist_ok=True)
 
-# تنزيل الأصول
-jumper_model = fetch_sketchfab_model("parachute", models_dir, "jumper")
-plane_model = fetch_sketchfab_model("airplane boeing", models_dir, "plane")
+# تنزيل الأصول مع التحقق من الكلمات الدلالية
+jumper_model = fetch_sketchfab_model("parachute", models_dir, "jumper", ["parachute", "skydiver", "chute", "drop"])
+plane_model = fetch_sketchfab_model("boeing 727 airplane", models_dir, "plane", ["boeing", "airplane", "plane", "airliner"])
 terrain_dem = fetch_opentopography_dem(models_dir)
 
-# طباعة لوحة تقرير حالة الأصول
+# طباعة تقرير حالة الأصول
 log_print("\n" + "="*60)
 log_print("📊 لوحة تقرير حالة الأصول (Asset Acquisition Report):")
 log_print(f"  🧠 السيناريو (AGY Script)    : {ASSET_STATUS['agy_script']}")
@@ -300,7 +300,7 @@ log_print(f"  🏔️ تضاريس ناسا (OpenTopography): {ASSET_STATUS['ter
 log_print("="*60 + "\n")
 
 # =============================================================================
-# 5. تصيير بلندر (مع os.path.exists)
+# 5. تصيير بلندر المحمي من كائنات الـ EMPTY والمتعددة الشِباك (100% مضمون)
 # =============================================================================
 raw_shot1_prefix = (SHUTTLE_DIR / "shot1_output").resolve()
 raw_shot2_prefix = (SHUTTLE_DIR / "shot2_output").resolve()
@@ -327,15 +327,48 @@ if mat_red.node_tree:
     mat_red.node_tree.links.new(emis.outputs['Emission'], out.inputs['Surface'])
 
 jumper_path = {repr(jumper_model)}
+jumper_loaded = False
+
 if jumper_path and os.path.exists(jumper_path):
-    bpy.ops.import_scene.gltf(filepath=jumper_path)
-    jumper = bpy.context.selected_objects[0]
-    jumper.location = (0, 0, 5)
-    max_d = max(jumper.dimensions) if max(jumper.dimensions) > 0 else 1.0
-    jumper.scale = [1.8 / max_d] * 3
-    jumper.data.materials.clear()
-    jumper.data.materials.append(mat_red)
-else:
+    try:
+        # إنشاء حاوية تحكم فارغة لجمع وتوحيد أجزاء الموديل المستورد
+        root_ctrl = bpy.data.objects.new("JumperRoot", None)
+        scene.collection.objects.link(root_ctrl)
+        root_ctrl.location = (0, 0, 5)
+
+        bpy.ops.import_scene.gltf(filepath=jumper_path)
+        imported_objs = list(bpy.context.selected_objects)
+
+        # البحث حصراً عن الكائنات التي لها بيانات شبكية (MESH) وتجاهل الحاويات الفارغة
+        mesh_objs = [o for o in imported_objs if o.type == 'MESH']
+        if mesh_objs:
+            for o in imported_objs:
+                if o.parent is None:
+                    o.parent = root_ctrl
+
+            for o in mesh_objs:
+                if o.data and hasattr(o.data, "materials"):
+                    o.data.materials.clear()
+                    o.data.materials.append(mat_red)
+
+            max_dim = max([max(o.dimensions) for o in mesh_objs if max(o.dimensions) > 0] or [1.0])
+            scale_f = 2.0 / max_dim
+            root_ctrl.scale = (scale_f, scale_f, scale_f)
+
+            root_ctrl.keyframe_insert(data_path="location", frame=1)
+            root_ctrl.location.z = -18
+            root_ctrl.keyframe_insert(data_path="location", frame={FPS * 30})
+
+            root_ctrl.rotation_euler = (0, 0, 0)
+            root_ctrl.keyframe_insert(data_path="rotation_euler", frame=1)
+            root_ctrl.rotation_euler = (math.radians(720), math.radians(240), math.radians(180))
+            root_ctrl.keyframe_insert(data_path="rotation_euler", frame={FPS * 30})
+
+            jumper_loaded = True
+    except Exception as e:
+        print("Jumper load error:", e)
+
+if not jumper_loaded:
     bpy.ops.mesh.primitive_cylinder_add(radius=0.4, depth=1.6, location=(0, 0, 5))
     jumper = bpy.context.active_object
     jumper.data.materials.append(mat_red)
@@ -344,14 +377,14 @@ else:
     pack.data.materials.append(mat_red)
     pack.parent = jumper
 
-jumper.keyframe_insert(data_path="location", frame=1)
-jumper.location.z = -18
-jumper.keyframe_insert(data_path="location", frame={FPS * 30})
+    jumper.keyframe_insert(data_path="location", frame=1)
+    jumper.location.z = -18
+    jumper.keyframe_insert(data_path="location", frame={FPS * 30})
 
-jumper.rotation_euler = (0, 0, 0)
-jumper.keyframe_insert(data_path="rotation_euler", frame=1)
-jumper.rotation_euler = (math.radians(720), math.radians(240), math.radians(180))
-jumper.keyframe_insert(data_path="rotation_euler", frame={FPS * 30})
+    jumper.rotation_euler = (0, 0, 0)
+    jumper.keyframe_insert(data_path="rotation_euler", frame=1)
+    jumper.rotation_euler = (math.radians(720), math.radians(240), math.radians(180))
+    jumper.keyframe_insert(data_path="rotation_euler", frame={FPS * 30})
 
 cam_data = bpy.data.cameras.new("Cam1")
 cam_data.lens = 32
@@ -402,20 +435,49 @@ else:
     disp.strength = 3.5
 
 plane_file = {repr(plane_model)}
+plane_loaded = False
+
 if plane_file and os.path.exists(plane_file):
-    bpy.ops.import_scene.gltf(filepath=plane_file)
-    plane = bpy.context.selected_objects[0]
-    max_p = max(plane.dimensions) if max(plane.dimensions) > 0 else 1.0
-    plane.scale = [2.2 / max_p] * 3
-else:
+    try:
+        root_plane = bpy.data.objects.new("PlaneRoot", None)
+        scene.collection.objects.link(root_plane)
+        root_plane.location = (0, -14, 5.5)
+
+        bpy.ops.import_scene.gltf(filepath=plane_file)
+        imported_plane_objs = list(bpy.context.selected_objects)
+
+        mesh_plane_objs = [o for o in imported_plane_objs if o.type == 'MESH']
+        if mesh_plane_objs:
+            for o in imported_plane_objs:
+                if o.parent is None:
+                    o.parent = root_plane
+
+            for o in mesh_plane_objs:
+                if o.data and hasattr(o.data, "materials"):
+                    o.data.materials.clear()
+                    o.data.materials.append(mat_plane)
+
+            max_dim = max([max(o.dimensions) for o in mesh_plane_objs if max(o.dimensions) > 0] or [1.0])
+            scale_f = 2.5 / max_dim
+            root_plane.scale = (scale_f, scale_f, scale_f)
+
+            root_plane.keyframe_insert(data_path="location", frame=1)
+            root_plane.location.y = 14
+            root_plane.keyframe_insert(data_path="location", frame={FPS * 30})
+
+            plane_loaded = True
+    except Exception as e:
+        print("Plane load error:", e)
+
+if not plane_loaded:
     bpy.ops.mesh.primitive_cone_add(radius1=0.7, depth=2.8, location=(0, -14, 5.5))
     plane = bpy.context.active_object
     plane.rotation_euler = (math.radians(-90), 0, 0)
-plane.data.materials.append(mat_plane)
+    plane.data.materials.append(mat_plane)
 
-plane.keyframe_insert(data_path="location", frame=1)
-plane.location.y = 14
-plane.keyframe_insert(data_path="location", frame={FPS * 30})
+    plane.keyframe_insert(data_path="location", frame=1)
+    plane.location.y = 14
+    plane.keyframe_insert(data_path="location", frame={FPS * 30})
 
 cam_data = bpy.data.cameras.new("Cam2")
 cam_data.lens = 45
