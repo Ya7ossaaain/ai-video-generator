@@ -1,12 +1,24 @@
-name: Blender Documentary Pipeline - 60s Proof of Concept
+name: Blender Documentary - Asset-First Fast Test
 
 on:
   workflow_dispatch:
     inputs:
       topic:
-        description: Documentary topic for reference search
+        description: Documentary scene topic
         required: true
         default: "D. B. Cooper: the night jump"
+      duration_seconds:
+        description: Preview duration (start with 12 seconds; increase after assets/import work)
+        required: true
+        default: "12"
+        type: choice
+        options: ["12", "30", "60"]
+      fps:
+        description: Preview frame rate (12 is faster; use 24 for final)
+        required: true
+        default: "12"
+        type: choice
+        options: ["12", "24"]
       resolution_percent:
         description: Render scale (lower is faster)
         required: true
@@ -20,11 +32,15 @@ permissions:
 jobs:
   render:
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    timeout-minutes: 90
     env:
       TOPIC: ${{ inputs.topic }}
+      DURATION_SECONDS: ${{ inputs.duration_seconds }}
+      FPS: ${{ inputs.fps }}
       RESOLUTION_PERCENT: ${{ inputs.resolution_percent }}
       OUTPUT_DIR: ${{ github.workspace }}/output
+      SKETCHFAB_API_TOKEN: ${{ secrets.SKETCHFAB_API_TOKEN }}
+      AGY_CREDENTIALS: ${{ secrets.AGY_CREDENTIALS }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -32,42 +48,55 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y blender ffmpeg python3 xvfb libgl1-mesa-dri libglu1-mesa
+      - name: Configure existing Antigravity credentials if agy is available
+        shell: bash
+        run: |
+          if [ -n "$AGY_CREDENTIALS" ]; then
+            mkdir -p "$HOME/.gemini/antigravity-cli"
+            printf '%s' "$AGY_CREDENTIALS" > "$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
+            chmod 600 "$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
+          fi
+          if command -v agy >/dev/null 2>&1; then
+            echo "agy CLI is available; candidate metadata will be ranked by Agy."
+          else
+            echo "agy CLI is not installed on this runner; script will log a deterministic metadata fallback. No agy binary is installed by this workflow."
+          fi
       - name: Show environment
         run: |
           blender --version
           ffmpeg -version | head -n 2
           mkdir -p "$OUTPUT_DIR"
-      - name: Search references and render scene
+      - name: Search, evaluate, download and render existing models
+        shell: bash
         run: |
           set -o pipefail
-          # EEVEE in the Ubuntu-packaged Blender may still initialize OpenGL in CI.
-          # Xvfb supplies a virtual display; Mesa software rendering avoids a physical GPU requirement.
           export LIBGL_ALWAYS_SOFTWARE=1
           xvfb-run -a blender --background --python blender_documentary_60s_test.py 2>&1 | tee "$OUTPUT_DIR/blender_render.log"
-      - name: Encode 60-second MP4
+      - name: Encode MP4 if frames exist
         if: always()
+        shell: bash
         run: |
           if find "$OUTPUT_DIR/frames" -name 'frame_*.png' -print -quit 2>/dev/null | grep -q .; then
-            ffmpeg -y -framerate 24 -i "$OUTPUT_DIR/frames/frame_%04d.png" \
-              -c:v libx264 -preset veryfast -crf 21 -pix_fmt yuv420p -movflags +faststart \
-              "$OUTPUT_DIR/documentary_60s_test.mp4"
-            ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 "$OUTPUT_DIR/documentary_60s_test.mp4"
+            ffmpeg -y -framerate "$FPS" -i "$OUTPUT_DIR/frames/frame_%04d.png" \
+              -c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p -movflags +faststart \
+              "$OUTPUT_DIR/documentary_asset_test.mp4"
+            ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 "$OUTPUT_DIR/documentary_asset_test.mp4"
           else
-            echo "No rendered frames found; see blender_render.log" >&2
-            exit 1
+            echo "No rendered frames found. See blender_render.log and asset_pipeline_error.txt." >&2
           fi
       - name: Create contact sheet
         if: always()
+        shell: bash
         run: |
           if [ -f "$OUTPUT_DIR/frames/frame_0001.png" ]; then
-            ffmpeg -y -framerate 24 -i "$OUTPUT_DIR/frames/frame_%04d.png" \
-              -vf "select='not(mod(n,120))',scale=320:-1,tile=4x3" -frames:v 1 "$OUTPUT_DIR/contact_sheet.jpg" || true
+            ffmpeg -y -framerate "$FPS" -i "$OUTPUT_DIR/frames/frame_%04d.png" \
+              -vf "select='not(mod(n,max(1,${FPS})))',scale=320:-1,tile=4x3" -frames:v 1 "$OUTPUT_DIR/contact_sheet.jpg" || true
           fi
-      - name: Upload video and reports
+      - name: Upload video, models and evaluation reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: blender-documentary-60s-test
+          name: blender-documentary-asset-first-test
           path: output/
           if-no-files-found: warn
           retention-days: 7
