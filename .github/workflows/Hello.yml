@@ -32,15 +32,24 @@ jobs:
         env:
           AGY_CREDS: ${{ secrets.AGY_CREDENTIALS }}
         run: |
-          mkdir -p ~/.config/agy ~/.agy
+          # 1. التثبيت الرسمي لأداة Antigravity CLI وإضافتها للـ PATH
+          curl -fsSL https://antigravity.google/cli/install.sh | bash || true
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/bin:$PATH"
+
+          # 2. إعداد الاعتمادات
+          mkdir -p ~/.config/agy ~/.agy ~/.gemini/antigravity-cli
           echo "$AGY_CREDS" > ~/.config/agy/credentials.json
           echo "$AGY_CREDS" > ~/.config/agy/config.json
+          echo "$AGY_CREDS" > ~/.gemini/antigravity-cli/credentials.json
+          echo "$AGY_CREDS" > ~/.agy/credentials.json
           export AGY_CREDENTIALS="$AGY_CREDS"
-          echo "✅ تم إعداد اعتمادات AGY بنجاح."
+          echo "✅ تم تثبيت Antigravity CLI وتسجيل اعتمادات AGY بنجاح."
 
       - name: Execute Full Autonomous Pipeline
         env:
           DISPLAY: ":99"
+          PYTHONUNBUFFERED: "1"
           AGY_CREDENTIALS: ${{ secrets.AGY_CREDENTIALS }}
           SKETCHFAB_API_KEY: ${{ secrets.SKETCHFAB_API_KEY }}
           OPENTOPOGRAPHY_API_KEY: ${{ secrets.OPENTOPOGRAPHY_API_KEY }}
@@ -50,7 +59,7 @@ jobs:
         run: |
           Xvfb :99 -screen 0 1280x720x24 &
           sleep 2
-          python lemmino_2min_engine.py
+          python -u lemmino_2min_engine.py
 
       - name: Upload Video Artifact
         uses: actions/upload-artifact@v4
