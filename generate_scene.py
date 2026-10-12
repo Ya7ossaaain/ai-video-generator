@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 LEMMiNO AUTONOMOUS PIPELINE (OPEN-SOURCE STACK)
-HuggingFace Hub + Trimesh + AGY Reviewer + Blender EEVEE Engine
+HuggingFace Hub + Trimesh + AGY Reviewer + Blender EEVEE Engine (Xvfb)
 """
 
 import os
@@ -167,10 +167,6 @@ Return ONLY valid JSON:
     return True, "تم الاعتماد تلقائياً"
 
 
-# =============================================================================
-# كود Blender عبر محرك EEVEE السريع
-# ⚠️ تنبيه: أي f-string داخلي يحتاج تهريب الأقواس {{}} أو تجنب f تماماً
-# =============================================================================
 BLENDER_SCRIPT = f"""
 import bpy
 import math
@@ -191,7 +187,6 @@ scene.render.filepath = "./lemmino_jump.mp4"
 scene.render.resolution_x = 1280
 scene.render.resolution_y = 720
 
-# ✅ استخدام EEVEE بدلاً من CYCLES لتسريع الرندر بشكل هائل
 try:
     scene.render.engine = 'BLENDER_EEVEE_NEXT'
 except Exception:
@@ -260,9 +255,6 @@ def import_obj_safely(file_path):
     return None
 
 
-# ------------------------------------------------------------
-# 1. استيراد وتجهيز الطائرة
-# ------------------------------------------------------------
 plane_file = Path("{PLANE_OBJ.resolve()}")
 airplane = import_obj_safely(plane_file)
 
@@ -342,9 +334,6 @@ airplane.keyframe_insert(data_path="location", frame=1)
 airplane.location = (0, -50, 0)
 airplane.keyframe_insert(data_path="location", frame=150)
 
-# ------------------------------------------------------------
-# 2. استيراد وتجهيز المظلي
-# ------------------------------------------------------------
 skydiver_file = Path("{SKYDIVER_OBJ.resolve()}")
 skydiver = import_obj_safely(skydiver_file)
 
@@ -408,9 +397,6 @@ skydiver.rotation_euler = (math.radians(350), math.radians(110), math.radians(60
 skydiver.keyframe_insert(data_path="location", frame=150)
 skydiver.keyframe_insert(data_path="rotation_euler", frame=150)
 
-# ------------------------------------------------------------
-# 3. سلاسل جبال كاسكيد الطبوغرافية
-# ------------------------------------------------------------
 bpy.ops.mesh.primitive_grid_add(x_subdivisions=80, y_subdivisions=80, size=200, location=(0, 22, -29))
 mountains = bpy.context.active_object
 mountains.name = "CascadeMountainRange"
@@ -441,9 +427,6 @@ for i in range(80):
     tree = bpy.context.active_object
     tree.data.materials.append(mat_tree_white if dist < 8.5 else mat_tree_dark)
 
-# ------------------------------------------------------------
-# 4. خطوط السرعة والرياح
-# ------------------------------------------------------------
 random.seed(1971)
 for i in range(45):
     wx = random.uniform(-16, 16)
@@ -457,9 +440,6 @@ for i in range(45):
     line.location.y += random.uniform(35, 60)
     line.keyframe_insert(data_path="location", frame=150)
 
-# ------------------------------------------------------------
-# 5. الكاميرا والتتبع السينمائي
-# ------------------------------------------------------------
 cam_target = bpy.data.objects.new("CamTarget", None)
 scene.collection.objects.link(cam_target)
 
@@ -507,9 +487,7 @@ def main():
 
     log("🎬 استدعاء Blender لتنفيذ الرندر...")
 
-    # ✅ ضبط متغيرات البيئة لتفعيل EGL في وضع الخلفية (Headless)
     env = os.environ.copy()
-    env["EGL_PLATFORM"] = "surfaceless"
     env["LIBGL_ALWAYS_SOFTWARE"] = "1"
     env["MESA_GL_VERSION_OVERRIDE"] = "4.1"
 
