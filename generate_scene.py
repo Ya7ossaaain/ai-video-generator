@@ -86,37 +86,41 @@ def fetch_open_assets():
     # 1. تحميل الطائرة
     if not PLANE_OBJ.exists():
         plane_raw = MODELS_DIR / "temp_plane.glb"
-        plane_url = (
+        plane_urls = [
+            "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/"
+            "main/Models/CesiumMan/glTF-Binary/CesiumMan.glb",
             "https://huggingface.co/datasets/shuolucs/WorldCoder-Bench/"
-            "resolve/main/CesiumMan.glb"
-        )
-        try:
-            log("📥 [طائرة] جاري السحب من المصدر المفتوح...")
-            req = urllib.request.Request(plane_url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = resp.read()
-                if len(data) > 5000:
-                    with open(plane_raw, "wb") as f:
-                        f.write(data)
-                    if trimesh:
-                        convert_to_clean_obj(plane_raw, PLANE_OBJ)
-        except Exception as e:
-            log(f"  ⚠️ تعذر تحميل الطائرة: {e}")
+            "resolve/main/CesiumMan.glb",
+        ]
+        for i, url in enumerate(plane_urls, 1):
+            try:
+                log(f"📥 [طائرة] جاري السحب ({i}/{len(plane_urls)})...")
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = resp.read()
+                    if len(data) > 5000:
+                        with open(plane_raw, "wb") as f:
+                            f.write(data)
+                        if trimesh:
+                            convert_to_clean_obj(plane_raw, PLANE_OBJ)
+                        break
+            except Exception as e:
+                log(f"  ⚠️ تعذر الرابط {i}: {e}")
 
     # 2. تحميل المظلي البشري
     if not SKYDIVER_OBJ.exists():
         skydiver_raw = MODELS_DIR / "temp_skydiver.glb"
         human_urls = [
-            "https://huggingface.co/datasets/shuolucs/WorldCoder-Bench/"
-            "resolve/main/CesiumMan.glb",
             "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/"
             "main/Models/CesiumMan/glTF-Binary/CesiumMan.glb",
+            "https://huggingface.co/datasets/shuolucs/WorldCoder-Bench/"
+            "resolve/main/CesiumMan.glb",
         ]
         for i, url in enumerate(human_urls, 1):
             try:
                 log(f"📥 [مظلي بشري] جاري السحب ({i}/{len(human_urls)})...")
                 req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req, timeout=10) as resp:
+                with urllib.request.urlopen(req, timeout=15) as resp:
                     data = resp.read()
                     if len(data) > 5000:
                         with open(skydiver_raw, "wb") as f:
@@ -248,7 +252,6 @@ def import_obj_safely(file_path):
         else:
             bpy.ops.import_scene.obj(filepath=str(file_path))
     except Exception as err:
-        # ✅ لا يوجد f-string هنا → لا مشكلة في التقييم المزدوج
         print("⚠️ فشل استيراد OBJ:", err, flush=True)
         return None
     new_objs = [o for o in bpy.data.objects if o not in before and o.type == 'MESH']
@@ -515,8 +518,19 @@ def main():
         f.write(BLENDER_SCRIPT)
 
     log("🎬 استدعاء Blender لتنفيذ الرندر...")
+
+    # ✅ ضبط متغيرات البيئة لتفعيل EGL في وضع الخلفية (Headless)
+    env = os.environ.copy()
+    env["EGL_PLATFORM"] = "surfaceless"
+    env["MESA_GL_VERSION_OVERRIDE"] = "4.1"
+    env["LIBGL_ALWAYS_SOFTWARE"] = "1"
+
     blender_bin = os.environ.get("BLENDER_BIN", "blender")
-    res = subprocess.run([blender_bin, "-b", "-P", str(script_path)], text=True)
+    res = subprocess.run(
+        [blender_bin, "-b", "-P", str(script_path)],
+        text=True,
+        env=env,
+    )
 
     if res.returncode == 0 and OUTPUT_VIDEO.exists() and OUTPUT_VIDEO.stat().st_size > 1024:
         log(f"🎉 تم الرندر بنجاح تام! الملف جاهز: {OUTPUT_VIDEO}")
