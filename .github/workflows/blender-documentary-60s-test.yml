@@ -31,7 +31,7 @@ jobs:
       - name: Install Blender and FFmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y blender ffmpeg python3
+          sudo apt-get install -y blender ffmpeg python3 xvfb libgl1-mesa-dri libglu1-mesa
       - name: Show environment
         run: |
           blender --version
@@ -40,7 +40,10 @@ jobs:
       - name: Search references and render scene
         run: |
           set -o pipefail
-          blender -b --python blender_documentary_60s_test.py 2>&1 | tee "$OUTPUT_DIR/blender_render.log"
+          # EEVEE in the Ubuntu-packaged Blender may still initialize OpenGL in CI.
+          # Xvfb supplies a virtual display; Mesa software rendering avoids a physical GPU requirement.
+          export LIBGL_ALWAYS_SOFTWARE=1
+          xvfb-run -a blender --background --python blender_documentary_60s_test.py 2>&1 | tee "$OUTPUT_DIR/blender_render.log"
       - name: Encode 60-second MP4
         if: always()
         run: |
@@ -57,7 +60,7 @@ jobs:
         if: always()
         run: |
           if [ -f "$OUTPUT_DIR/frames/frame_0001.png" ]; then
-            ffmpeg -y -framerate 1/5 -pattern_type glob -i "$OUTPUT_DIR/frames/frame_*.png" \
+            ffmpeg -y -framerate 24 -i "$OUTPUT_DIR/frames/frame_%04d.png" \
               -vf "select='not(mod(n,120))',scale=320:-1,tile=4x3" -frames:v 1 "$OUTPUT_DIR/contact_sheet.jpg" || true
           fi
       - name: Upload video and reports
