@@ -35,7 +35,11 @@ jobs:
     - name: Install System Tools
       run: |
         sudo apt-get update
-        sudo apt-get install -y curl jq wget xz-utils
+        sudo apt-get install -y \
+          curl jq wget xz-utils \
+          libgl1 libegl1 libx11-6 libxi6 \
+          libxxf86vm1 libxrender1 libgomp1 libsm6 \
+          libgbm1 libglvnd0 libglu1-mesa
 
     - name: Install Blender Portable
       run: |
@@ -78,6 +82,9 @@ jobs:
     - name: Execute Full Autonomous Pipeline
       env:
         AGY_CREDENTIALS: ${{ secrets.AGY_CREDENTIALS }}
+        EGL_PLATFORM: surfaceless
+        MESA_GL_VERSION_OVERRIDE: "4.1"
+        LIBGL_ALWAYS_SOFTWARE: "1"
       run: |
         python3 generate_scene.py
 
