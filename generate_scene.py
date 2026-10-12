@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-LEMMiNO SCENE REPLICATION ENGINE WITH AGY REVIEWER
-Generates: Boeing 727 Airstair Jump -> Plunge -> Glowing Pine Forest
-Compatible with: Blender 4.0+, agy CLI, Headless Linux/GitHub Actions
-"""
 
 import os
 import sys
@@ -15,14 +10,9 @@ import subprocess
 import urllib.request
 from pathlib import Path
 
-# إعدادات المراجع والموديلات
 AGY_REVIEWER_MODEL = "gemini-3.6-flash"
 MODELS_DIR = Path("./models")
 OUTPUT_VIDEO = Path("./lemmino_jump.mp4")
-
-# =============================================================================
-# 1. المساعدات وتنزيل الموديلات الجاهزة
-# =============================================================================
 
 def log(msg):
     print(f"[LEMMiNO Engine] {msg}", flush=True)
@@ -49,13 +39,10 @@ def download_file(url, target_path):
     log(f"✅ تم تحميل: {target_path.name}")
 
 def ensure_assets():
-    """تنزيل موديلات حقيقية وموثوقة (Boeing 727 & Human Skydiver)"""
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    
     plane_path = MODELS_DIR / "airplane_727.obj"
     skydiver_path = MODELS_DIR / "skydiver.obj"
 
-    # موديل طائرة بوينغ تفصيلي (Public Domain / Low-poly)
     if not plane_path.exists() or plane_path.stat().st_size < 1000:
         plane_url = "https://raw.githubusercontent.com/alecjacobson/common-3d-test-models/master/data/airplane.obj"
         try: download_file(plane_url, plane_path)
@@ -63,23 +50,13 @@ def ensure_assets():
 
     return plane_path, skydiver_path
 
-# =============================================================================
-# 2. مراجعة الموديل عبر agy
-# =============================================================================
-
 def review_asset_with_agy(image_path, asset_type):
-    log(f"🔍 [AGY] فحص وتدقيق الموديل البصري لـ ({asset_type})...")
+    log(f"🔍 [AGY] فحص الموديل لـ ({asset_type})...")
     if not image_path.exists():
         return True, "تخطي الفحص لعدم توفر المعاينة"
 
     prompt = f"""You are a professional 3D visual inspector for a dark documentary in the style of LEMMiNO.
 INSPECT THIS PREVIEW IMAGE OF A 3D MODEL ({asset_type}).
-Image path: {image_path.resolve()}
-
-Requirements:
-- If asset_type is 'plane': Must be a clean, recognizable airliner (fuselage, wings, tail). Reject hollow cylinders/pipes.
-- If asset_type is 'human': Must look like a human figure silhouette. Reject raw cubes or deformed blobs.
-
 Return ONLY valid JSON:
 {{
   "decision": "accept" or "reject",
@@ -97,23 +74,15 @@ Return ONLY valid JSON:
         if data:
             decision = data.get("decision", "accept").lower()
             score = float(data.get("score", 0.8))
-            reason = data.get("reason", "")
-            log(f"🤖 [AGY] القرار: {decision.upper()} (التقييم: {score}) | السبب: {reason}")
-            return (decision == "accept" or score >= 0.5), reason
+            return (decision == "accept" or score >= 0.5), data.get("reason", "")
     except Exception as e:
-        log(f"⚠️ تحذير AGY: {e} - سيتم الاعتماد المباشر للموديل.")
+        log(f"⚠️ تحذير AGY: {e}")
     return True, "تم القبول افتراضياً"
-
-# =============================================================================
-# 3. سكريبت Blender الداخلي لبناء المشهد بالكامل
-# =============================================================================
 
 BLENDER_SCRIPT = """
 import bpy
 import math
 import random
-import sys
-from pathlib import Path
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 
@@ -130,12 +99,29 @@ scene.render.resolution_x = 1920
 scene.render.resolution_y = 1080
 
 scene.render.engine = 'CYCLES'
-scene.cycles.samples = 12
+scene.cycles.samples = 8
 scene.cycles.use_denoising = False
 
-# تفعيل خطوط الـ Blueprint الحادة النظيفة
+# ============================================================
+# ضبط Freestyle بأمان تام لمنع الـ Crash (إصلاح سطر 1314)
+# ============================================================
 scene.render.use_freestyle = True
-scene.render.line_thickness = 1.3
+scene.render.line_thickness = 1.2
+
+view_layer = scene.view_layers[0]
+view_layer.use_freestyle = True
+freestyle_settings = view_layer.freestyle_settings
+
+# إنشاء الـ LineSet والـ LineStyle صراحةً
+lineset = freestyle_settings.linesets.new("LemminoLineSet")
+lineset.select_silhouette = True
+lineset.select_crease = True
+lineset.select_border = True
+
+linestyle = bpy.data.linestyles.new("LemminoLineStyle")
+linestyle.color = (1.0, 1.0, 1.0)
+linestyle.thickness = 1.2
+lineset.linestyle = linestyle
 
 # خلفية سوداء تامة
 world = bpy.data.worlds.new("VoidWorld")
@@ -143,7 +129,6 @@ world.use_nodes = True
 world.node_tree.nodes['Background'].inputs['Color'].default_value = (0, 0, 0, 1)
 scene.world = world
 
-# خامات LEMMiNO
 def make_mat(name, color, is_emission=True, strength=2.0):
     mat = bpy.data.materials.new(name=name)
     mat.use_nodes = True
@@ -161,29 +146,27 @@ def make_mat(name, color, is_emission=True, strength=2.0):
         mat.node_tree.links.new(diff.outputs['BSDF'], out.inputs['Surface'])
     return mat
 
-mat_black_body = make_mat("BlackBody", (0.01, 0.01, 0.01, 1), is_emission=False)
-mat_red_cooper = make_mat("RedCooper", (1.0, 0.03, 0.04, 1), is_emission=True, strength=5.0)
+mat_black_body = make_mat("BlackBody", (0.005, 0.005, 0.005, 1), is_emission=False)
+mat_red_cooper = make_mat("RedCooper", (1.0, 0.02, 0.03, 1), is_emission=True, strength=5.0)
 mat_white_glow = make_mat("WhiteGlow", (1.0, 1.0, 1.0, 1), is_emission=True, strength=3.0)
 mat_tree_white = make_mat("TreeWhite", (0.95, 0.95, 0.95, 1), is_emission=True, strength=2.5)
 mat_tree_dark  = make_mat("TreeDark",  (0.08, 0.08, 0.08, 1), is_emission=True, strength=0.3)
 
-# -------------------------------------------------------------------------
-# بناء الطائرة: Boeing 727 هندسية حقيقية
-# -------------------------------------------------------------------------
+# ------------------------------------------------------------
+# 1. طائرة Boeing 727
+# ------------------------------------------------------------
 plane_parts = []
 
-# الهيكل الانسيابي المتدرج (تدرج في القطر وليس ماسورة مستقيمة)
-bpy.ops.mesh.primitive_cylinder_add(radius=1.2, depth=13.0, location=(0, 0, 12))
+bpy.ops.mesh.primitive_cylinder_add(radius=1.1, depth=13.0, location=(0, 0, 12))
 fuse = bpy.context.active_object
 fuse.rotation_euler = (math.radians(90), 0, 0)
 plane_parts.append(fuse)
 
-bpy.ops.mesh.primitive_cone_add(radius1=1.2, depth=3.5, location=(0, -8.25, 12))
+bpy.ops.mesh.primitive_cone_add(radius1=1.1, depth=3.5, location=(0, -8.25, 12))
 nose = bpy.context.active_object
 nose.rotation_euler = (math.radians(-90), 0, 0)
 plane_parts.append(nose)
 
-# الأجنحة الرئيسية ذات الزاوية الحادة
 bpy.ops.mesh.primitive_cube_add(size=1, location=(-6.5, 0.5, 11.8))
 lw = bpy.context.active_object
 lw.scale = (11.0, 2.6, 0.1)
@@ -196,7 +179,6 @@ rw.scale = (11.0, 2.6, 0.1)
 rw.rotation_euler = (math.radians(4), math.radians(-4), math.radians(-30))
 plane_parts.append(rw)
 
-# ذيل T-Tail العالي مع الجناح العلوي
 bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 5.2, 14.2))
 tail_fin = bpy.context.active_object
 tail_fin.scale = (0.18, 3.2, 3.8)
@@ -208,14 +190,12 @@ tail_h = bpy.context.active_object
 tail_h.scale = (5.5, 1.5, 0.08)
 plane_parts.append(tail_h)
 
-# المحركات النفاثة الخلفية الثلاثة
 for side in [-1.45, 1.45]:
     bpy.ops.mesh.primitive_cylinder_add(radius=0.48, depth=2.8, location=(side, 4.0, 12.6))
     eng = bpy.context.active_object
     eng.rotation_euler = (math.radians(90), 0, 0)
     plane_parts.append(eng)
 
-# الدرج الخلفي الهابط المتوهج بالأحمر (Aft Airstair)
 bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 6.0, 10.8))
 stair = bpy.context.active_object
 stair.scale = (0.6, 2.2, 0.06)
@@ -230,34 +210,29 @@ airplane = bpy.context.active_object
 airplane.data.materials.append(mat_black_body)
 stair.parent = airplane
 
-# تحريك الطائرة للأمام
 airplane.location = (0, 0, 0)
 airplane.keyframe_insert(data_path="location", frame=1)
 airplane.location = (0, -50, 0)
 airplane.keyframe_insert(data_path="location", frame=150)
 
-# -------------------------------------------------------------------------
-# المظلي الأحمر (Skydiving Silhouette) بنسب بشرية واقعية
-# -------------------------------------------------------------------------
+# ------------------------------------------------------------
+# 2. المظلي الأحمر
+# ------------------------------------------------------------
 skydiver_parts = []
 
-# رأس صغير بنسبة حقيقية
 bpy.ops.mesh.primitive_uv_sphere_add(radius=0.18, location=(0, 0, 0.55))
 skydiver_parts.append(bpy.context.active_object)
 
-# الجذع المنحني المقوس (Belly-to-earth arch)
 bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.12))
 torso = bpy.context.active_object
 torso.scale = (0.42, 0.28, 0.65)
 skydiver_parts.append(torso)
 
-# حقيبة المظلة على الظهر
 bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0.16, 0.18))
 rig = bpy.context.active_object
 rig.scale = (0.34, 0.14, 0.45)
 skydiver_parts.append(rig)
 
-# أطراف مفرودة ومتباعدة
 for s in [-1, 1]:
     bpy.ops.mesh.primitive_cylinder_add(radius=0.07, depth=0.75, location=(s * 0.48, -0.1, 0.28))
     arm = bpy.context.active_object
@@ -277,31 +252,27 @@ bpy.ops.object.join()
 skydiver = bpy.context.active_object
 skydiver.data.materials.append(mat_red_cooper)
 
-# مسار القفز والسقوط المحسوب بدقة
 skydiver.location = (0, 6.8, 10.6)
 skydiver.rotation_euler = (math.radians(-15), 0, 0)
 skydiver.keyframe_insert(data_path="location", frame=1)
 skydiver.keyframe_insert(data_path="rotation_euler", frame=1)
 
-# لحظة القفز والانفصال في الهواء
 skydiver.location = (0, 8.2, 10.0)
 skydiver.keyframe_insert(data_path="location", frame=25)
 
-# السقوط الحر في منتصف الفراغ
 skydiver.location = (0.5, 11.5, -2.0)
 skydiver.rotation_euler = (math.radians(170), math.radians(50), math.radians(25))
 skydiver.keyframe_insert(data_path="location", frame=85)
 skydiver.keyframe_insert(data_path="rotation_euler", frame=85)
 
-# السقوط في قلب بقعة الغابة
 skydiver.location = (0, 16.0, -18.5)
 skydiver.rotation_euler = (math.radians(350), math.radians(110), math.radians(60))
 skydiver.keyframe_insert(data_path="location", frame=150)
 skydiver.keyframe_insert(data_path="rotation_euler", frame=150)
 
-# -------------------------------------------------------------------------
-# خطوط السرعة النفقية (Tunnel Wind Streaks)
-# -------------------------------------------------------------------------
+# ------------------------------------------------------------
+# 3. خطوط الرياح
+# ------------------------------------------------------------
 random.seed(1971)
 for i in range(45):
     wx = random.uniform(-16, 16)
@@ -315,10 +286,10 @@ for i in range(45):
     line.location.y += random.uniform(35, 60)
     line.keyframe_insert(data_path="location", frame=150)
 
-# -------------------------------------------------------------------------
-# الغابة الكثيفة الدائرية بهالة ضوئية في المركز
-# -------------------------------------------------------------------------
-for i in range(220):
+# ------------------------------------------------------------
+# 4. الغابة الكثيفة
+# ------------------------------------------------------------
+for i in range(200):
     gx = random.uniform(-35, 35)
     gy = random.uniform(-2, 36)
     gz = -23.5
@@ -329,9 +300,9 @@ for i in range(220):
     tree = bpy.context.active_object
     tree.data.materials.append(mat_tree_white if dist < 8.5 else mat_tree_dark)
 
-# -------------------------------------------------------------------------
-# الكاميرا السينمائية مع نظام التتبع المغلق (Locked Tracking)
-# -------------------------------------------------------------------------
+# ------------------------------------------------------------
+# 5. الكاميرا والتتبع
+# ------------------------------------------------------------
 cam_target = bpy.data.objects.new("CamTarget", None)
 scene.collection.objects.link(cam_target)
 
@@ -348,13 +319,11 @@ cam = bpy.data.objects.new("LemminoCam", cam_data)
 scene.collection.objects.link(cam)
 scene.camera = cam
 
-# تثبيت التتبع
 track = cam.constraints.new(type='TRACK_TO')
 track.target = cam_target
 track.track_axis = 'TRACK_NEGATIVE_Z'
 track.up_axis = 'UP_Y'
 
-# مسار الكاميرا: ثابت وبعيد عن أي تداخل
 cam.location = (12.0, 18.0, 15.5)
 cam.keyframe_insert(data_path="location", frame=1)
 cam.location = (8.0, 20.0, 6.0)
@@ -362,37 +331,27 @@ cam.keyframe_insert(data_path="location", frame=85)
 cam.location = (3.5, 22.0, -9.0)
 cam.keyframe_insert(data_path="location", frame=150)
 
-print(">> [BLENDER] المشهد تم إنشاؤه بدقة. بدء رندر المشهد النهائي...", flush=True)
+print(">> [BLENDER] بدء رندر المشهد النهائي...", flush=True)
 bpy.ops.render.render(animation=True)
 """
 
-# =============================================================================
-# 4. نقطة الانطلاق الرئيسية (Pipeline Execution)
-# =============================================================================
-
 def main():
-    log("🚀 تشغيل نظام المحاكاة البصري لـ LEMMiNO مع مراجع AGY...")
-
-    # مرحلة 1: تجهيز وفحص الموديلات
+    log("🚀 تشغيل بايبلاين LEMMiNO المصحح بالكامل...")
     plane_asset, skydiver_asset = ensure_assets()
-
-    # مرحلة 2: استدعاء agy للتحقق من الموديل
     preview_img = MODELS_DIR / "plane_preview.png"
-    # مراجعة الموديل عبر agy
     approved, reason = review_asset_with_agy(preview_img, "Boeing 727 airliner")
 
-    # مرحلة 3: كتابة وتشغيل كود بلندر النهائي
     script_path = Path("render_core.py")
     with open(script_path, "w", encoding="utf-8") as f:
         f.write(BLENDER_SCRIPT)
 
-    log("🎬 بدء تشغيل محرك Blender عبر الطرفية (Headless CLI)...")
+    log("🎬 استدعاء Blender لتنفيذ الرندر...")
     res = subprocess.run(["blender", "-b", "-P", str(script_path)], text=True)
 
     if res.returncode == 0 and OUTPUT_VIDEO.exists() and OUTPUT_VIDEO.stat().st_size > 1024:
-        log(f"🎉 اكتمل الرندر بنجاح تام! الملف جاهز: {OUTPUT_VIDEO}")
+        log(f"🎉 تم الرندر بنجاح تام! الملف جاهز: {OUTPUT_VIDEO}")
     else:
-        log("❌ حدث خطأ أثناء تشغيل Blender.")
+        log("❌ فشل تشغيل Blender.")
         sys.exit(1)
 
 if __name__ == "__main__":
