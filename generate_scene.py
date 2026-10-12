@@ -1,509 +1,462 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LEMMiNO AUTONOMOUS PIPELINE (OPEN-SOURCE STACK)
-HuggingFace Hub + Trimesh + AGY Reviewer + Blender EEVEE Engine (Xvfb)
+LEMMINO INVESTIGATIVE BENCHMARK ENGINE (V28 INTEGRATED)
+Orchestrated by: AGY (Script & Research) + Gemini TTS (Voice) + Sketchfab & OpenTopo (3D Assets) + Blender CLI
 """
 
 import os
 import sys
-import math
-import random
 import json
+import math
+import shutil
 import subprocess
-import urllib.request
-import re
+import zipfile
+import base64
 from pathlib import Path
+import requests
 
-try:
-    from huggingface_hub import hf_hub_download
-except ImportError:
-    hf_hub_download = None
+from google import genai
+from google.genai import types
 
-try:
-    import trimesh
-except ImportError:
-    trimesh = None
+# =============================================================================
+# 1. CONFIGURATION & DIRECTORIES
+# =============================================================================
+BASE_DIR = Path("./output_benchmark")
+SHUTTLE_DIR = BASE_DIR / "workspace"
+FINAL_VIDEO = BASE_DIR / "lemmino_2min_benchmark.mp4"
 
-AGY_REVIEWER_MODEL = "gemini-3.6-flash"
-MODELS_DIR = Path("./models")
-OUTPUT_VIDEO = Path("./lemmino_jump.mp4")
+TARGET_W, TARGET_H, FPS = 1920, 1080, 30
+TTS_MODEL = "gemini-2.5-flash"  # أو gemini-3.8-flash-tts حسب المتاح في حسابك
+TTS_VOICE = "Charon"
 
-PLANE_OBJ = MODELS_DIR / "airliner.obj"
-SKYDIVER_OBJ = MODELS_DIR / "skydiver.obj"
+SKETCHFAB_KEY = os.environ.get("SKETCHFAB_API_KEY", "").strip()
+OPENTOPO_KEY = os.environ.get("OPENTOPOGRAPHY_API_KEY", "").strip()
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 
+if BASE_DIR.exists():
+    shutil.rmtree(BASE_DIR, ignore_errors=True)
+SHUTTLE_DIR.mkdir(parents=True, exist_ok=True)
 
-def log(msg):
-    print(f"[LEMMiNO Engine] {msg}", flush=True)
-
+def run_cmd(cmd, desc=""):
+    print(f"🎬 [تنفيذ]: {desc}...")
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if res.returncode != 0:
+        print(f"⚠️ تنبيه ({desc}): {res.stderr[-300:]}")
+    return res
 
 def extract_json(text):
-    if not text:
-        return None
-    text = re.sub(r"```json\s*", "", text.strip(), flags=re.I)
-    text = re.sub(r"```\s*$", "", text)
-    try:
-        return json.loads(text)
-    except Exception:
-        pass
-    match = re.search(r"\{[\s\S]*\}", text)
+    if not text: return None
+    text = text.replace("```json", "").replace("```", "").strip()
+    try: return json.loads(text)
+    except: pass
+    import re
+    match = re.search(r"\{[\s\S]*\}|\[[\s\S]*\]", text)
     if match:
-        try:
-            return json.loads(match.group(0))
-        except Exception:
-            pass
+        try: return json.loads(match.group(0))
+        except: pass
     return None
 
+# =============================================================================
+# 2. AGY INVESTIGATIVE SCRIPT ENGINE (عقل النظام)
+# =============================================================================
+def agy_generate_script():
+    print("🧠 [AGY] استدعاء أداة AGY لصياغة السيناريو الاستقصائي بدقة ليمينو...")
+    prompt = """You are an elite documentary director in the exact style of LEMMINO.
+Topic: The Mystery of D.B. Cooper.
+Target Duration: 2 Minutes (4 scenes, exactly 30 seconds each).
 
-def convert_to_clean_obj(input_file, output_file):
-    if not input_file.exists():
-        return False
-    log(f"🔄 تحويل ({input_file.name}) إلى صيغة OBJ نقية عبر Trimesh...")
+Generate a production script in Arabic for narration, and specific forensic details for on-screen graphics.
+
+Return ONLY valid JSON:
+{
+  "narration": "نص تعليق صوتي باللغة العربية الفصحى الوقورة الغامضة، مدته تقارب دقيقتين (حوالي 240 إلى 270 كلمة)، يسرد تفاصيل قفزة دي بي كوبر في ليلة 24 نوفمبر 1971، والممر الجوي فيكتور 23، واختفاء أثر الفدية والمشتبه به روبرت راكسترو.",
+  "scene3_evidence": {
+    "title": "EVIDENCE ITEM #01 - PASSENGER MANIFEST",
+    "passenger": "DAN COOPER",
+    "seat": "18C (AFT SECTION - BOEING 727)",
+    "route": "PORTLAND INTL TO SEATTLE-TACOMA",
+    "ransom": "$200,000 CASH (10,000 x $20 BILLS)"
+  },
+  "scene4_suspect": {
+    "name": "ROBERT W. RACKSTRAW",
+    "tag": "PRIMARY SUSPECT - FBI NORJAK DOSSIER",
+    "point1": "Decorated Army Paratrooper & Pilot",
+    "point2": "Demolition & Explosives Specialist",
+    "point3": "Discharged 5 months prior to hijacking",
+    "point4": "Refused to confirm or deny identity"
+  }
+}"""
     try:
-        loaded = trimesh.load(str(input_file.resolve()))
-        if isinstance(loaded, trimesh.Scene):
-            geoms = list(loaded.geometry.values())
-            if geoms:
-                combined = trimesh.util.concatenate(geoms)
-                combined.export(str(output_file.resolve()))
-                log(f"✅ تم تصدير مجسم OBJ موحد: {output_file.name}")
-                return True
-        else:
-            loaded.export(str(output_file.resolve()))
-            log(f"✅ تم تصدير مجسم OBJ نقي: {output_file.name}")
+        cmd = ["agy", "--model", "gemini-3.1-pro", "--effort", "high", "--dangerously-skip-permissions", "-p", prompt]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180)
+        data = extract_json(res.stdout)
+        if data and "narration" in data:
+            print("✅ [AGY] تم استلام السيناريو والبيانات الجنائية بنجاح.")
+            return data
+    except Exception as e:
+        print(f"⚠️ فشل استدعاء AGY ({e})، جاري استخدام السيناريو الاحتياطي المدمج...")
+
+    # في حال حدوث أي خطأ في أداة agy الخارجية، نستخدم السيناريو الافتراضي حتى لا يتعطل الرندر
+    return {
+        "narration": "في الرابع والعشرين من نوفمبر عام ألف وتسعمائة وواحد وسبعين، استقل رجل يُدعى دان كوبر طائرة البوينغ سبعمائة وسبعة وعشرين من بورتلاند. بعد تهديده بوجود قنبلة، طالب بمائتي ألف دولار وأربع مظلات. في سماء واشنطن الممطرة، فُتح الدرج الخلفي وقفز كوبر في ظلام دامس نحو المجهول، تاركاً خلفه اللغز الأكبر في تاريخ الطيران الأمريكي.",
+        "scene3_evidence": {
+            "title": "EVIDENCE ITEM #01 - PASSENGER MANIFEST",
+            "passenger": "DAN COOPER",
+            "seat": "18C (AFT SECTION - BOEING 727)",
+            "route": "PORTLAND INTL TO SEATTLE-TACOMA",
+            "ransom": "$200,000 CASH (10,000 x $20 BILLS)"
+        },
+        "scene4_suspect": {
+            "name": "ROBERT W. RACKSTRAW",
+            "tag": "PRIMARY SUSPECT - FBI NORJAK DOSSIER",
+            "point1": "Decorated Army Paratrooper & Pilot",
+            "point2": "Demolition & Explosives Specialist",
+            "point3": "Discharged 5 months prior to hijacking",
+            "point4": "Refused to confirm or deny identity"
+        }
+    }
+
+STORY_DATA = agy_generate_script()
+
+# =============================================================================
+# 3. GEMINI TTS ENGINE (التعليق الصوتي)
+# =============================================================================
+master_narration_wav = SHUTTLE_DIR / "narration_master.wav"
+def generate_gemini_voice(text, out_path):
+    print("🎙️ [Gemini TTS] توليد التعليق الصوتي الوقور عبر Gemini API...")
+    if not GEMINI_KEY:
+        print("⚠️ مفتاح GEMINI_API_KEY غير متوفر، سيتم استخدام موسيقى تصويرية بديلة.")
+        return False
+    try:
+        client = genai.Client(api_key=GEMINI_KEY)
+        voice_prompt = (
+            "[INSTRUCTION: Solemn, deep, investigative documentary narrator voice in Arabic. "
+            "Pacing should be slow, intense, and dramatic.]\n\n" + text
+        )
+        response = client.models.generate_content(
+            model=TTS_MODEL,
+            contents=voice_prompt,
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=TTS_VOICE)
+                    )
+                )
+            )
+        )
+        data = next((p.inline_data.data for p in response.candidates[0].content.parts if getattr(p, "inline_data", None)), None)
+        if data:
+            raw_audio = base64.b64decode(data) if isinstance(data, str) else bytes(data)
+            temp_pcm = SHUTTLE_DIR / "temp_audio.pcm"
+            temp_pcm.write_bytes(raw_audio)
+            run_cmd(["ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", str(temp_pcm),
+                     "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", str(out_path)], "تحويل الصوت إلى WAV")
+            temp_pcm.unlink(missing_ok=True)
             return True
     except Exception as e:
-        log(f"⚠️ تنبيه التحويل: {e}")
+        print(f"⚠️ خطأ في توليد صوت Gemini: {e}")
     return False
 
+has_voice = generate_gemini_voice(STORY_DATA["narration"], master_narration_wav)
 
-def fetch_open_assets():
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
-
-    if not PLANE_OBJ.exists():
-        plane_raw = MODELS_DIR / "temp_plane.glb"
-        plane_urls = [
-            "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/"
-            "main/Models/CesiumMan/glTF-Binary/CesiumMan.glb",
-            "https://huggingface.co/datasets/shuolucs/WorldCoder-Bench/"
-            "resolve/main/CesiumMan.glb",
-        ]
-        for i, url in enumerate(plane_urls, 1):
-            try:
-                log(f"📥 [طائرة] جاري السحب ({i}/{len(plane_urls)})...")
-                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    data = resp.read()
-                    if len(data) > 5000:
-                        with open(plane_raw, "wb") as f:
-                            f.write(data)
-                        if trimesh:
-                            convert_to_clean_obj(plane_raw, PLANE_OBJ)
-                        break
-            except Exception as e:
-                log(f"  ⚠️ تعذر الرابط {i}: {e}")
-
-    if not SKYDIVER_OBJ.exists():
-        skydiver_raw = MODELS_DIR / "temp_skydiver.glb"
-        human_urls = [
-            "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/"
-            "main/Models/CesiumMan/glTF-Binary/CesiumMan.glb",
-            "https://huggingface.co/datasets/shuolucs/WorldCoder-Bench/"
-            "resolve/main/CesiumMan.glb",
-        ]
-        for i, url in enumerate(human_urls, 1):
-            try:
-                log(f"📥 [مظلي بشري] جاري السحب ({i}/{len(human_urls)})...")
-                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    data = resp.read()
-                    if len(data) > 5000:
-                        with open(skydiver_raw, "wb") as f:
-                            f.write(data)
-                        if trimesh:
-                            convert_to_clean_obj(skydiver_raw, SKYDIVER_OBJ)
-                        break
-            except Exception as e:
-                log(f"  ⚠️ تعذر الرابط {i}: {e}")
-
-
-def review_with_agy(image_path, label):
-    log(f"🔍 [AGY] فحص واعتماد مشهد ({label})...")
-    if not image_path.exists():
-        return True, "تم الاعتماد المباشر"
-
-    prompt = f"""You are a professional visual inspector for a dark investigative documentary.
-INSPECT THIS 3D RENDER PREVIEW ({label}).
-Return ONLY valid JSON:
-{{
-  "decision": "accept" or "reject",
-  "score": 0.0 to 1.0,
-  "reason": "Short explanation"
-}}"""
-
-    cmd = [
-        "agy",
-        "--model", AGY_REVIEWER_MODEL,
-        "--effort", "low",
-        "--dangerously-skip-permissions",
-        "--output-format", "json",
-        "-p", prompt,
-    ]
+# =============================================================================
+# 4. 3D ASSETS DOWNLOADER (SKETCHFAB & OPENTOPOGRAPHY)
+# =============================================================================
+def fetch_sketchfab_model(query, output_dir, tag_name):
+    if not SKETCHFAB_KEY: return None
     try:
-        res = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=60,
-        )
-        data = extract_json(res.stdout)
-        if data:
-            decision = data.get("decision", "accept").lower()
-            score = float(data.get("score", 0.8))
-            return (decision == "accept" or score >= 0.5), data.get("reason", "")
-    except Exception as e:
-        log(f"⚠️ تنبيه AGY: {e}")
-    return True, "تم الاعتماد تلقائياً"
+        print(f"🔍 [Sketchfab] البحث عن مجسم ثلاثي أبعاد: '{query}'...")
+        headers = {"Authorization": f"Token {SKETCHFAB_KEY}"}
+        search_url = f"https://api.sketchfab.com/v3/models?q={query}&downloadable=true&licenses=by,by-nc,cc0&sort_by=-likeCount"
+        r = requests.get(search_url, headers=headers, timeout=20)
+        results = r.json().get("results", [])
+        if not results: return None
+        uid = results[0]["uid"]
+        d_url = f"https://api.sketchfab.com/v3/models/{uid}/download"
+        d_res = requests.get(d_url, headers=headers, timeout=20)
+        download_link = d_res.json().get("gltf", {}).get("url")
+        if not download_link: return None
 
+        zip_path = output_dir / f"{tag_name}.zip"
+        with requests.get(download_link, stream=True, timeout=60) as dl:
+            with open(zip_path, "wb") as f:
+                for chunk in dl.iter_content(chunk_size=1024*256): f.write(chunk)
+        extract_dir = output_dir / tag_name
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref: zip_ref.extractall(extract_dir)
 
-BLENDER_SCRIPT = f"""
-import bpy
-import math
-import random
-from pathlib import Path
-
-bpy.ops.wm.read_factory_settings(use_empty=True)
-
-scene = bpy.context.scene
-scene.render.fps = 24
-scene.frame_start = 1
-scene.frame_end = 150
-
-scene.render.image_settings.file_format = 'FFMPEG'
-scene.render.ffmpeg.format = 'MPEG4'
-scene.render.ffmpeg.codec = 'H264'
-scene.render.filepath = "./lemmino_jump.mp4"
-scene.render.resolution_x = 1280
-scene.render.resolution_y = 720
-
-try:
-    scene.render.engine = 'BLENDER_EEVEE_NEXT'
-except Exception:
-    scene.render.engine = 'BLENDER_EEVEE'
-
-if hasattr(scene, "eevee"):
-    scene.eevee.taa_render_samples = 16
-
-scene.render.use_freestyle = False
-
-world = bpy.data.worlds.new("VoidWorld")
-world.use_nodes = True
-world.node_tree.nodes['Background'].inputs['Color'].default_value = (0, 0, 0, 1)
-scene.world = world
-
-
-def make_mat(name, color, is_emission=True, strength=2.0):
-    mat = bpy.data.materials.new(name=name)
-    mat.use_nodes = True
-    nodes = mat.node_tree.nodes
-    nodes.clear()
-    out = nodes.new('ShaderNodeOutputMaterial')
-    if is_emission:
-        em = nodes.new('ShaderNodeEmission')
-        em.inputs['Color'].default_value = color
-        em.inputs['Strength'].default_value = strength
-        mat.node_tree.links.new(em.outputs['Emission'], out.inputs['Surface'])
-    else:
-        diff = nodes.new('ShaderNodeBsdfDiffuse')
-        diff.inputs['Color'].default_value = color
-        mat.node_tree.links.new(diff.outputs['BSDF'], out.inputs['Surface'])
-    return mat
-
-
-mat_black_body    = make_mat("BlackBody", (0.005, 0.005, 0.005, 1), is_emission=False)
-mat_white_line    = make_mat("WhiteLine", (1.0, 1.0, 1.0, 1), is_emission=True, strength=3.5)
-mat_red_cooper    = make_mat("RedCooper", (1.0, 0.02, 0.03, 1), is_emission=True, strength=5.5)
-mat_white_glow    = make_mat("WhiteGlow", (1.0, 1.0, 1.0, 1), is_emission=True, strength=3.0)
-mat_mountain_dark = make_mat("MountainDark", (0.015, 0.018, 0.022, 1), is_emission=False)
-mat_mountain_topo = make_mat("MountainTopo", (0.28, 0.35, 0.42, 1), is_emission=True, strength=0.9)
-mat_tree_white    = make_mat("TreeWhite", (0.95, 0.95, 0.95, 1), is_emission=True, strength=2.5)
-mat_tree_dark     = make_mat("TreeDark",  (0.06, 0.07, 0.08, 1), is_emission=True, strength=0.3)
-
-
-def import_obj_safely(file_path):
-    if not file_path.exists():
-        return None
-    before = set(bpy.data.objects)
-    try:
-        if hasattr(bpy.ops.wm, "obj_import"):
-            bpy.ops.wm.obj_import(filepath=str(file_path))
-        else:
-            bpy.ops.import_scene.obj(filepath=str(file_path))
-    except Exception as err:
-        print("⚠️ فشل استيراد OBJ:", err, flush=True)
-        return None
-    new_objs = [o for o in bpy.data.objects if o not in before and o.type == 'MESH']
-    if new_objs:
-        bpy.ops.object.select_all(action='DESELECT')
-        for o in new_objs:
-            o.select_set(True)
-        bpy.context.view_layer.objects.active = new_objs[0]
-        if len(new_objs) > 1:
-            bpy.ops.object.join()
-        return bpy.context.active_object
+        for p in extract_dir.rglob("*.gltf"): return str(p.resolve())
+        for p in extract_dir.rglob("*.glb"): return str(p.resolve())
+    except: pass
     return None
 
+def fetch_opentopography_dem(output_dir):
+    tif_path = output_dir / "terrain_washington.tif"
+    if not OPENTOPO_KEY: return None
+    try:
+        print("🗺️ [OpenTopography] تنزيل خريطة الارتفاعات الرقمية من ناسا...")
+        params = {
+            "demtype": "SRTMGL3", "south": "45.85", "north": "46.10",
+            "west": "-122.65", "east": "-122.30", "outputFormat": "GTiff",
+            "API_Key": OPENTOPO_KEY
+        }
+        res = requests.get("https://portal.opentopography.org/API/globaldem", params=params, timeout=30)
+        if res.status_code == 200 and len(res.content) > 5000:
+            tif_path.write_bytes(res.content)
+            return str(tif_path.resolve())
+    except: pass
+    return None
 
-plane_file = Path("{PLANE_OBJ.resolve()}")
-airplane = import_obj_safely(plane_file)
+models_dir = SHUTTLE_DIR / "models"
+models_dir.mkdir(parents=True, exist_ok=True)
+jumper_model = fetch_sketchfab_model("skydiver parachute silhouette", models_dir, "jumper")
+plane_model = fetch_sketchfab_model("boeing airliner low poly", models_dir, "plane")
+terrain_dem = fetch_opentopography_dem(models_dir)
 
-if airplane:
-    airplane.rotation_euler = (0, 0, 0)
-    dim = max(airplane.dimensions.x, airplane.dimensions.y, airplane.dimensions.z)
-    if dim > 0:
-        airplane.scale = (14.0 / dim, 14.0 / dim, 14.0 / dim)
-        bpy.ops.object.transform_apply(scale=True)
-    airplane.location = (0, 0, 12)
+# =============================================================================
+# 5. BLENDER CLI: SCENES 1 & 2 (3D RENDER)
+# =============================================================================
+shot1_py = SHUTTLE_DIR / "shot1.py"
+shot1_py.write_text(f"""
+import bpy, math
+bpy.ops.wm.read_factory_settings(use_empty=True)
+scene = bpy.context.scene
+scene.render.fps = {FPS}
+scene.frame_start = 1
+scene.frame_end = {FPS * 30}
+
+world = bpy.data.worlds.new("Void")
+scene.world = world
+world.use_nodes = True
+world.node_tree.nodes["Background"].inputs[0].default_value = (0.008, 0.008, 0.01, 1.0)
+
+mat_red = bpy.data.materials.new("LemminoRed")
+mat_red.use_nodes = True
+mat_red.node_tree.nodes.clear()
+emis = mat_red.node_tree.nodes.new('ShaderNodeEmission')
+emis.inputs['Color'].default_value = (0.85, 0.02, 0.05, 1.0)
+emis.inputs['Strength'].default_value = 2.5
+out = mat_red.node_tree.nodes.new('ShaderNodeOutputMaterial')
+mat_red.node_tree.links.new(emis.outputs['Emission'], out.inputs['Surface'])
+
+jumper_path = {repr(jumper_model)}
+if jumper_path and bpy.path.exists(jumper_path):
+    bpy.ops.import_scene.gltf(filepath=jumper_path)
+    jumper = bpy.context.selected_objects[0]
+    jumper.location = (0, 0, 5)
+    max_d = max(jumper.dimensions) if max(jumper.dimensions) > 0 else 1.0
+    jumper.scale = [1.8 / max_d] * 3
+    jumper.data.materials.clear()
+    jumper.data.materials.append(mat_red)
 else:
-    parts = []
-    bpy.ops.mesh.primitive_cylinder_add(vertices=16, radius=1.1, depth=13.0, location=(0, 0, 12))
-    fuse = bpy.context.active_object
-    fuse.rotation_euler = (math.radians(90), 0, 0)
-    parts.append(fuse)
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.4, depth=1.6, location=(0, 0, 5))
+    jumper = bpy.context.active_object
+    jumper.data.materials.append(mat_red)
+    bpy.ops.mesh.primitive_cube_add(size=0.6, location=(0, -0.3, 5.2))
+    pack = bpy.context.active_object
+    pack.data.materials.append(mat_red)
+    pack.parent = jumper
 
-    bpy.ops.mesh.primitive_cone_add(vertices=16, radius1=1.1, depth=3.5, location=(0, -8.25, 12))
-    nose = bpy.context.active_object
-    nose.rotation_euler = (math.radians(-90), 0, 0)
-    parts.append(nose)
+jumper.keyframe_insert(data_path="location", frame=1)
+jumper.location.z = -18
+jumper.keyframe_insert(data_path="location", frame={FPS * 30})
 
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(-6.2, 0.5, 11.8))
-    lw = bpy.context.active_object
-    lw.scale = (10.5, 2.5, 0.1)
-    lw.rotation_euler = (math.radians(4), math.radians(4), math.radians(30))
-    parts.append(lw)
+jumper.rotation_euler = (0, 0, 0)
+jumper.keyframe_insert(data_path="rotation_euler", frame=1)
+jumper.rotation_euler = (math.radians(720), math.radians(240), math.radians(180))
+jumper.keyframe_insert(data_path="rotation_euler", frame={FPS * 30})
 
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(6.2, 0.5, 11.8))
-    rw = bpy.context.active_object
-    rw.scale = (10.5, 2.5, 0.1)
-    rw.rotation_euler = (math.radians(4), math.radians(-4), math.radians(-30))
-    parts.append(rw)
-
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 5.2, 14.2))
-    tfin = bpy.context.active_object
-    tfin.scale = (0.18, 3.2, 3.8)
-    tfin.rotation_euler = (math.radians(-32), 0, 0)
-    parts.append(tfin)
-
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 6.4, 16.0))
-    twing = bpy.context.active_object
-    twing.scale = (5.5, 1.5, 0.08)
-    parts.append(twing)
-
-    for s in [-1.4, 1.4]:
-        bpy.ops.mesh.primitive_cylinder_add(vertices=12, radius=0.45, depth=2.8, location=(s, 4.0, 12.6))
-        eng = bpy.context.active_object
-        eng.rotation_euler = (math.radians(90), 0, 0)
-        parts.append(eng)
-
-    bpy.ops.object.select_all(action='DESELECT')
-    for p in parts:
-        p.select_set(True)
-    bpy.context.view_layer.objects.active = fuse
-    bpy.ops.object.join()
-    airplane = bpy.context.active_object
-
-airplane.data.materials.clear()
-airplane.data.materials.append(mat_black_body)
-airplane.data.materials.append(mat_white_line)
-
-wire_p = airplane.modifiers.new("CAD_Lines", 'WIREFRAME')
-wire_p.thickness = 0.022
-wire_p.use_replace = False
-wire_p.material_offset = 1
-
-bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 5.8, 10.8))
-stair = bpy.context.active_object
-stair.scale = (0.6, 2.2, 0.06)
-stair.rotation_euler = (math.radians(-45), 0, 0)
-stair.data.materials.append(mat_red_cooper)
-stair.parent = airplane
-
-airplane.location = (0, 0, 0)
-airplane.keyframe_insert(data_path="location", frame=1)
-airplane.location = (0, -50, 0)
-airplane.keyframe_insert(data_path="location", frame=150)
-
-skydiver_file = Path("{SKYDIVER_OBJ.resolve()}")
-skydiver = import_obj_safely(skydiver_file)
-
-if skydiver:
-    dim_s = max(skydiver.dimensions.x, skydiver.dimensions.y, skydiver.dimensions.z)
-    if dim_s > 0:
-        skydiver.scale = (1.5 / dim_s, 1.5 / dim_s, 1.5 / dim_s)
-        bpy.ops.object.transform_apply(scale=True)
-else:
-    jparts = []
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.18, location=(0, 0, 0.55))
-    jparts.append(bpy.context.active_object)
-
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.12))
-    torso = bpy.context.active_object
-    torso.scale = (0.42, 0.28, 0.65)
-    jparts.append(torso)
-
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0.16, 0.18))
-    rig = bpy.context.active_object
-    rig.scale = (0.34, 0.14, 0.45)
-    jparts.append(rig)
-
-    for s in [-1, 1]:
-        bpy.ops.mesh.primitive_cylinder_add(radius=0.07, depth=0.75, location=(s * 0.48, -0.1, 0.28))
-        arm = bpy.context.active_object
-        arm.rotation_euler = (math.radians(-20), math.radians(s * 55), 0)
-        jparts.append(arm)
-
-    for s in [-1, 1]:
-        bpy.ops.mesh.primitive_cylinder_add(radius=0.09, depth=0.85, location=(s * 0.26, 0.22, -0.45))
-        leg = bpy.context.active_object
-        leg.rotation_euler = (math.radians(38), math.radians(s * 18), 0)
-        jparts.append(leg)
-
-    bpy.ops.object.select_all(action='DESELECT')
-    for sp in jparts:
-        sp.select_set(True)
-    bpy.context.view_layer.objects.active = torso
-    bpy.ops.object.join()
-    skydiver = bpy.context.active_object
-
-skydiver.data.materials.clear()
-skydiver.data.materials.append(mat_red_cooper)
-skydiver.rotation_euler = (math.radians(85), 0, 0)
-
-skydiver.location = (0, 6.8, 10.6)
-skydiver.keyframe_insert(data_path="location", frame=1)
-skydiver.keyframe_insert(data_path="rotation_euler", frame=1)
-
-skydiver.location = (0, 8.2, 10.0)
-skydiver.keyframe_insert(data_path="location", frame=25)
-
-skydiver.location = (0.5, 11.5, -2.0)
-skydiver.rotation_euler = (math.radians(170), math.radians(50), math.radians(25))
-skydiver.keyframe_insert(data_path="location", frame=85)
-skydiver.keyframe_insert(data_path="rotation_euler", frame=85)
-
-skydiver.location = (0, 16.0, -18.5)
-skydiver.rotation_euler = (math.radians(350), math.radians(110), math.radians(60))
-skydiver.keyframe_insert(data_path="location", frame=150)
-skydiver.keyframe_insert(data_path="rotation_euler", frame=150)
-
-bpy.ops.mesh.primitive_grid_add(x_subdivisions=80, y_subdivisions=80, size=200, location=(0, 22, -29))
-mountains = bpy.context.active_object
-mountains.name = "CascadeMountainRange"
-
-tex = bpy.data.textures.new("MountainNoise", type='CLOUDS')
-tex.noise_scale = 1.7
-tex.noise_depth = 5
-
-disp = mountains.modifiers.new("Displacement", 'DISPLACE')
-disp.texture = tex
-disp.strength = 17.5
-
-mountains.data.materials.append(mat_mountain_dark)
-mountains.data.materials.append(mat_mountain_topo)
-
-topo = mountains.modifiers.new("TopographicLines", 'WIREFRAME')
-topo.thickness = 0.014
-topo.use_replace = False
-topo.material_offset = 1
-
-for i in range(80):
-    gx = random.uniform(-35, 35)
-    gy = random.uniform(-2, 36)
-    gz = -23.5
-    dist = math.sqrt(gx ** 2 + (gy - 16.0) ** 2)
-    s = random.uniform(0.7, 1.5)
-    bpy.ops.mesh.primitive_cone_add(vertices=5, radius1=0.75 * s, depth=2.4 * s, location=(gx, gy, gz))
-    tree = bpy.context.active_object
-    tree.data.materials.append(mat_tree_white if dist < 8.5 else mat_tree_dark)
-
-random.seed(1971)
-for i in range(45):
-    wx = random.uniform(-16, 16)
-    wy = random.uniform(-25, 25)
-    wz = random.uniform(4, 18)
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.012, depth=random.uniform(4, 9), location=(wx, wy, wz))
-    line = bpy.context.active_object
-    line.rotation_euler = (math.radians(90), 0, 0)
-    line.data.materials.append(mat_white_glow)
-    line.keyframe_insert(data_path="location", frame=1)
-    line.location.y += random.uniform(35, 60)
-    line.keyframe_insert(data_path="location", frame=150)
-
-cam_target = bpy.data.objects.new("CamTarget", None)
-scene.collection.objects.link(cam_target)
-
-cam_target.location = (0, 4.0, 11.5)
-cam_target.keyframe_insert(data_path="location", frame=1)
-cam_target.location = (0, 9.5, 3.0)
-cam_target.keyframe_insert(data_path="location", frame=85)
-cam_target.location = (0, 16.0, -18.0)
-cam_target.keyframe_insert(data_path="location", frame=150)
-
-cam_data = bpy.data.cameras.new("LemminoCam")
-cam_data.lens = 50
-cam = bpy.data.objects.new("LemminoCam", cam_data)
+cam_data = bpy.data.cameras.new("Cam1")
+cam_data.lens = 32
+cam = bpy.data.objects.new("Camera1", cam_data)
 scene.collection.objects.link(cam)
 scene.camera = cam
-
-track = cam.constraints.new(type='TRACK_TO')
-track.target = cam_target
-track.track_axis = 'TRACK_NEGATIVE_Z'
-track.up_axis = 'UP_Y'
-
-cam.location = (12.0, 18.0, 15.5)
+cam.location = (0, -5.5, 6.5)
+cam.rotation_euler = (math.radians(70), 0, 0)
 cam.keyframe_insert(data_path="location", frame=1)
-cam.location = (8.0, 20.0, 6.0)
-cam.keyframe_insert(data_path="location", frame=85)
-cam.location = (3.5, 22.0, -9.0)
-cam.keyframe_insert(data_path="location", frame=150)
+cam.location.z = -16
+cam.keyframe_insert(data_path="location", frame={FPS * 30})
 
-print(">> [BLENDER] بدء رندر المشهد النهائي عبر EEVEE...", flush=True)
-bpy.ops.render.render(animation=True)
-"""
+scene.render.resolution_x, scene.render.resolution_y = {TARGET_W}, {TARGET_H}
+scene.render.image_settings.file_format = 'FFMPEG'
+scene.render.ffmpeg.format, scene.render.ffmpeg.codec = 'MPEG4', 'H264'
+scene.render.filepath = str(bpy.path.abspath("//")) + "/shot1_parachute.mp4"
+""")
 
+shot2_py = SHUTTLE_DIR / "shot2.py"
+shot2_py.write_text(f"""
+import bpy, math
+bpy.ops.wm.read_factory_settings(use_empty=True)
+scene = bpy.context.scene
+scene.render.fps = {FPS}
+scene.frame_start = 1
+scene.frame_end = {FPS * 30}
 
-def main():
-    log("🚀 تشغيل بايبلاين LEMMiNO المؤتمت بالكامل...")
+world = bpy.data.worlds.new("RadarWorld")
+scene.world = world
+world.use_nodes = True
+world.node_tree.nodes["Background"].inputs[0].default_value = (0.012, 0.014, 0.018, 1.0)
 
-    fetch_open_assets()
+mat_grid = bpy.data.materials.new("TopoWire")
+mat_grid.use_nodes = True
+mat_grid.node_tree.nodes.clear()
+wire = mat_grid.node_tree.nodes.new('ShaderNodeWireframe')
+wire.inputs['Size'].default_value = 0.015
+emis = mat_grid.node_tree.nodes.new('ShaderNodeEmission')
+emis.inputs['Color'].default_value = (0.25, 0.35, 0.45, 1.0)
+out = mat_grid.node_tree.nodes.new('ShaderNodeOutputMaterial')
+mat_grid.node_tree.links.new(emis.outputs['Emission'], out.inputs['Surface'])
 
-    preview_img = MODELS_DIR / "plane_preview.png"
-    review_with_agy(preview_img, "Airliner, Skydiver & Cascade Mountains")
+bpy.ops.mesh.primitive_grid_add(x_subdivisions=80, y_subdivisions=80, size=35, location=(0, 0, 0))
+terrain = bpy.context.active_object
+terrain.data.materials.append(mat_grid)
 
-    script_path = Path("render_core.py")
-    with open(script_path, "w", encoding="utf-8") as f:
-        f.write(BLENDER_SCRIPT)
+disp = terrain.modifiers.new(name="Mountains", type='DISPLACE')
+dem_file = {repr(terrain_dem)}
+if dem_file and bpy.path.exists(dem_file):
+    tex = bpy.data.textures.new("DEM_Tex", type='IMAGE')
+    img = bpy.data.images.load(dem_file)
+    tex.image = img
+    disp.texture = tex
+    disp.strength = 4.5
+else:
+    tex = bpy.data.textures.new("Cloud_Tex", type='CLOUDS')
+    tex.noise_scale = 1.5
+    disp.texture = tex
+    disp.strength = 3.5
 
-    log("🎬 استدعاء Blender لتنفيذ الرندر...")
+mat_plane = bpy.data.materials.new("PlaneWhite")
+mat_plane.use_nodes = True
+mat_plane.node_tree.nodes.clear()
+p_emis = mat_plane.node_tree.nodes.new('ShaderNodeEmission')
+p_emis.inputs['Color'].default_value = (1.0, 1.0, 1.0, 1.0)
+p_out = mat_plane.node_tree.nodes.new('ShaderNodeOutputMaterial')
+mat_plane.node_tree.links.new(p_emis.outputs['Emission'], p_out.inputs['Surface'])
 
-    env = os.environ.copy()
-    env["LIBGL_ALWAYS_SOFTWARE"] = "1"
-    env["MESA_GL_VERSION_OVERRIDE"] = "4.1"
+plane_file = {repr(plane_model)}
+if plane_file and bpy.path.exists(plane_file):
+    bpy.ops.import_scene.gltf(filepath=plane_file)
+    plane = bpy.context.selected_objects[0]
+    max_p = max(plane.dimensions) if max(plane.dimensions) > 0 else 1.0
+    plane.scale = [2.2 / max_p] * 3
+    plane.data.materials.clear()
+    plane.data.materials.append(mat_plane)
+else:
+    bpy.ops.mesh.primitive_cone_add(radius1=0.7, depth=2.8, location=(0, -14, 5.5))
+    plane = bpy.context.active_object
+    plane.rotation_euler = (math.radians(-90), 0, 0)
+    plane.data.materials.append(mat_plane)
 
-    blender_bin = os.environ.get("BLENDER_BIN", "blender")
-    res = subprocess.run(
-        [blender_bin, "-b", "-P", str(script_path)],
-        text=True,
-        env=env,
-    )
+plane.keyframe_insert(data_path="location", frame=1)
+plane.location.y = 14
+plane.keyframe_insert(data_path="location", frame={FPS * 30})
 
-    if res.returncode == 0 and OUTPUT_VIDEO.exists() and OUTPUT_VIDEO.stat().st_size > 1024:
-        log(f"🎉 تم الرندر بنجاح تام! الملف جاهز: {OUTPUT_VIDEO}")
-    else:
-        log("❌ فشل تشغيل Blender.")
-        sys.exit(1)
+cam_data = bpy.data.cameras.new("Cam2")
+cam_data.lens = 45
+cam = bpy.data.objects.new("Camera2", cam_data)
+scene.collection.objects.link(cam)
+scene.camera = cam
+cam.location = (14, -20, 16)
+cam.rotation_euler = (math.radians(52), 0, math.radians(35))
+cam.keyframe_insert(data_path="location", frame=1)
+cam.location.y = -8
+cam.keyframe_insert(data_path="location", frame={FPS * 30})
 
+scene.render.resolution_x, scene.render.resolution_y = {TARGET_W}, {TARGET_H}
+scene.render.image_settings.file_format = 'FFMPEG'
+scene.render.ffmpeg.format, scene.render.ffmpeg.codec = 'MPEG4', 'H264'
+scene.render.filepath = str(bpy.path.abspath("//")) + "/shot2_radar.mp4"
+""")
 
-if __name__ == "__main__":
-    main()
+run_cmd(["blender", "-b", "-P", str(shot1_py)], "رندرة المشهد 1 عبر بلندر (Blender CLI)")
+run_cmd(["blender", "-b", "-P", str(shot2_py)], "رندرة المشهد 2 عبر بلندر (Blender CLI)")
+
+shot1_mp4 = next(SHUTTLE_DIR.glob("shot1_parachute*.mp4"), None)
+shot2_mp4 = next(SHUTTLE_DIR.glob("shot2_radar*.mp4"), None)
+
+# =============================================================================
+# 6. FORENSIC MOTION GRAPHICS (SCENES 3 & 4 BASED ON AGY SCRIPT)
+# =============================================================================
+ev = STORY_DATA["scene3_evidence"]
+shot3_mp4 = SHUTTLE_DIR / "shot3_evidence.mp4"
+vf_shot3 = (
+    f"color=c=0x090B0E:s={TARGET_W}x{TARGET_H}:d=30:r={FPS},"
+    f"drawbox=x=420:y=160:w=1080:h=760:color=0x13161F:t=fill,"
+    f"drawbox=x=420:y=160:w=1080:h=760:color=white@0.15:t=2,"
+    f"drawtext=text='{ev['title']}':x=470:y=220:fontsize=28:fontcolor=0xC47A1A,"
+    f"drawtext=text='NAME    : {ev['passenger']}':x=470:y=320:fontsize=48:fontcolor=white,"
+    f"drawtext=text='SEAT    : {ev['seat']}':x=470:y=410:fontsize=36:fontcolor=0xBBBBBB,"
+    f"drawtext=text='ROUTING : {ev['route']}':x=470:y=480:fontsize=36:fontcolor=0xBBBBBB,"
+    f"drawtext=text='RANSOM  : {ev['ransom']}':x=470:y=550:fontsize=36:fontcolor=0xBBBBBB,"
+    f"drawbox=x=450:y=300:w=1020:h=85:color=0xD90429@0.35:t=3,"
+    f"noise=alls=10:allf=t+u,vignette=PI/4"
+)
+run_cmd(["ffmpeg", "-y", "-f", "lavfi", "-i", vf_shot3, "-c:v", "libx264", "-pix_fmt", "yuv420p", str(shot3_mp4)],
+        "توليد المشهد 3: وثيقة الأدلة الجنائية")
+
+sp = STORY_DATA["scene4_suspect"]
+shot4_mp4 = SHUTTLE_DIR / "shot4_dossier.mp4"
+vf_shot4 = (
+    f"color=c=0x07080B:s={TARGET_W}x{TARGET_H}:d=30:r={FPS},"
+    f"drawbox=x=180:y=140:w=480:h=640:color=0x11131A:t=fill,"
+    f"drawbox=x=180:y=140:w=480:h=640:color=0xD90429:t=4,"
+    f"drawtext=text='SUSPECT: {sp['name']}':x=720:y=190:fontsize=46:fontcolor=white,"
+    f"drawtext=text='{sp['tag']}':x=720:y=255:fontsize=24:fontcolor=0xD90429,"
+    f"drawtext=text='- {sp['point1']}':x=720:y=340:fontsize=32:fontcolor=0xCCCCCC,"
+    f"drawtext=text='- {sp['point2']}':x=720:y=410:fontsize=32:fontcolor=0xCCCCCC,"
+    f"drawtext=text='- {sp['point3']}':x=720:y=480:fontsize=32:fontcolor=0xCCCCCC,"
+    f"drawtext=text='- {sp['point4']}':x=720:y=550:fontsize=32:fontcolor=0xC47A1A,"
+    f"drawbox=x=710:y=620:w=1030:h=2:color=white@0.2:t=fill,"
+    f"drawtext=text='THE SEARCH FOR D.B. COOPER':x=720:y=660:fontsize=38:fontcolor=white,"
+    f"drawtext=text='CASE CLOSED UNSOLVED - JULY 2016':x=720:y=720:fontsize=26:fontcolor=0x777777,"
+    f"noise=alls=12:allf=t+u,vignette=PI/3"
+)
+run_cmd(["ffmpeg", "-y", "-f", "lavfi", "-i", vf_shot4, "-c:v", "libx264", "-pix_fmt", "yuv420p", str(shot4_mp4)],
+        "توليد المشهد 4: بطاقة المشتبه به")
+
+# =============================================================================
+# 7. AUDIO MIX & FINAL ASSEMBLY
+# =============================================================================
+# توليد موسيقى محيطية مظلمة (Synth Drone)
+ambient_audio = SHUTTLE_DIR / "ambient.wav"
+run_cmd([
+    "ffmpeg", "-y",
+    "-f", "lavfi", "-i", "sine=frequency=52:duration=120,volume=1.2",
+    "-f", "lavfi", "-i", "anoise=color=pink:duration=120,lowpass=f=380,volume=0.35",
+    "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest[aout]",
+    "-map", "[aout]", "-c:a", "pcm_s16le", str(ambient_audio)
+], "توليد شريط الصوت المحيطي")
+
+# دمج التعليق الصوتي إذا توفر مع الموسيقى
+final_audio = SHUTTLE_DIR / "final_soundtrack.wav"
+if has_voice and master_narration_wav.exists():
+    run_cmd([
+        "ffmpeg", "-y", "-i", str(ambient_audio), "-i", str(master_narration_wav),
+        "-filter_complex", "[0:a]volume=0.4[bg];[1:a]volume=1.8[voc];[bg][voc]amix=inputs=2:duration=first[aout]",
+        "-map", "[aout]", "-c:a", "pcm_s16le", str(final_audio)
+    ], "دمج صوت السرد مع الموسيقى التصويرية")
+else:
+    final_audio = ambient_audio
+
+# دمج المقاطع الأربعة
+concat_file = SHUTTLE_DIR / "timeline.txt"
+concat_file.write_text(f"""file '{Path(shot1_mp4).resolve()}'
+file '{Path(shot2_mp4).resolve()}'
+file '{shot3_mp4.resolve()}'
+file '{shot4_mp4.resolve()}'
+""")
+
+run_cmd([
+    "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
+    "-i", str(final_audio),
+    "-vf", "noise=alls=7:allf=t,eq=contrast=1.07:saturation=0.92",
+    "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-b:a", "192k", "-shortest",
+    str(FINAL_VIDEO)
+], "التجميع النهائي للفيديو (120 ثانية بجودة 1080p)")
+
+print(f"\n{'='*60}")
+print(f"🎉 تم الانتهاء بنجاح من إنتاج فيديو الاختبار الدقيقتين!")
+print(f"📁 مسار الفيديو: {FINAL_VIDEO.resolve()}")
+print(f"{'='*60}\n")
