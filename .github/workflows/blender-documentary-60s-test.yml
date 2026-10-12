@@ -1,0 +1,70 @@
+name: Blender Documentary Pipeline - 60s Proof of Concept
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: Documentary topic for reference search
+        required: true
+        default: "D. B. Cooper: the night jump"
+      resolution_percent:
+        description: Render scale (lower is faster)
+        required: true
+        default: "35"
+        type: choice
+        options: ["25", "35", "50", "75", "100"]
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    env:
+      TOPIC: ${{ inputs.topic }}
+      RESOLUTION_PERCENT: ${{ inputs.resolution_percent }}
+      OUTPUT_DIR: ${{ github.workspace }}/output
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Blender and FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y blender ffmpeg python3
+      - name: Show environment
+        run: |
+          blender --version
+          ffmpeg -version | head -n 2
+          mkdir -p "$OUTPUT_DIR"
+      - name: Search references and render scene
+        run: |
+          set -o pipefail
+          blender -b --python blender_documentary_60s_test.py 2>&1 | tee "$OUTPUT_DIR/blender_render.log"
+      - name: Encode 60-second MP4
+        if: always()
+        run: |
+          if find "$OUTPUT_DIR/frames" -name 'frame_*.png' -print -quit 2>/dev/null | grep -q .; then
+            ffmpeg -y -framerate 24 -i "$OUTPUT_DIR/frames/frame_%04d.png" \
+              -c:v libx264 -preset veryfast -crf 21 -pix_fmt yuv420p -movflags +faststart \
+              "$OUTPUT_DIR/documentary_60s_test.mp4"
+            ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 "$OUTPUT_DIR/documentary_60s_test.mp4"
+          else
+            echo "No rendered frames found; see blender_render.log" >&2
+            exit 1
+          fi
+      - name: Create contact sheet
+        if: always()
+        run: |
+          if [ -f "$OUTPUT_DIR/frames/frame_0001.png" ]; then
+            ffmpeg -y -framerate 1/5 -pattern_type glob -i "$OUTPUT_DIR/frames/frame_*.png" \
+              -vf "select='not(mod(n,120))',scale=320:-1,tile=4x3" -frames:v 1 "$OUTPUT_DIR/contact_sheet.jpg" || true
+          fi
+      - name: Upload video and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-documentary-60s-test
+          path: output/
+          if-no-files-found: warn
+          retention-days: 7
