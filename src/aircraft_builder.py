@@ -8,13 +8,14 @@ from .materials import add_inverted_hull_outline
 def create_mesh_object(name, bm, collection, material=None, mark_sharp_angle=32.0):
     mesh = bpy.data.meshes.new(name)
     bm.normal_update()
-    # تعليم الحواف الهندسية الحادة ليظهرها Freestyle باللون الأبيض بوضوح
     angle_rad = math.radians(mark_sharp_angle)
-    for edge in bm.edges:
+    sharp_edge_indices = []
+    for idx, edge in enumerate(bm.edges):
         if len(edge.link_faces) == 2:
             a = edge.link_faces[0].normal.angle(edge.link_faces[1].normal, 0.0)
             if a >= angle_rad:
                 edge.smooth = False
+                sharp_edge_indices.append(idx)
     bm.to_mesh(mesh)
     bm.free()
     obj = bpy.data.objects.new(name, mesh)
@@ -22,32 +23,42 @@ def create_mesh_object(name, bm, collection, material=None, mark_sharp_angle=32.
     if material:
         obj.data.materials.append(material)
     set_smooth_shading(obj, mark_sharp_angle)
-    # تفعيل علامات Freestyle على الحواف الحادة
-    for edge in obj.data.edges:
-        if not edge.use_smooth:
-            edge.use_freestyle_mark = True
+    # متوافق مع Blender 3.x و Blender 4.x
+    for idx in sharp_edge_indices:
+        if idx < len(obj.data.edges):
+            e = obj.data.edges[idx]
+            if hasattr(e, "use_edge_sharp"):
+                e.use_edge_sharp = True
+            if hasattr(e, "use_freestyle_mark"):
+                e.use_freestyle_mark = True
     return obj
+
+def close_ring_cap(bm, ring_verts, flip=False):
+    """إغلاق حلقات المجسم بأمان في Blender 4.0 بدون الاعتماد على contextual_create."""
+    try:
+        verts = list(reversed(ring_verts)) if flip else list(ring_verts)
+        bm.faces.new(verts)
+    except Exception:
+        pass
 
 def build_lofted_fuselage(collection, mat_body, mat_white):
     """نسج بدن طائرة Boeing 727-100 عبر مقاطع عرضية انسيابية (Lofted Stations)."""
     bm = bmesh.new()
-    # محطات البدن: (x_pos, radius_y, radius_z, z_offset)
-    # الطائرة تتجه نحو المحور -X (المقدمة عند X = -19.5، الذيل عند X = +18.0)
     stations = [
         (-19.6, 0.04, 0.04, -0.35),
         (-19.1, 0.45, 0.42, -0.32),
         (-18.2, 0.92, 0.85, -0.25),
-        (-17.0, 1.32, 1.18, -0.12),  # زجاج قمرة القيادة
+        (-17.0, 1.32, 1.18, -0.12),
         (-15.5, 1.68, 1.72, 0.02),
         (-13.0, 1.88, 2.02, 0.08),
         (-9.0,  1.90, 2.05, 0.08),
         (-3.0,  1.90, 2.05, 0.08),
         (3.5,   1.90, 2.05, 0.08),
         (8.0,   1.85, 1.98, 0.12),
-        (10.8,  1.62, 1.78, 0.25),   # بداية فتحة السلم الخلفي السفلي
+        (10.8,  1.62, 1.78, 0.25),
         (13.8,  1.22, 1.42, 0.52),
         (16.5,  0.68, 0.85, 0.78),
-        (18.2,  0.32, 0.38, 0.92),   # فوهة المحرك الأوسط رقم 2
+        (18.2,  0.32, 0.38, 0.92),
     ]
 
     ring_Factor = 32
@@ -58,7 +69,6 @@ def build_lofted_fuselage(collection, mat_body, mat_white):
             theta = (2.0 * math.pi * i) / ring_Factor
             y = ry * math.cos(theta)
             z_raw = math.sin(theta)
-            # تسطيح خفيف للبطن السفلي في منطقة السلم الخلفي
             if 9.5 <= x <= 14.5 and z_raw < -0.55:
                 z_raw = -0.55
             z = rz * z_raw + z_off
@@ -73,9 +83,8 @@ def build_lofted_fuselage(collection, mat_body, mat_white):
             i_next = (i + 1) % ring_Factor
             bm.faces.new((r1[i], r1[i_next], r2[i_next], r2[i]))
 
-    # إغلاق المقدمة والفوهة الخلفية
-    bmesh.ops.contextual_create(bm, geom=rings[0])
-    bmesh.ops.contextual_create(bm, geom=rings[-1])
+    close_ring_cap(bm, rings[0], flip=True)
+    close_ring_cap(bm, rings[-1], flip=False)
 
     fuselage = create_mesh_object("B727_Fuselage", bm, collection, mat_body, 28.0)
     add_inverted_hull_outline(fuselage, mat_white, thickness=0.028)
@@ -86,9 +95,7 @@ def build_swept_wings_and_flaps(collection, parent_obj, mat_body, mat_white):
     for side in [-1, 1]:
         side_name = "L" if side == 1 else "R"
         bm = bmesh.new()
-        # مقاطع الجناح من الجذر إلى الطرف (Airfoil Profile)
         wing_sections = [
-            # (x_lead, x_trail, y_span, z_pos, thickness)
             (-3.2, 4.2, side * 1.75, -0.55, 0.52),
             (0.2,  5.6, side * 6.50, -0.35, 0.38),
             (4.8,  8.1, side * 12.8, -0.10, 0.24),
@@ -113,14 +120,18 @@ def build_swept_wings_and_flaps(collection, parent_obj, mat_body, mat_white):
             r1, r2 = sec_rings[s], sec_rings[s + 1]
             for i in range(n_pts):
                 inext = (i + 1) % n_pts
-                bm.faces.new((r1[i], r1[inext], r2[inext], r2[i])) if side == 1 else bm.faces.new((r1[inext], r1[i], r2[i], r2[inext]))
-        bmesh.ops.contextual_create(bm, geom=sec_rings[-1])
+                if side == 1:
+                    bm.faces.new((r1[i], r1[inext], r2[inext], r2[i]))
+                else:
+                    bm.faces.new((r1[inext], r1[i], r2[i], r2[inext]))
+
+        close_ring_cap(bm, sec_rings[-1], flip=(side != 1))
 
         wing_obj = create_mesh_object(f"B727_Wing_{side_name}", bm, collection, mat_body, 25.0)
         wing_obj.parent = parent_obj
         add_inverted_hull_outline(wing_obj, mat_white, thickness=0.022)
 
-        # بناء 4 هياكل لمسارات الجنيحات (Flap Track Fairings) كما في اللقطة الرابعة المرجعية
+        # بناء 4 هياكل لمسارات الجنيحات (Flap Track Fairings)
         fairing_spans = [3.4, 5.8, 8.4, 11.2]
         for idx, sp in enumerate(fairing_spans):
             t_ratio = (sp - 1.75) / (17.2 - 1.75)
@@ -149,7 +160,6 @@ def build_swept_wings_and_flaps(collection, parent_obj, mat_body, mat_white):
 
 def build_ttail_and_engines(collection, parent_obj, mat_body, mat_white):
     """بناء الذيل T-Tail، قناة المحرك الأوسط S-Duct، والمحركين الجانبيين JT8D مع شفرات المروحة."""
-    # 1. الزعنفة الرأسية (Swept Vertical Fin)
     bm_fin = bmesh.new()
     fin_base = [(10.2, -0.22, 1.75), (10.2, 0.22, 1.75), (17.6, 0.14, 0.90), (17.6, -0.14, 0.90)]
     fin_top  = [(15.2, -0.12, 6.85), (15.2, 0.12, 6.85), (19.4, 0.08, 6.85), (19.4, -0.08, 6.85)]
@@ -163,7 +173,6 @@ def build_ttail_and_engines(collection, parent_obj, mat_body, mat_white):
     fin_obj.parent = parent_obj
     add_inverted_hull_outline(fin_obj, mat_white, thickness=0.024)
 
-    # 2. الجناح الأفقي العلوي للذيل (T-Tail Horizontal Stabilizer)
     for side in [-1, 1]:
         sname = "L" if side == 1 else "R"
         bm_hs = bmesh.new()
@@ -179,7 +188,6 @@ def build_ttail_and_engines(collection, parent_obj, mat_body, mat_white):
         hs_obj.parent = parent_obj
         add_inverted_hull_outline(hs_obj, mat_white, thickness=0.020)
 
-    # 3. مدخل المحرك الأوسط العلوي (Center Engine #2 S-Duct Intake)
     bm_sduct = bmesh.new()
     s_stations = [
         (8.8,  0.62, 0.62, 2.38),
@@ -202,7 +210,6 @@ def build_ttail_and_engines(collection, parent_obj, mat_body, mat_white):
     sduct_obj.parent = parent_obj
     add_inverted_hull_outline(sduct_obj, mat_white, thickness=0.022)
 
-    # 4. المحركان الجانبيان الخلفيان (Side-Mounted Pratt & Whitney JT8D Nacelles #1 & #3)
     for side in [-1, 1]:
         sname = "L" if side == 1 else "R"
         bm_eng = bmesh.new()
@@ -219,14 +226,12 @@ def build_ttail_and_engines(collection, parent_obj, mat_body, mat_white):
             for i in range(24):
                 inext = (i + 1) % 24
                 bm_eng.faces.new((e_rings[r][i], e_rings[r][inext], e_rings[r+1][inext], e_rings[r+1][i]))
-        # إضافة حلقة المدخل الأمامي ومخروط المروحة ليظهر بوضوح في اللقطة الخامسة المرجعية
-        bmesh.ops.contextual_create(bm_eng, geom=e_rings[0])
-        bmesh.ops.contextual_create(bm_eng, geom=e_rings[-1])
+        close_ring_cap(bm_eng, e_rings[0], flip=True)
+        close_ring_cap(bm_eng, e_rings[-1], flip=False)
         eng_obj = create_mesh_object(f"B727_Engine_{sname}", bm_eng, collection, mat_body, 26.0)
         eng_obj.parent = parent_obj
         add_inverted_hull_outline(eng_obj, mat_white, thickness=0.022)
 
-        # حلقة بيضاء داخلية لمدخل المحرك ومخروط المروحة
         bm_fan = bmesh.new()
         bmesh.ops.create_circle(bm_fan, cap_ends=True, radius=0.56, segments=20)
         bmesh.ops.rotate(bm_fan, verts=bm_fan.verts, matrix=Matrix.Rotation(math.radians(90), 3, 'Y'))
@@ -238,10 +243,8 @@ def build_landing_gear(collection, parent_obj, mat_body, mat_white):
     """بناء عجلات الهبوط الأمامية المزدوجة وعجلات الهبوط الرئيسية أسفل الجناحين."""
     def make_wheel_pair(name_prefix, x, y_center, z_axle, wheel_radius, wheel_width, strut_height):
         bm = bmesh.new()
-        # الدعامة الرأسية (Strut)
         bmesh.ops.create_cone(bm, cap_ends=True, segments=10, radius1=0.11, radius2=0.09, depth=strut_height)
         bmesh.ops.translate(bm, verts=bm.verts, vec=(x, y_center, z_axle + strut_height * 0.5))
-        # العجلتان المزدوجتان
         for w_side in [-1, 1]:
             wbm = bmesh.new()
             bmesh.ops.create_cone(wbm, cap_ends=True, segments=20, radius1=wheel_radius, radius2=wheel_radius, depth=wheel_width)
@@ -254,9 +257,7 @@ def build_landing_gear(collection, parent_obj, mat_body, mat_white):
         strut_obj = create_mesh_object(f"{name_prefix}_Strut", bm, collection, mat_white, 24.0)
         strut_obj.parent = parent_obj
 
-    # عجلة الأنف الأمامية (Nose Gear) — تظهر في اللقطتين الرابعة والخامسة
     make_wheel_pair("B727_NoseGear", -15.4, 0.0, -2.55, 0.42, 0.18, 1.35)
-    # عجلتا الهبوط الرئيسيتان (Main Landing Gear)
     make_wheel_pair("B727_MainGear_L", 2.2, 3.05, -2.65, 0.62, 0.26, 2.15)
     make_wheel_pair("B727_MainGear_R", 2.2, -3.05, -2.65, 0.62, 0.26, 2.15)
 
@@ -265,16 +266,13 @@ def build_aft_stairway(collection, parent_obj, mat_body, mat_white):
     stair_pivot = bpy.data.objects.new("B727_AftStair_Pivot", None)
     collection.objects.link(stair_pivot)
     stair_pivot.parent = parent_obj
-    # نقطة مفصل السلم تحت مؤخرة البدن
     stair_pivot.location = (9.8, 0.0, -0.88)
-    # زاوية فتح السلم أثناء الطيران (نحو 34 درجة للأسفل)
     stair_pivot.rotation_euler = (0.0, math.radians(-34.0), 0.0)
 
     bm = bmesh.new()
     stair_len = 3.9
     stair_width = 0.92
 
-    # العوارض الجانبية للسلم (Side Stringers)
     for side in [-1, 1]:
         y = side * (stair_width * 0.5)
         v1 = bm.verts.new((0.0, y - 0.05, 0.0))
@@ -286,7 +284,6 @@ def build_aft_stairway(collection, parent_obj, mat_body, mat_white):
         for v in bm.verts[-4:]:
             v.co.z -= 0.24
 
-    # الدرجات الثماني للسلم (8 Steps)
     num_steps = 8
     for s in range(num_steps):
         sx = 0.35 + (s / num_steps) * (stair_len - 0.45)
@@ -298,16 +295,13 @@ def build_aft_stairway(collection, parent_obj, mat_body, mat_white):
         step_obj.parent = stair_pivot
         add_inverted_hull_outline(step_obj, mat_white, thickness=0.015)
 
-    # القضبان اليدوية والمكابس الهيدروليكية (Handrails & Hydraulic Actuators)
     for side in [-1, 1]:
         y = side * (stair_width * 0.48)
-        rbm = bmesh.new()
-        # القائمان والعارضة العلوية للقضيب اليدوي
         posts = [
             ((0.3, y, 0.0), (0.3, y, 0.85)),
             ((stair_len - 0.25, y, 0.0), (stair_len - 0.25, y, 0.85)),
             ((0.0, y, 0.85), (stair_len - 0.15, y, 0.85)),
-            ((1.4, y, 0.0), (0.9, y, 1.35)),  # ذراع المكبس الهيدروليكي
+            ((1.4, y, 0.0), (0.9, y, 1.35)),
         ]
         for p_start, p_end in posts:
             vec = Vector(p_end) - Vector(p_start)
