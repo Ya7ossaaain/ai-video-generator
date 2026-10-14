@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROFILE="${1:-preview}"
-FRAME_STEP="${2:-2}"
+FRAME_STEP="${2:-1}"
 
 export LIBGL_ALWAYS_SOFTWARE=1
 
@@ -12,7 +12,7 @@ xvfb-run -a -s "-screen 0 1920x1080x24" blender -b -noaudio --python-exit-code 1
 echo "=== Step 2: Running Visual & Pixel Verification on Sample Keyframes ==="
 python3 verify_output.py --require-samples
 
-echo "=== Step 3: Rendering Full Sequence (Resumable, Step=$FRAME_STEP) ==="
+echo "=== Step 3: Rendering Full 24fps Sequence (Step=$FRAME_STEP) ==="
 xvfb-run -a -s "-screen 0 1920x1080x24" blender -b -noaudio --python-exit-code 1 --python main_scene.py -- --profile "$PROFILE" --mode samples_and_video --frame-step "$FRAME_STEP"
 
 echo "=== Step 4: Assembling Final MP4 & Generating Verification Report ==="
