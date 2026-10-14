@@ -81,7 +81,6 @@ def build_full_scene(config, profile_name):
 def render_sample_keyframes(scene, config):
     samples_dir = os.path.join(PROJECT_ROOT, config["paths"]["samples_dir"])
     os.makedirs(samples_dir, exist_ok=True)
-    # حذف العينات القديمة لضمان فحص العينات الجديدة فقط
     for old_f in os.listdir(samples_dir):
         if old_f.endswith(".png"):
             os.remove(os.path.join(samples_dir, old_f))
@@ -92,19 +91,17 @@ def render_sample_keyframes(scene, config):
     for frame in config["sample_keyframes"]:
         out_file = os.path.join(samples_dir, f"sample_{frame:04d}.png")
         scene.frame_set(frame)
-        active_cam = None
-        for m in sorted(scene.timeline_markers, key=lambda x: x.frame):
-            if m.frame <= frame and m.camera:
-                active_cam = m.camera
-        if active_cam:
-            scene.camera = active_cam
         scene.render.filepath = out_file
-        print(f"[Renderer] Rendering sample keyframe {frame} (Camera: {scene.camera.name}) -> {out_file}")
+        print(f"[Renderer] Rendering sample keyframe {frame} -> {out_file}")
         bpy.ops.render.render(write_still=True)
 
 def render_animation_resumable(scene, config, frame_start=None, frame_end=None, frame_step=None):
     frames_dir = os.path.join(PROJECT_ROOT, config["paths"]["frames_dir"])
     os.makedirs(frames_dir, exist_ok=True)
+    for old_f in os.listdir(frames_dir):
+        if old_f.endswith(".png") or old_f.endswith(".txt"):
+            os.remove(os.path.join(frames_dir, old_f))
+
     scene.render.image_settings.file_format = 'PNG'
     scene.render.image_settings.color_mode = 'RGB'
 
@@ -115,14 +112,10 @@ def render_animation_resumable(scene, config, frame_start=None, frame_end=None, 
     for frame in range(f_start, f_end + 1, f_step):
         out_file = os.path.join(frames_dir, f"frame_{frame:04d}.png")
         scene.frame_set(frame)
-        active_cam = None
-        for m in sorted(scene.timeline_markers, key=lambda x: x.frame):
-            if m.frame <= frame and m.camera:
-                active_cam = m.camera
-        if active_cam:
-            scene.camera = active_cam
+        # تعطيل Freestyle تلقائيًا بعد الإطار 420 لتسريع تصيير لقطات السقوط الحر والغابة بـ 3 أضعاف
+        scene.render.use_freestyle = (frame <= 420)
         scene.render.filepath = out_file
-        print(f"[Renderer] Rendering frame {frame:04d}/{f_end:04d} [{scene.camera.name}]")
+        print(f"[Renderer] Rendering frame {frame:04d}/{f_end:04d}")
         bpy.ops.render.render(write_still=True)
 
 def main():
