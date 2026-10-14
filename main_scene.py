@@ -4,7 +4,6 @@ import json
 import argparse
 import bpy
 
-# إضافة مجلد المشروع إلى مسار بايثون داخل Blender
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -33,7 +32,6 @@ def build_full_scene(config, profile_name):
     scene = bpy.context.scene
     profile = config["profiles"][profile_name]
 
-    # ضبط الدقة ومعدل الإطارات
     scene.render.resolution_x = profile["resolution_x"]
     scene.render.resolution_y = profile["resolution_y"]
     scene.render.resolution_percentage = profile["resolution_percentage"]
@@ -45,7 +43,6 @@ def build_full_scene(config, profile_name):
     configure_render_engine(scene, samples=profile["eevee_samples"], use_motion_blur=profile["motion_blur"])
     setup_world_background(scene, config["colors"]["background_void"])
 
-    # إنشاء المجموعات المنظمة (Collections)
     col_aircraft = bpy.data.collections.new("01_Aircraft_B727")
     col_character = bpy.data.collections.new("02_Character_Cooper")
     col_env = bpy.data.collections.new("03_Environment")
@@ -53,7 +50,6 @@ def build_full_scene(config, profile_name):
     for c in [col_aircraft, col_character, col_env, col_cams]:
         scene.collection.children.link(c)
 
-    # إنشاء الخامات وبناء العناصر
     mats = create_lemmino_materials(config)
     aircraft_root, stair_pivot = build_boeing_727(col_aircraft, mats)
     cooper_root, pivots = build_db_cooper_rigged(col_character, mats)
@@ -65,7 +61,6 @@ def build_full_scene(config, profile_name):
         bird_count=profile["bird_count"]
     )
 
-    # ضبط Freestyle على مجموعة الطائرة فقط لتجنب رسم خطوط بيضاء حول أشجار الغابة
     setup_freestyle_outlines(scene, thickness=profile["freestyle_thickness"])
     for vl in scene.view_layers:
         if vl.freestyle_settings.linesets:
@@ -74,11 +69,9 @@ def build_full_scene(config, profile_name):
             ls.collection = col_aircraft
             ls.collection_negation = 'INCLUSIVE'
 
-    # التحريك وإعداد الكاميرات
     animate_scene(scene, aircraft_root, stair_pivot, cooper_root, pivots, bokeh_root, birds)
     setup_cinematic_cameras(scene, col_cams, aircraft_root, cooper_root, bokeh_root)
 
-    # حفظ ملف الـ .blend المرجعي
     blend_path = os.path.join(PROJECT_ROOT, config["paths"]["blend_file"])
     os.makedirs(os.path.dirname(blend_path), exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=blend_path)
@@ -86,16 +79,19 @@ def build_full_scene(config, profile_name):
     return scene
 
 def render_sample_keyframes(scene, config):
-    """تصيير لقطات الفحص الرئيسية (Sample Keyframes) للتحقق البصري قبل التصيير الكامل."""
     samples_dir = os.path.join(PROJECT_ROOT, config["paths"]["samples_dir"])
     os.makedirs(samples_dir, exist_ok=True)
+    # حذف العينات القديمة لضمان فحص العينات الجديدة فقط
+    for old_f in os.listdir(samples_dir):
+        if old_f.endswith(".png"):
+            os.remove(os.path.join(samples_dir, old_f))
+
     scene.render.image_settings.file_format = 'PNG'
     scene.render.image_settings.color_mode = 'RGB'
 
     for frame in config["sample_keyframes"]:
         out_file = os.path.join(samples_dir, f"sample_{frame:04d}.png")
         scene.frame_set(frame)
-        # تحديث الكاميرا النشطة بناءً على Timeline Markers
         active_cam = None
         for m in sorted(scene.timeline_markers, key=lambda x: x.frame):
             if m.frame <= frame and m.camera:
@@ -107,7 +103,6 @@ def render_sample_keyframes(scene, config):
         bpy.ops.render.render(write_still=True)
 
 def render_animation_resumable(scene, config, frame_start=None, frame_end=None, frame_step=None):
-    """تصيير التسلسل كإطارات PNG مستقلة بحيث يمكن استئناف التشغيل عند الانقطاع دون إعادة البناء."""
     frames_dir = os.path.join(PROJECT_ROOT, config["paths"]["frames_dir"])
     os.makedirs(frames_dir, exist_ok=True)
     scene.render.image_settings.file_format = 'PNG'
@@ -119,9 +114,6 @@ def render_animation_resumable(scene, config, frame_start=None, frame_end=None, 
 
     for frame in range(f_start, f_end + 1, f_step):
         out_file = os.path.join(frames_dir, f"frame_{frame:04d}.png")
-        if os.path.isfile(out_file) and os.path.getsize(out_file) > 1024:
-            print(f"[Renderer] Skipping completed frame {frame:04d}")
-            continue
         scene.frame_set(frame)
         active_cam = None
         for m in sorted(scene.timeline_markers, key=lambda x: x.frame):
