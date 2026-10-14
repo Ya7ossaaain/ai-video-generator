@@ -12,10 +12,10 @@
       "frame_step": 1,
       "eevee_samples": 16,
       "motion_blur": false,
-      "freestyle_thickness": 1.7,
-      "forest_tree_count": 520,
-      "rain_particle_count": 450,
-      "bird_count": 42
+      "freestyle_thickness": 1.6,
+      "forest_tree_count": 620,
+      "rain_particle_count": 350,
+      "bird_count": 48
     },
     "production": {
       "resolution_x": 1920,
@@ -25,12 +25,12 @@
       "frame_start": 1,
       "frame_end": 864,
       "frame_step": 1,
-      "eevee_samples": 48,
+      "eevee_samples": 32,
       "motion_blur": true,
-      "freestyle_thickness": 2.1,
-      "forest_tree_count": 750,
-      "rain_particle_count": 900,
-      "bird_count": 55
+      "freestyle_thickness": 2.0,
+      "forest_tree_count": 800,
+      "rain_particle_count": 500,
+      "bird_count": 60
     }
   },
   "paths": {
@@ -42,11 +42,11 @@
     "blend_file": "output/db_cooper_scene.blend"
   },
   "colors": {
-    "background_void": [0.007, 0.007, 0.008, 1.0],
-    "aircraft_body": [0.022, 0.022, 0.025, 1.0],
+    "background_void": [0.008, 0.008, 0.009, 1.0],
+    "aircraft_body": [0.024, 0.024, 0.026, 1.0],
     "white_line": [0.95, 0.95, 0.96, 1.0],
-    "cooper_red": [0.90, 0.05, 0.07, 1.0],
-    "city_bokeh": [0.42, 0.43, 0.45, 1.0]
+    "cooper_red": [0.92, 0.05, 0.06, 1.0],
+    "city_bokeh": [0.72, 0.73, 0.75, 1.0]
   },
-  "sample_keyframes": [85, 180, 300, 385, 530, 660, 785, 835]
+  "sample_keyframes": [52, 72, 195, 250, 372, 455, 655, 780]
 }
