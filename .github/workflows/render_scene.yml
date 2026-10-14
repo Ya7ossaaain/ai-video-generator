@@ -1,0 +1,58 @@
+name: Render DB Cooper 3D Sequence
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Render quality profile (preview or production)'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - preview
+          - production
+      frame_step:
+        description: 'Frame step (1 = full 24fps, 2 = fast 12fps interpolated to 24fps)'
+        required: true
+        default: '2'
+  push:
+    branches: [ main ]
+
+jobs:
+  render-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Cache Blender Binary & External Assets
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/blender-4.0.2
+            assets/
+          key: ${{ runner.os }}-blender-4.0.2-assets-v1
+
+      - name: Setup Blender & Dependencies
+        run: |
+          chmod +x scripts/setup_env.sh scripts/run_pipeline.sh
+          ./scripts/setup_env.sh
+
+      - name: Run 3D Scene Build, Sample Verification & Video Render
+        run: |
+          PROFILE="${{ github.event.inputs.profile || 'preview' }}"
+          STEP="${{ github.event.inputs.frame_step || '2' }}"
+          ./scripts/run_pipeline.sh "$PROFILE" "$STEP"
+
+      - name: Upload Final MP4, Contact Sheet & Blender File
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: db-cooper-3d-render-${{ github.run_id }}
+          path: |
+            output/db_cooper_sequence.mp4
+            output/samples/*.png
+            output/verification_report.json
+            output/db_cooper_scene.blend
