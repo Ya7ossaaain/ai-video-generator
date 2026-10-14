@@ -7,7 +7,22 @@ free -h || true
 
 echo "=== [2/3] Installing FFmpeg, Pillow, and Xvfb/headless libraries ==="
 sudo apt-get update -y
-sudo apt-get install -y ffmpeg python3-pil wget xz-utils libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libkbcommon0 libsm6 libice6
+sudo apt-get install -y \
+    ffmpeg \
+    python3-pil \
+    wget \
+    xz-utils \
+    xvfb \
+    libxi6 \
+    libxxf86vm1 \
+    libxfixes3 \
+    libxrender1 \
+    libgl1 \
+    libgl1-mesa-dri \
+    libegl1 \
+    libxkbcommon0 \
+    libsm6 \
+    libice6
 
 echo "=== [3/3] Ensuring Blender (4.0.2 LTS Portable or System Blender) ==="
 BLENDER_DIR="$HOME/blender-4.0.2"
