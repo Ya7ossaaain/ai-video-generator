@@ -8,30 +8,32 @@ import subprocess
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 def analyze_png_image(filepath):
-    """تحليل سريع لملف PNG باستخدام مكتبات بايثون القياسية أو Pillow إن توفرت."""
+    """فحص صارم لبكسلات الصورة للتأكد من وجود خطوط الطائرة أو الشخصية الحمراء أو الغابة فعليًا."""
     try:
         from PIL import Image
         img = Image.open(filepath).convert("RGB")
         w, h = img.size
         pixels = list(img.getdata())
         total = len(pixels)
-        bright_white = sum(1 for r, g, b in pixels if r > 180 and g > 180 and b > 180)
-        cooper_red   = sum(1 for r, g, b in pixels if r > 150 and g < 70 and b < 70)
-        non_black    = sum(1 for r, g, b in pixels if (r + g + b) > 45)
+        bright_white = sum(1 for r, g, b in pixels if r > 170 and g > 170 and b > 170)
+        mid_gray     = sum(1 for r, g, b in pixels if 45 < r <= 170 and abs(r - g) < 20)
+        cooper_red   = sum(1 for r, g, b in pixels if r > 140 and g < 75 and b < 75)
+        active_content = bright_white + mid_gray + cooper_red
         return {
             "valid": True,
             "width": w,
             "height": h,
             "white_ratio": round(bright_white / total, 5),
+            "gray_ratio": round(mid_gray / total, 5),
             "red_ratio": round(cooper_red / total, 5),
-            "non_black_ratio": round(non_black / total, 5),
-            "is_black_frame": (non_black / total) < 0.0005
+            "active_content_ratio": round(active_content / total, 5),
+            "is_empty_frame": (active_content / total) < 0.00015
         }
     except ImportError:
         with open(filepath, "rb") as f:
             data = f.read(32)
         if len(data) < 24 or data[:8] != b'\x89PNG\r\n\x1a\n':
-            return {"valid": False, "is_black_frame": True}
+            return {"valid": False, "is_empty_frame": True}
         w, h = struct.unpack(">II", data[16:24])
         fsize = os.path.getsize(filepath)
         return {
@@ -39,11 +41,10 @@ def analyze_png_image(filepath):
             "width": w,
             "height": h,
             "file_size_bytes": fsize,
-            "is_black_frame": fsize < 4500
+            "is_empty_frame": fsize < 5500
         }
 
 def assemble_video_ffmpeg(frames_dir, output_mp4, fps=24):
-    """تجميع الإطارات المصيرة إلى ملف MP4 متوافق مع جميع المشغلات."""
     frame_files = sorted(glob.glob(os.path.join(frames_dir, "frame_*.png")))
     if not frame_files:
         print("[Verifier] No rendered animation frames found in", frames_dir)
@@ -69,7 +70,7 @@ def assemble_video_ffmpeg(frames_dir, output_mp4, fps=24):
         "-f", "concat", "-safe", "0",
         "-i", concat_list_path,
         "-vf", f"fps={fps},format=yuv420p",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "17",
         "-movflags", "+faststart",
         output_mp4
     ]
@@ -107,15 +108,15 @@ def main():
     output_mp4  = os.path.join(PROJECT_ROOT, config["paths"]["final_video"])
     report_path = os.path.join(PROJECT_ROOT, config["paths"]["report_file"])
 
-    report = {"samples": {}, "black_frames_detected": [], "video_assembled": False, "status": "PENDING"}
+    report = {"samples": {}, "empty_frames_detected": [], "video_assembled": False, "status": "PENDING"}
 
     sample_files = sorted(glob.glob(os.path.join(samples_dir, "sample_*.png")))
     for s_file in sample_files:
         name = os.path.basename(s_file)
         stats = analyze_png_image(s_file)
         report["samples"][name] = stats
-        if stats.get("is_black_frame"):
-            report["black_frames_detected"].append(name)
+        if stats.get("is_empty_frame"):
+            report["empty_frames_detected"].append(name)
 
     contact_sheet = build_contact_sheet(samples_dir)
     if contact_sheet:
@@ -128,8 +129,8 @@ def main():
 
     if require_samples and len(sample_files) == 0:
         report["status"] = "FAILED_NO_SAMPLES_RENDERED"
-    elif report["black_frames_detected"]:
-        report["status"] = "WARNING_BLACK_FRAMES"
+    elif report["empty_frames_detected"]:
+        report["status"] = "FAILED_EMPTY_OR_MISFRAMED_SHOTS"
     elif require_video and not report["video_assembled"]:
         report["status"] = "FAILED_NO_VIDEO_ASSEMBLED"
     else:
