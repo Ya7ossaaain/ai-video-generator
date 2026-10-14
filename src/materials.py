@@ -1,8 +1,7 @@
 import bpy
-from .compat import set_principled_socket
 
 def create_lemmino_materials(config):
-    """إنشاء منظومة الخامات القياسية المستلهمة من مرجع LEMMiNO."""
+    """إنشاء منظومة الخامات القياسية المستلهمة من مرجع LEMMiNO والمتوافقة مع Blender 4.0."""
     colors = config["colors"]
     mats = {}
 
@@ -20,37 +19,39 @@ def create_lemmino_materials(config):
     layer_weight = nodes.new(type='ShaderNodeLayerWeight')
     ramp = nodes.new(type='ShaderNodeValToRGB')
 
-    diffuse.inputs['Color'].default_value = tuple(colors["aircraft_body"])
-    diffuse.inputs['Roughness'].default_value = 0.95
+    diffuse.inputs[0].default_value = tuple(colors["aircraft_body"])
+    if 'Roughness' in diffuse.inputs:
+        diffuse.inputs['Roughness'].default_value = 0.95
 
-    layer_weight.inputs['Blend'].default_value = 0.25
+    layer_weight.inputs[0].default_value = 0.25
     ramp.color_ramp.elements[0].position = 0.68
     ramp.color_ramp.elements[0].color = (0.02, 0.02, 0.025, 1.0)
     ramp.color_ramp.elements[1].position = 0.96
     ramp.color_ramp.elements[1].color = (0.28, 0.28, 0.30, 1.0)
 
-    emission_rim.inputs['Strength'].default_value = 1.0
+    emission_rim.inputs[1].default_value = 1.0
 
     links.new(layer_weight.outputs['Facing'], ramp.inputs['Fac'])
-    links.new(ramp.outputs['Color'], emission_rim.inputs['Color'])
-    links.new(diffuse.outputs['BSDF'], mix_shader.inputs[1])
-    links.new(emission_rim.outputs['Emission'], mix_shader.inputs[2])
-    mix_shader.inputs['Fac'].default_value = 0.65
-    links.new(mix_shader.outputs['Shader'], output.inputs['Surface'])
+    links.new(ramp.outputs['Color'], emission_rim.inputs[0])
+    links.new(diffuse.outputs[0], mix_shader.inputs[1])
+    links.new(emission_rim.outputs[0], mix_shader.inputs[2])
+    mix_shader.inputs[0].default_value = 0.65
+    links.new(mix_shader.outputs[0], output.inputs['Surface'])
     mats["aircraft_body"] = mat_aircraft
 
-    # 2. خامة الخطوط البيضاء الحادة (للحواف الميكانيكية، القضبان، وInverted Hull)
+    # 2. خامة الخطوط البيضاء الحادة
     mat_white = bpy.data.materials.new(name="LEMMiNO_White_Line")
     mat_white.use_nodes = True
-    mat_white.use_backface_culling = True
+    if hasattr(mat_white, "use_backface_culling"):
+        mat_white.use_backface_culling = True
     wnodes = mat_white.node_tree.nodes
     wlinks = mat_white.node_tree.links
     wnodes.clear()
     w_out = wnodes.new(type='ShaderNodeOutputMaterial')
     w_emit = wnodes.new(type='ShaderNodeEmission')
-    w_emit.inputs['Color'].default_value = tuple(colors["white_line"])
-    w_emit.inputs['Strength'].default_value = 1.15
-    wlinks.new(w_emit.outputs['Emission'], w_out.inputs['Surface'])
+    w_emit.inputs[0].default_value = tuple(colors["white_line"])
+    w_emit.inputs[1].default_value = 1.15
+    wlinks.new(w_emit.outputs[0], w_out.inputs['Surface'])
     mats["white_line"] = mat_white
 
     # 3. خامة D.B. Cooper القرمزية المشبعة (Crimson Red Silhouette)
@@ -61,17 +62,9 @@ def create_lemmino_materials(config):
     cnodes.clear()
     c_out = cnodes.new(type='ShaderNodeOutputMaterial')
     c_emit = cnodes.new(type='ShaderNodeEmission')
-    c_lw = cnodes.new(type='ShaderNodeLayerWeight')
-    c_mix = cnodes.new(type='ShaderNodeMixRGB')
-
-    c_lw.inputs['Blend'].default_value = 0.3
-    c_mix.inputs['Color1'].default_value = tuple(colors["cooper_red"])
-    c_mix.inputs['Color2'].default_value = (1.0, 0.18, 0.18, 1.0)
-    c_emit.inputs['Strength'].default_value = 1.25
-
-    clinks.new(c_lw.outputs['Fresnel'], c_mix.inputs['Fac'])
-    clinks.new(c_mix.outputs['Color'], c_emit.inputs['Color'])
-    clinks.new(c_emit.outputs['Emission'], c_out.inputs['Surface'])
+    c_emit.inputs[0].default_value = tuple(colors["cooper_red"])
+    c_emit.inputs[1].default_value = 1.35
+    clinks.new(c_emit.outputs[0], c_out.inputs['Surface'])
     mats["cooper_red"] = mat_cooper
 
     # 4. خامة غابة الصنوبر ذات التدرج الشعاعي المركزي (Radial Spotlight Forest Shader)
@@ -88,17 +81,15 @@ def create_lemmino_materials(config):
     f_map = fnodes.new(type='ShaderNodeMapRange')
     f_ramp = fnodes.new(type='ShaderNodeValToRGB')
 
-    # مركز البقعة المضيئة في الغابة عند (0, 0, -220)
     f_vec_math.operation = 'DISTANCE'
     f_vec_math.inputs[1].default_value = (0.0, 0.0, -220.0)
 
-    f_map.inputs['From Min'].default_value = 0.0
-    f_map.inputs['From Max'].default_value = 62.0
-    f_map.inputs['To Min'].default_value = 0.0
-    f_map.inputs['To Max'].default_value = 1.0
+    f_map.inputs[1].default_value = 0.0
+    f_map.inputs[2].default_value = 62.0
+    f_map.inputs[3].default_value = 0.0
+    f_map.inputs[4].default_value = 1.0
     f_map.clamp = True
 
-    # تدرج من الأبيض الساطع في المركز إلى الرمادي المتدرج فالأسود في الأطراف
     els = f_ramp.color_ramp.elements
     els[0].position = 0.0
     els[0].color = (0.98, 0.98, 0.99, 1.0)
@@ -109,13 +100,13 @@ def create_lemmino_materials(config):
     e_dark = f_ramp.color_ramp.elements.new(0.95)
     e_dark.color = (0.015, 0.015, 0.018, 1.0)
 
-    f_emit.inputs['Strength'].default_value = 1.05
+    f_emit.inputs[1].default_value = 1.05
 
     flinks.new(f_geom.outputs['Position'], f_vec_math.inputs[0])
-    flinks.new(f_vec_math.outputs['Value'], f_map.inputs['Value'])
-    flinks.new(f_map.outputs['Result'], f_ramp.inputs['Fac'])
-    flinks.new(f_ramp.outputs['Color'], f_emit.inputs['Color'])
-    flinks.new(f_emit.outputs['Emission'], f_out.inputs['Surface'])
+    flinks.new(f_vec_math.outputs['Value'], f_map.inputs[0])
+    flinks.new(f_map.outputs[0], f_ramp.inputs['Fac'])
+    flinks.new(f_ramp.outputs['Color'], f_emit.inputs[0])
+    flinks.new(f_emit.outputs[0], f_out.inputs['Surface'])
     mats["forest_gradient"] = mat_forest
 
     # 5. خامة أضواء المدينة الضبابية (Bokeh City Lights)
@@ -126,15 +117,14 @@ def create_lemmino_materials(config):
     bnodes.clear()
     b_out = bnodes.new(type='ShaderNodeOutputMaterial')
     b_emit = bnodes.new(type='ShaderNodeEmission')
-    b_emit.inputs['Color'].default_value = tuple(colors["city_bokeh"])
-    b_emit.inputs['Strength'].default_value = 3.5
-    blinks.new(b_emit.outputs['Emission'], b_out.inputs['Surface'])
+    b_emit.inputs[0].default_value = tuple(colors["city_bokeh"])
+    b_emit.inputs[1].default_value = 3.5
+    blinks.new(b_emit.outputs[0], b_out.inputs['Surface'])
     mats["city_bokeh"] = mat_bokeh
 
     return mats
 
 def add_inverted_hull_outline(obj, white_material, thickness=0.035):
-    """إضافة طبقة حواف بيضاء هندسية (Inverted Hull) لضمان ظهور الخطوط البيضاء في كل الظروف."""
     if obj.type != 'MESH' or not obj.data:
         return
     if white_material.name not in [m.name for m in obj.data.materials if m]:
@@ -150,13 +140,12 @@ def add_inverted_hull_outline(obj, white_material, thickness=0.035):
         solid.use_quality_normals = True
 
 def setup_freestyle_outlines(scene, thickness=2.0):
-    """تفعيل Freestyle لرسم الخطوط الهندسية البيضاء الدقيقة على طائرة Boeing 727."""
     scene.render.use_freestyle = True
     scene.render.line_thickness = thickness
     for view_layer in scene.view_layers:
         view_layer.use_freestyle = True
         fs = view_layer.freestyle_settings
-        fs.crease_angle = 0.58  # ~33 درجة لإظهار خطوط البدن والمحركات والجنيحات
+        fs.crease_angle = 0.58
         while fs.linesets:
             fs.linesets.remove(fs.linesets[0])
         lineset = fs.linesets.new(name="LEMMiNO_Tech_Lines")
