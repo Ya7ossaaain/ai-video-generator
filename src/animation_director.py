@@ -1,179 +1,209 @@
 import math
 import random
 import bpy
-from mathutils import Vector
+from mathutils import Vector, Quaternion
 
 def keyframe_transform(obj, frame, loc=None, rot_deg=None, scale=None):
     if loc is not None:
         obj.location = loc
         obj.keyframe_insert(data_path="location", frame=frame)
     if rot_deg is not None:
+        obj.rotation_mode = 'XYZ'
         obj.rotation_euler = tuple(math.radians(a) for a in rot_deg)
         obj.keyframe_insert(data_path="rotation_euler", frame=frame)
     if scale is not None:
         obj.scale = scale
         obj.keyframe_insert(data_path="scale", frame=frame)
 
+def aim_camera_at(cam_obj, frame, cam_loc, target_loc, roll_deg=0.0):
+    """توجيه الكاميرا رياضيًا بدقة 100% نحو الهدف باستخدام الكواترنيون دون أخطاء زوايا أويلر."""
+    cam_vec = Vector(cam_loc)
+    tgt_vec = Vector(target_loc)
+    direction = (tgt_vec - cam_vec).normalized()
+    rot_quat = direction.to_track_quat('-Z', 'Y')
+    if abs(roll_deg) > 1e-4:
+        roll_quat = Quaternion(direction, math.radians(roll_deg))
+        rot_quat = roll_quat @ rot_quat
+    cam_obj.location = cam_vec
+    cam_obj.rotation_mode = 'QUATERNION'
+    cam_obj.rotation_quaternion = rot_quat
+    cam_obj.keyframe_insert(data_path="location", frame=frame)
+    cam_obj.keyframe_insert(data_path="rotation_quaternion", frame=frame)
+
+def get_aircraft_pos(frame):
+    """حساب موقع الطائرة الحتمي في كل إطار."""
+    t = (frame - 1) / 24.0
+    if frame <= 352:
+        ax = -t * 0.35
+        az = math.sin(t * 1.4) * 0.14
+    else:
+        dt = (frame - 352) / 24.0
+        ax = -14.6 * 0.35 - (dt ** 1.35) * 7.5
+        az = 0.6 + dt * 1.8
+    return Vector((ax, 0.0, az))
+
+def get_cooper_pos(frame):
+    """حساب موقع شخصية D.B. Cooper الحتمي في كل إطار."""
+    if frame <= 352:
+        ac = get_aircraft_pos(frame)
+        # Cooper يقف في أسفل السلم الخلفي تمامًا كما في اللقطة الرابعة المرجعية
+        return Vector((ac.x + 13.05, 0.0, ac.z - 2.95))
+    else:
+        ac_jump = get_aircraft_pos(352)
+        start_x = ac_jump.x + 13.05
+        start_z = ac_jump.z - 2.95
+        jt = (frame - 352) / 24.0
+        decay = math.exp(-jt * 0.32)
+        cx = start_x * decay + math.sin(jt * 1.1) * 0.25 * decay
+        cy = math.sin(jt * 0.8) * 0.20 * decay
+        # يصل إلى قمم الأشجار البيضاء (Z = -218.5) عند الإطار 795
+        progress = min(1.0, jt / 18.45)
+        cz = start_z - (progress ** 1.32) * (abs(-219.5 - start_z))
+        return Vector((cx, cy, cz))
+
 def animate_scene(scene, aircraft_root, stair_pivot, cooper_root, pivots, bokeh_root, birds):
-    """
-    تحريك كامل متسق مكانيًا وزمنيًا على مدار 864 إطارًا (36 ثانية):
-    - مسار الطائرة واهتزاز السلم الخلفي لحظة القفز.
-    - حركة مفاصل D.B. Cooper في التأهب، الوثب، التقلب الحر، والاستقرار الهوائي.
-    - تطاير سرب الطيور لحظة دخول Cooper في الغابة.
-    - نظام الكاميرات السينمائية السبع مع الربط الزمني عبر Timeline Markers.
-    """
-    # 1. حركة الطائرة (Boeing 727 Flight Path + Oscillation after jump)
-    # الطائرة تحلق عند ارتفاع Z = 0 وتتحرك للأمام ببطء نسبي مع اهتزاز جوي طفيف
-    for f in range(1, 620, 12):
+    """تحريك الطائرة، السلم الخلفي، مفاصل Cooper، أضواء الـ Bokeh، وسرب الطيور."""
+    # 1. تحريك الطائرة
+    for f in range(1, 865, 6):
+        pos = get_aircraft_pos(f)
         t = (f - 1) / 24.0
-        # قبل القفزة (الإطار 350) تتحرك الطائرة بثبات، وبعد الإطار 360 تندفع للأمام وتبتعد
-        if f <= 355:
-            ax = -t * 0.4
-            az = math.sin(t * 1.6) * 0.18
-            roll = math.sin(t * 1.1) * 1.8
-            pitch = 2.0 + math.cos(t * 0.9) * 0.6
-        else:
-            dt = (f - 355) / 24.0
-            ax = -14.8 * 0.4 - (dt ** 1.45) * 8.5
-            az = 0.8 + dt * 2.4 + math.sin(dt * 5.0) * 0.35 * math.exp(-dt * 0.4)
-            roll = -4.0 + math.sin(dt * 3.0) * 2.0
-            pitch = 3.5 + math.sin(dt * 6.0) * 2.2 * math.exp(-dt * 0.5)
-        keyframe_transform(aircraft_root, f, loc=(ax, 0.0, az), rot_deg=(roll, pitch, 0.0))
+        roll = math.sin(t * 1.1) * 1.4
+        pitch = 1.8 + math.cos(t * 0.9) * 0.5
+        if f > 352:
+            dt = (f - 352) / 24.0
+            pitch += math.sin(dt * 5.5) * 1.8 * math.exp(-dt * 0.45)
+        keyframe_transform(aircraft_root, f, loc=pos, rot_deg=(roll, pitch, 0.0))
 
-    # اهتزاز السلم الخلفي لحظة القفز (Aft Stairway Oscillation عند الإطار 350–410)
-    keyframe_transform(stair_pivot, 1,   rot_deg=(0.0, -34.0, 0.0))
-    keyframe_transform(stair_pivot, 345, rot_deg=(0.0, -35.5, 0.0))
-    keyframe_transform(stair_pivot, 362, rot_deg=(0.0, -18.0, 0.0))  # ارتداد السلم للأعلى بعد مغادرة وزن Cooper
-    keyframe_transform(stair_pivot, 380, rot_deg=(0.0, -31.0, 0.0))
-    keyframe_transform(stair_pivot, 405, rot_deg=(0.0, -26.0, 0.0))
+    # اهتزاز السلم الخلفي عند القفز (Oscillation)
+    keyframe_transform(stair_pivot, 1,   rot_deg=(0.0, 33.0, 0.0))
+    keyframe_transform(stair_pivot, 348, rot_deg=(0.0, 34.5, 0.0))
+    keyframe_transform(stair_pivot, 365, rot_deg=(0.0, 19.0, 0.0))
+    keyframe_transform(stair_pivot, 385, rot_deg=(0.0, 31.0, 0.0))
+    keyframe_transform(stair_pivot, 410, rot_deg=(0.0, 27.0, 0.0))
 
-    # 2. مسار وحركة شخصية D.B. Cooper
-    # من الإطار 1 إلى 350: يقف Cooper في نهاية السلم الخلفي (عند X=+13.1 بالنسبة للطائرة، Z=-3.15)
-    # ابتداءً من الإطار 351: يثب للخلف والأسفل في الهواء الحر حتى يصل إلى قمم أشجار الغابة (Z=-218) عند الإطار 805
+    # 2. تحريك شخصية D.B. Cooper ومفاصله
     for f in range(1, 865, 4):
-        if f <= 350:
-            t = (f - 1) / 24.0
-            ax = -t * 0.4
-            az = math.sin(t * 1.6) * 0.18
-            # موقع نهاية السلم الخلفي بدقة بدون أي تداخل مع البدن أو الجناح
-            cx = ax + 12.85
-            cy = 0.0
-            cz = az - 3.12
-            c_rot = (0.0, 18.0, 0.0)
-
-            # وضعية الانحناء والتأهب على السلم (مطابقة للقطة الرابعة المرجعية)
-            keyframe_transform(pivots["Pelvis"], f, rot_deg=(0, 28, 0))
-            keyframe_transform(pivots["Spine"], f, rot_deg=(0, 22, 0))
-            keyframe_transform(pivots["Hip_L"], f, rot_deg=(0, -48, 0))
-            keyframe_transform(pivots["Hip_R"], f, rot_deg=(0, -38, 0))
-            keyframe_transform(pivots["Knee_L"], f, rot_deg=(0, 55, 0))
-            keyframe_transform(pivots["Knee_R"], f, rot_deg=(0, 45, 0))
-            keyframe_transform(pivots["Shoulder_L"], f, rot_deg=(-25, -35, 0))
-            keyframe_transform(pivots["Shoulder_R"], f, rot_deg=(25, -35, 0))
+        c_pos = get_cooper_pos(f)
+        if f <= 352:
+            # وضعية الانحناء على السلم الخلفي (مطابقة للقطة الرابعة المرجعية)
+            c_rot = (0.0, 16.0, 180.0)
+            keyframe_transform(pivots["Pelvis"], f, rot_deg=(0, 22, 0))
+            keyframe_transform(pivots["Spine"], f, rot_deg=(0, 18, 0))
+            keyframe_transform(pivots["Hip_L"], f, rot_deg=(0, -45, 0))
+            keyframe_transform(pivots["Hip_R"], f, rot_deg=(0, -35, 0))
+            keyframe_transform(pivots["Knee_L"], f, rot_deg=(0, 52, 0))
+            keyframe_transform(pivots["Knee_R"], f, rot_deg=(0, 42, 0))
+            keyframe_transform(pivots["Shoulder_L"], f, rot_deg=(-18, -32, 0))
+            keyframe_transform(pivots["Shoulder_R"], f, rot_deg=(18, -32, 0))
+            keyframe_transform(pivots["Elbow_L"], f, rot_deg=(0, -25, 0))
+            keyframe_transform(pivots["Elbow_R"], f, rot_deg=(0, -25, 0))
+        elif f < 600:
+            # مرحلة السقوط الحر والتقلب في الفراغ الأسود (مطابقة للقطة الثالثة المرجعية عند الإطار 530)
+            jt = (f - 352) / 24.0
+            # عند الإطار 530 يتجه الرأس لليمين والأسفل قليلًا مع امتداد الذراعين والساقين
+            c_rot = (
+                math.sin(jt * 1.8) * 14.0,
+                -108.0 + math.cos(jt * 1.5) * 12.0,
+                math.sin(jt * 0.9) * 18.0
+            )
+            keyframe_transform(pivots["Pelvis"], f, rot_deg=(0, -8, 0))
+            keyframe_transform(pivots["Spine"], f, rot_deg=(0, -14, 0))
+            keyframe_transform(pivots["Shoulder_L"], f, rot_deg=(-55, -85 + math.sin(jt*4)*15, 0))
+            keyframe_transform(pivots["Shoulder_R"], f, rot_deg=(45, -30 + math.cos(jt*4)*15, 0))
+            keyframe_transform(pivots["Elbow_L"], f, rot_deg=(0, -20, 0))
+            keyframe_transform(pivots["Elbow_R"], f, rot_deg=(0, -35, 0))
+            keyframe_transform(pivots["Hip_L"], f, rot_deg=(-10, 15 + math.sin(jt*3)*15, 0))
+            keyframe_transform(pivots["Hip_R"], f, rot_deg=(10, -22 + math.cos(jt*3)*15, 0))
+            keyframe_transform(pivots["Knee_L"], f, rot_deg=(0, 58, 0))
+            keyframe_transform(pivots["Knee_R"], f, rot_deg=(0, 18, 0))
         else:
-            # مرحلة القفز والسقوط الحر (الإطارات 351 إلى 864)
-            jt = (f - 350) / 24.0  # الزمن بالثواني منذ لحظة القفز (0 إلى 21.4 ثانية)
-            # ينحرف للخلف في البداية ثم يسقط عموديًا باتجاه مركز الغابة المضاءة (0, 0, -220)
-            decay = math.exp(-jt * 0.35)
-            cx = 7.1 * decay + math.sin(jt * 1.3) * 0.4
-            cy = math.sin(jt * 0.9) * 0.5 * decay
-            # تسارع السقوط من Z = -3.12 إلى Z = -224 عند الإطار 805 (jt = 18.9s)
-            progress = min(1.0, jt / 18.9)
-            cz = -3.12 - (progress ** 1.35) * 221.0
+            # مرحلة الاستقرار الأفقي Belly-to-Earth والوجه لليسار (مطابقة للقطة الثانية المرجعية عند الإطار 660)
+            jt = (f - 352) / 24.0
+            c_rot = (
+                math.sin(jt * 3.0) * 4.0,
+                84.0 + math.cos(jt * 2.5) * 3.0,
+                0.0
+            )
+            keyframe_transform(pivots["Pelvis"], f, rot_deg=(0, -6, 0))
+            keyframe_transform(pivots["Spine"], f, rot_deg=(0, -16, 0))
+            keyframe_transform(pivots["Shoulder_L"], f, rot_deg=(-35, -62 + math.sin(jt*7)*6, 0))
+            keyframe_transform(pivots["Shoulder_R"], f, rot_deg=(35, -48 + math.cos(jt*7)*6, 0))
+            keyframe_transform(pivots["Elbow_L"], f, rot_deg=(0, -38, 0))
+            keyframe_transform(pivots["Elbow_R"], f, rot_deg=(0, -32, 0))
+            keyframe_transform(pivots["Hip_L"], f, rot_deg=(-8, -14 + math.sin(jt*6)*5, 0))
+            keyframe_transform(pivots["Hip_R"], f, rot_deg=(8, 12 + math.cos(jt*6)*5, 0))
+            keyframe_transform(pivots["Knee_L"], f, rot_deg=(0, -52, 0))
+            keyframe_transform(pivots["Knee_R"], f, rot_deg=(0, -45, 0))
 
-            if f < 600:
-                # مرحلة التخبط والدوران في الرياح (اللقطة الثالثة المرجعية)
-                c_rot = (
-                    math.sin(jt * 2.8) * 35.0,
-                    72.0 + math.cos(jt * 2.2) * 28.0,
-                    jt * 42.0
-                )
-                keyframe_transform(pivots["Pelvis"], f, rot_deg=(math.sin(jt*4)*12, 10, 0))
-                keyframe_transform(pivots["Spine"], f, rot_deg=(0, -15 + math.cos(jt*5)*10, 0))
-                keyframe_transform(pivots["Shoulder_L"], f, rot_deg=(-65 + math.sin(jt*6)*25, -40, 20))
-                keyframe_transform(pivots["Shoulder_R"], f, rot_deg=(65 + math.cos(jt*6)*25, 30, -20))
-                keyframe_transform(pivots["Elbow_L"], f, rot_deg=(0, -35 + math.sin(jt*7)*20, 0))
-                keyframe_transform(pivots["Elbow_R"], f, rot_deg=(0, -25 + math.cos(jt*7)*20, 0))
-                keyframe_transform(pivots["Hip_L"], f, rot_deg=(-18, -25 + math.sin(jt*5)*30, 0))
-                keyframe_transform(pivots["Hip_R"], f, rot_deg=(18, 20 + math.cos(jt*5)*30, 0))
-                keyframe_transform(pivots["Knee_L"], f, rot_deg=(0, 48 + math.sin(jt*6)*22, 0))
-                keyframe_transform(pivots["Knee_R"], f, rot_deg=(0, 35 + math.cos(jt*6)*22, 0))
-            else:
-                # مرحلة الاستقرار الأفقي Belly-to-Earth فوق أضواء المدينة والغابة (اللقطة الثانية والأولى)
-                c_rot = (
-                    math.sin(jt * 3.5) * 6.0,
-                    82.0 + math.cos(jt * 3.0) * 5.0,
-                    180.0 + math.sin(jt * 1.5) * 8.0
-                )
-                keyframe_transform(pivots["Pelvis"], f, rot_deg=(0, 8, 0))
-                keyframe_transform(pivots["Spine"], f, rot_deg=(0, -18, 0))
-                keyframe_transform(pivots["Shoulder_L"], f, rot_deg=(-45, -70 + math.sin(jt*9)*8, 0))
-                keyframe_transform(pivots["Shoulder_R"], f, rot_deg=(45, -65 + math.cos(jt*9)*8, 0))
-                keyframe_transform(pivots["Elbow_L"], f, rot_deg=(0, -45, 0))
-                keyframe_transform(pivots["Elbow_R"], f, rot_deg=(0, -40, 0))
-                keyframe_transform(pivots["Hip_L"], f, rot_deg=(-12, 18 + math.sin(jt*8)*6, 0))
-                keyframe_transform(pivots["Hip_R"], f, rot_deg=(12, 28 + math.cos(jt*8)*6, 0))
-                keyframe_transform(pivots["Knee_L"], f, rot_deg=(0, 62 + math.sin(jt*10)*8, 0))
-                keyframe_transform(pivots["Knee_R"], f, rot_deg=(0, 52 + math.cos(jt*10)*8, 0))
+        # تصغير حجم Cooper قليلًا في لقطة الغابة الواسعة ليطابق النقطة الحمراء الصغيرة في اللقطة الأولى، ثم إخفاؤه عند 796
+        if f < 721:
+            s_val = (1.0, 1.0, 1.0)
+        elif f <= 795:
+            s_val = (0.55, 0.55, 0.55)
+        else:
+            s_val = (0.0001, 0.0001, 0.0001)
+        keyframe_transform(cooper_root, f, loc=c_pos, rot_deg=c_rot, scale=s_val)
 
-            # رفرفة ذيل المعطف في الهواء
-            keyframe_transform(pivots["CoatTail"], f, rot_deg=(math.sin(jt*14)*12, -35 + math.cos(jt*16)*18, 0))
+    # 3. التحكم الصارم بظهور أضواء المدينة الضبابية (تظهر فقط في اللقطة السادسة 601–720 وتختفي تمامًا في الغابة!)
+    keyframe_transform(bokeh_root, 1,   loc=(0, 0, -500), scale=(0.0001, 0.0001, 0.0001))
+    keyframe_transform(bokeh_root, 600, loc=(0, 0, -500), scale=(0.0001, 0.0001, 0.0001))
+    for f in range(601, 721, 4):
+        c_pos = get_cooper_pos(f)
+        prog = (f - 601) / 120.0
+        keyframe_transform(
+            bokeh_root, f,
+            loc=(c_pos.x - 1.5 + prog * 2.5, c_pos.y + 18.0, c_pos.z - 2.2),
+            rot_deg=(0.0, 0.0, 0.0),
+            scale=(1.0, 1.0, 1.0)
+        )
+    keyframe_transform(bokeh_root, 721, loc=(0, 0, -500), scale=(0.0001, 0.0001, 0.0001))
+    keyframe_transform(bokeh_root, 864, loc=(0, 0, -500), scale=(0.0001, 0.0001, 0.0001))
 
-        # إخفاء Cooper داخل الأشجار بعد الإطار 808 (كما في الفيديو الأصلي عند 00:34)
-        s_val = (1.0, 1.0, 1.0) if f <= 808 else (0.001, 0.001, 0.001)
-        keyframe_transform(cooper_root, f, loc=(cx, cy, cz), rot_deg=c_rot, scale=s_val)
-
-    # 3. تحريك سرب الطيور البيضاء لحظة ارتطام Cooper بقمم الأشجار (الإطار 802 إلى 864)
+    # 4. تحريك سرب الطيور البيضاء لحظة ارتطام Cooper بقمم الأشجار البيضاء (الإطار 795 إلى 864)
     rng = random.Random(1980)
     for idx, b_obj in enumerate(birds):
-        start_x = rng.uniform(-12.0, 12.0)
-        start_y = rng.uniform(-6.0, 6.0)
-        start_z = -215.0 + rng.uniform(-2.0, 1.5)
-        vx = rng.uniform(-18.0, 18.0)
-        vy = rng.uniform(-8.0, 8.0)
-        vz = rng.uniform(14.0, 26.0)
+        start_x = rng.uniform(-9.0, 9.0)
+        start_y = rng.uniform(-5.0, 3.0)
+        start_z = -218.5 + rng.uniform(-1.5, 1.0)
+        vx = rng.uniform(-11.0, 11.0)
+        vy = rng.uniform(-4.0, 4.0)
+        vz = rng.uniform(9.5, 17.5)
 
-        keyframe_transform(b_obj, 1,   loc=(start_x, start_y, start_z), scale=(0.001, 0.001, 0.001))
-        keyframe_transform(b_obj, 800, loc=(start_x, start_y, start_z), scale=(0.001, 0.001, 0.001))
-        for bf in range(802, 865, 4):
-            bt = (bf - 802) / 24.0
-            bx = start_x + vx * bt + math.sin(bt * 6.0 + idx) * 1.2
+        keyframe_transform(b_obj, 1,   loc=(start_x, start_y, start_z), scale=(0.0001, 0.0001, 0.0001))
+        keyframe_transform(b_obj, 794, loc=(start_x, start_y, start_z), scale=(0.0001, 0.0001, 0.0001))
+        for bf in range(796, 865, 3):
+            bt = (bf - 796) / 24.0
+            bx = start_x + vx * bt + math.sin(bt * 5.0 + idx) * 0.8
             by = start_y + vy * bt
             bz = start_z + vz * bt
-            flap = math.sin(bt * 22.0 + idx) * 35.0
+            flap = math.sin(bt * 24.0 + idx) * 35.0
             keyframe_transform(
                 b_obj, bf,
                 loc=(bx, by, bz),
-                rot_deg=(flap, -15.0, math.degrees(math.atan2(vy, vx))),
-                scale=(1.1, 1.1, 1.1)
+                rot_deg=(flap, -12.0, math.degrees(math.atan2(vy, vx))),
+                scale=(0.85, 0.85, 0.85)
             )
 
 def setup_cinematic_cameras(scene, collection, aircraft_root, cooper_root, bokeh_root):
-    """إنشاء الكاميرات السينمائية السبع وربطها بالـ Timeline Markers."""
+    """إعداد الكاميرات السبع في الإحداثيات العالمية مع توجيه رياضي مباشر 100% نحو الأهداف."""
     cam_specs = [
-        # (name, start_frame, lens_mm, use_dof, fstop, target_obj)
-        ("Cam_01_FrontApproach",   1,   38.0, False, 4.0, aircraft_root),
-        ("Cam_02_OrbitalSide",     121, 42.0, False, 4.0, aircraft_root),
-        ("Cam_03_AftStairProfile", 241, 48.0, False, 4.0, aircraft_root),
-        ("Cam_04_TheJumpExit",     349, 35.0, False, 2.8, cooper_root),
-        ("Cam_05_FreefallTumble",  469, 35.0, True,  1.6, cooper_root),
-        ("Cam_06_NightBokeh",      601, 50.0, True,  1.2, cooper_root),
-        ("Cam_07_ForestFinale",    721, 75.0, False, 4.0, None),
+        ("Cam_01_FrontApproach",   1,   42.0),
+        ("Cam_02_OrbitalSide",     121, 42.0),
+        ("Cam_03_AftStairProfile", 241, 45.0),
+        ("Cam_04_TheJumpExit",     349, 38.0),
+        ("Cam_05_FreefallTumble",  469, 45.0),
+        ("Cam_06_NightBokeh",      601, 50.0),
+        ("Cam_07_ForestFinale",    721, 62.0),
     ]
 
     cameras = {}
     scene.timeline_markers.clear()
 
-    for name, f_start, lens, use_dof, fstop, dof_target in cam_specs:
+    for name, f_start, lens in cam_specs:
         cam_data = bpy.data.cameras.new(name)
         cam_data.lens = lens
         cam_data.clip_start = 0.1
         cam_data.clip_end = 1000.0
-        if use_dof and dof_target:
-            cam_data.dof.use_dof = True
-            cam_data.dof.focus_object = dof_target
-            cam_data.dof.aperture_fstop = fstop
-
         cam_obj = bpy.data.objects.new(name, cam_data)
         collection.objects.link(cam_obj)
         cameras[name] = cam_obj
@@ -183,59 +213,72 @@ def setup_cinematic_cameras(scene, collection, aircraft_root, cooper_root, bokeh
 
     scene.camera = cameras["Cam_01_FrontApproach"]
 
-    # تحريك الكاميرا 1: الاقتراب الأمامي السفلي (تطابق اللقطة الخامسة المرجعية عند الإطار 90–120)
+    # 1. الكاميرا 1 (الإطارات 1–120): الاقتراب الأمامي السفلي (تطابق اللقطة الخامسة المرجعية عند الإطار 85)
     c1 = cameras["Cam_01_FrontApproach"]
-    c1.parent = aircraft_root
-    keyframe_transform(c1, 1,   loc=(-95.0, 22.0, -14.0), rot_deg=(82.0, 0.0, -76.0))
-    keyframe_transform(c1, 85,  loc=(-33.0, 9.5,  -4.8),  rot_deg=(83.0, 0.0, -74.0))
-    keyframe_transform(c1, 120, loc=(-29.0, 12.5, -4.2),  rot_deg=(83.5, 0.0, -66.5))
+    for f in range(1, 122, 4):
+        ac = get_aircraft_pos(f)
+        u = (f - 1) / 119.0
+        # تقترب من (-68, +7.5, -6.5) إلى (-34.5, +4.2, -3.5) وتنظر لمركز الطائرة
+        cam_loc = ac + Vector((-68.0 + u * 35.5, 7.2 - u * 3.0, -6.2 + u * 2.8))
+        tgt_loc = ac + Vector((0.0, -0.3, 1.1))
+        aim_camera_at(c1, f, cam_loc, tgt_loc, roll_deg=-2.5)
 
-    # تحريك الكاميرا 2: الالتفاف الجانبي حول الجناح والمحركات
+    # 2. الكاميرا 2 (الإطارات 121–240): الالتفاف المداري حول جانب الطائرة الأيسر
     c2 = cameras["Cam_02_OrbitalSide"]
-    c2.parent = aircraft_root
-    keyframe_transform(c2, 121, loc=(-24.0, 18.0, -3.8), rot_deg=(84.0, 0.0, -52.0))
-    keyframe_transform(c2, 240, loc=(4.5,   26.5, -2.5), rot_deg=(85.5, 0.0, -12.0))
+    for f in range(121, 242, 4):
+        ac = get_aircraft_pos(f)
+        u = (f - 121) / 119.0
+        angle = math.radians(155.0 - u * 65.0)  # من المقدمة الجانبية إلى المنتصف الجانبي
+        dist = 32.0 - u * 6.0
+        cam_loc = ac + Vector((math.cos(angle) * dist + 2.0, -math.sin(angle) * dist, -2.5 + u * 1.2))
+        tgt_loc = ac + Vector((3.0 + u * 4.0, 0.0, 0.4))
+        aim_camera_at(c2, f, cam_loc, tgt_loc)
 
-    # تحريك الكاميرا 3: كشف السلم الخلفي وشخصية Cooper الحمراء (تطابق اللقطة الرابعة المرجعية)
+    # 3. الكاميرا 3 (الإطارات 241–348): لقطة السلم الخلفي وشخصية Cooper الحمراء (تطابق اللقطة الرابعة المرجعية عند الإطار 300)
     c3 = cameras["Cam_03_AftStairProfile"]
-    c3.parent = aircraft_root
-    keyframe_transform(c3, 241, loc=(8.5,  23.0, -2.2), rot_deg=(86.0, 0.0, -4.0))
-    keyframe_transform(c3, 348, loc=(11.2, 19.5, -1.8), rot_deg=(86.0, 0.0, 2.0))
+    for f in range(241, 350, 4):
+        ac = get_aircraft_pos(f)
+        u = (f - 241) / 107.0
+        cam_loc = ac + Vector((6.5 + u * 2.0, -24.5 + u * 2.5, -0.4))
+        tgt_loc = ac + Vector((7.8 + u * 1.0, 0.0, 0.25))
+        aim_camera_at(c3, f, cam_loc, tgt_loc)
 
-    # تحريك الكاميرا 4: لحظة الوثب والانفصال عن ذيل الطائرة
+    # 4. الكاميرا 4 (الإطارات 349–468): لحظة القفز من السلم الخلفي والانفصال عن الطائرة
     c4 = cameras["Cam_04_TheJumpExit"]
-    for f in range(349, 470, 4):
-        scene.frame_set(f)
-        c_pos = cooper_root.matrix_world.translation
-        keyframe_transform(c4, f, loc=(c_pos.x + 2.5, c_pos.y + 16.0, c_pos.z + 1.5), rot_deg=(85.0, 0.0, 180.0))
+    for f in range(349, 470, 3):
+        cp = get_cooper_pos(f)
+        ac = get_aircraft_pos(f)
+        u = (f - 349) / 119.0
+        # تبدأ مركزة بين السلم وCooper ثم تتبع سقوط Cooper بينما يخرج ذيل الطائرة من أعلى يسار الكادر
+        cam_loc = cp + Vector((-1.5 + u * 1.5, -16.5 + u * 3.5, 1.8 - u * 1.2))
+        tgt_loc = cp * (0.4 + 0.6 * u) + (ac + Vector((12.5, 0.0, -2.0))) * (0.6 - 0.6 * u)
+        aim_camera_at(c4, f, cam_loc, tgt_loc)
 
-    # تحريك الكاميرا 5: التتبع المركزي أثناء التخبط مع عبور الطائرة خلفه (تطابق اللقطة الثالثة المرجعية)
+    # 5. الكاميرا 5 (الإطارات 469–600): السقوط الحر والتقلب في الظلام (تطابق اللقطة الثالثة المرجعية عند الإطار 530)
     c5 = cameras["Cam_05_FreefallTumble"]
-    for f in range(469, 602, 4):
-        scene.frame_set(f)
-        c_pos = cooper_root.matrix_world.translation
-        # الكاميرا تنظر من الأسفل/الجانب نحو Cooper بحيث تعبر الطائرة في أعلى الكادر
-        keyframe_transform(c5, f, loc=(c_pos.x, c_pos.y + 11.5, c_pos.z - 2.2), rot_deg=(98.0, 0.0, 180.0))
+    for f in range(469, 602, 3):
+        cp = get_cooper_pos(f)
+        u = (f - 469) / 131.0
+        cam_loc = cp + Vector((math.sin(u * 1.2) * 1.5, -14.8, math.cos(u * 1.2) * 1.2))
+        tgt_loc = cp + Vector((0.0, 0.0, 0.15))
+        aim_camera_at(c5, f, cam_loc, tgt_loc)
 
-    # تحريك الكاميرا 6: السقوط الحر فوق أضواء المدينة الضبابية Bokeh (تطابق اللقطة الثانية المرجعية)
+    # 6. الكاميرا 6 (الإطارات 601–720): السقوط الحر فوق أضواء المدينة الضبابية (تطابق اللقطة الثانية المرجعية عند الإطار 660)
     c6 = cameras["Cam_06_NightBokeh"]
-    for f in range(601, 722, 4):
-        scene.frame_set(f)
-        c_pos = cooper_root.matrix_world.translation
-        # الكاميرا فوق Cooper تنظر للأسفل باتجاه Cooper وعنقود أضواء المدينة في الربع السفلي الأيسر
-        keyframe_transform(c6, f, loc=(c_pos.x + 1.2, c_pos.y - 8.2, c_pos.z + 3.8), rot_deg=(65.0, 0.0, 8.0))
-        # تحريك عنقود أضواء المدينة لينزلق في الخلفية السفلية اليسرى
-        prog = (f - 601) / 120.0
-        keyframe_transform(
-            bokeh_root, f,
-            loc=(c_pos.x - 14.0 + prog * 8.0, c_pos.y + 38.0, c_pos.z - 22.0),
-            rot_deg=(-25.0, 0.0, 0.0)
-        )
+    for f in range(601, 722, 3):
+        cp = get_cooper_pos(f)
+        u = (f - 601) / 119.0
+        cam_loc = cp + Vector((0.4 - u * 0.8, -10.2, 0.8))
+        tgt_loc = cp + Vector((0.0, 0.0, 0.05))
+        aim_camera_at(c6, f, cam_loc, tgt_loc)
 
-    # تحريك الكاميرا 7: الابتعاد للكشف عن غابة الصنوبر المضاءة وتطاير الطيور (تطابق اللقطة الأولى المرجعية)
+    # 7. الكاميرا 7 (الإطارات 721–864): غابة الصنوبر المضاءة وتطاير الطيور (تطابق اللقطة الأولى المرجعية عند الإطار 785)
     c7 = cameras["Cam_07_ForestFinale"]
-    keyframe_transform(c7, 721, loc=(0.0, -72.0, -182.0), rot_deg=(86.5, 0.0, 0.0))
-    keyframe_transform(c7, 790, loc=(0.0, -92.0, -206.0), rot_deg=(88.5, 0.0, 0.0))
-    keyframe_transform(c7, 864, loc=(0.0, -96.0, -208.5), rot_deg=(89.0, 0.0, 0.0))
+    for f in range(721, 865, 3):
+        u = min(1.0, (f - 721) / 55.0)
+        # ترتفع الغابة من أسفل الكادر وتستقر في النصف السفلي بينما يسقط Cooper كنقطة حمراء صغيرة في قمم الأشجار البيضاء
+        cam_loc = Vector((0.0, -64.0, -196.0 - u * 6.0))
+        tgt_loc = Vector((0.0, 0.0, -206.0 - u * 10.5))
+        aim_camera_at(c7, f, cam_loc, tgt_loc)
 
     return cameras
