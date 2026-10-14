@@ -3,7 +3,6 @@ import sys
 import glob
 import json
 import struct
-import zlib
 import subprocess
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -29,7 +28,6 @@ def analyze_png_image(filepath):
             "is_black_frame": (non_black / total) < 0.0005
         }
     except ImportError:
-        # في حال عدم تثبيت Pillow نتحقق من أبعاد وهيدر PNG عبر struct
         with open(filepath, "rb") as f:
             data = f.read(32)
         if len(data) < 24 or data[:8] != b'\x89PNG\r\n\x1a\n':
@@ -45,18 +43,16 @@ def analyze_png_image(filepath):
         }
 
 def assemble_video_ffmpeg(frames_dir, output_mp4, fps=24):
-    """تجميع الإطارات المصيرة إلى ملف MP4 متوافق مع جميع المشغلات، وإنشاء Contact Sheet."""
+    """تجميع الإطارات المصيرة إلى ملف MP4 متوافق مع جميع المشغلات."""
     frame_files = sorted(glob.glob(os.path.join(frames_dir, "frame_*.png")))
     if not frame_files:
         print("[Verifier] No rendered animation frames found in", frames_dir)
         return False
 
     os.makedirs(os.path.dirname(output_mp4), exist_ok=True)
-    # استخدام glob/concat لضمان العمل حتى لو كان frame_step > 1 أثناء الاختبار السريع
     concat_list_path = os.path.join(frames_dir, "ffmpeg_frames.txt")
     frame_duration = 1.0 / fps
     if len(frame_files) > 1:
-        # حساب الفرق بين أرقام الإطارات لتعويض frame_step تلقائيًا والحفاظ على مدة 36 ثانية
         f1 = int(os.path.basename(frame_files[0]).split("_")[1].split(".")[0])
         f2 = int(os.path.basename(frame_files[1]).split("_")[1].split(".")[0])
         step = max(1, f2 - f1)
@@ -100,6 +96,9 @@ def build_contact_sheet(samples_dir):
     return sheet_path if os.path.isfile(sheet_path) else None
 
 def main():
+    require_samples = "--require-samples" in sys.argv
+    require_video = "--require-video" in sys.argv
+
     with open(os.path.join(PROJECT_ROOT, "config.json"), "r", encoding="utf-8") as f:
         config = json.load(f)
 
@@ -110,7 +109,8 @@ def main():
 
     report = {"samples": {}, "black_frames_detected": [], "video_assembled": False, "status": "PENDING"}
 
-    for s_file in sorted(glob.glob(os.path.join(samples_dir, "sample_*.png"))):
+    sample_files = sorted(glob.glob(os.path.join(samples_dir, "sample_*.png")))
+    for s_file in sample_files:
         name = os.path.basename(s_file)
         stats = analyze_png_image(s_file)
         report["samples"][name] = stats
@@ -126,7 +126,15 @@ def main():
         report["video_assembled"] = ok
         report["final_video_path"] = output_mp4 if ok else None
 
-    report["status"] = "PASSED" if not report["black_frames_detected"] else "WARNING_BLACK_FRAMES"
+    if require_samples and len(sample_files) == 0:
+        report["status"] = "FAILED_NO_SAMPLES_RENDERED"
+    elif report["black_frames_detected"]:
+        report["status"] = "WARNING_BLACK_FRAMES"
+    elif require_video and not report["video_assembled"]:
+        report["status"] = "FAILED_NO_VIDEO_ASSEMBLED"
+    else:
+        report["status"] = "PASSED"
+
     os.makedirs(os.path.dirname(report_path), exist_ok=True)
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
