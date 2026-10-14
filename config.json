@@ -1,0 +1,58 @@
+{
+  "project_name": "DB_Cooper_LEMMiNO_Sequence",
+  "active_profile": "preview",
+  "profiles": {
+    "preview": {
+      "resolution_x": 1280,
+      "resolution_y": 720,
+      "resolution_percentage": 100,
+      "fps": 24,
+      "frame_start": 1,
+      "frame_end": 864,
+      "frame_step": 1,
+      "eevee_samples": 16,
+      "motion_blur": false,
+      "freestyle_thickness": 1.6,
+      "forest_tree_count": 320,
+      "rain_particle_count": 600,
+      "bird_count": 36
+    },
+    "production": {
+      "resolution_x": 1920,
+      "resolution_y": 1080,
+      "resolution_percentage": 100,
+      "fps": 24,
+      "frame_start": 1,
+      "frame_end": 864,
+      "frame_step": 1,
+      "eevee_samples": 64,
+      "motion_blur": true,
+      "freestyle_thickness": 2.2,
+      "forest_tree_count": 650,
+      "rain_particle_count": 1500,
+      "bird_count": 55
+    }
+  },
+  "paths": {
+    "assets_dir": "assets",
+    "frames_dir": "output/frames",
+    "samples_dir": "output/samples",
+    "final_video": "output/db_cooper_sequence.mp4",
+    "report_file": "output/verification_report.json",
+    "blend_file": "output/db_cooper_scene.blend"
+  },
+  "external_assets": {
+    "aircraft_model_url": "",
+    "aircraft_sha256": "",
+    "character_model_url": "",
+    "character_sha256": ""
+  },
+  "colors": {
+    "background_void": [0.008, 0.008, 0.010, 1.0],
+    "aircraft_body": [0.025, 0.025, 0.028, 1.0],
+    "white_line": [0.95, 0.95, 0.96, 1.0],
+    "cooper_red": [0.90, 0.06, 0.08, 1.0],
+    "city_bokeh": [0.85, 0.87, 0.90, 1.0]
+  },
+  "sample_keyframes": [45, 180, 310, 395, 530, 660, 790, 835]
+}
