@@ -14,7 +14,7 @@ on:
       frame_step:
         description: 'Frame step (1 = full 24fps, 2 = fast 12fps interpolated to 24fps)'
         required: true
-        default: '2'
+        default: '1'
   push:
     branches: [ main ]
 
