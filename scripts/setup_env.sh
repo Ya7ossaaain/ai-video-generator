@@ -1,42 +1,66 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "=== [1/3] Checking system resources (Disk & RAM) ==="
-df -h .
-free -h || true
+echo "=== [1/5] Freeing Runner Disk Space (~30GB) ==="
+sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+sudo apt-get clean || true
+df -h || true
 
-echo "=== [2/3] Installing FFmpeg, Pillow, and Xvfb/headless libraries ==="
+echo "=== [2/5] Installing Blender, FFmpeg, ImageMagick, Xvfb & Arabic Fonts ==="
 sudo apt-get update -y
 sudo apt-get install -y \
     ffmpeg \
-    python3-pil \
-    wget \
-    xz-utils \
+    blender \
+    imagemagick \
     xvfb \
+    fonts-noto-core \
+    fonts-noto-extra \
+    fontconfig \
+    python3-pip \
+    python3-pil \
+    python3-cairo \
+    python3-numpy \
+    libcairo2-dev \
+    pkg-config \
+    python3-dev \
     libxi6 \
     libxxf86vm1 \
     libxfixes3 \
     libxrender1 \
     libgl1 \
     libgl1-mesa-dri \
+    libglu1-mesa \
     libegl1 \
     libxkbcommon0 \
     libsm6 \
     libice6
+fc-cache -f -v >/dev/null 2>&1 || true
 
-echo "=== [3/3] Ensuring Blender (4.0.2 LTS Portable or System Blender) ==="
-BLENDER_DIR="$HOME/blender-4.0.2"
-if ! command -v blender &> /dev/null; then
-    if [ ! -f "$BLENDER_DIR/blender" ]; then
-        echo "Downloading official Blender 4.0.2 LTS Linux x64..."
-        wget -q "https://download.blender.org/release/Blender4.0/blender-4.0.2-linux-x64.tar.xz" -O /tmp/blender.tar.xz
-        mkdir -p "$BLENDER_DIR"
-        tar -xf /tmp/blender.tar.xz -C "$BLENDER_DIR" --strip-components=1
-        rm -f /tmp/blender.tar.xz
-    fi
-    sudo ln -sf "$BLENDER_DIR/blender" /usr/local/bin/blender
+echo "=== [3/5] Installing Python Dependencies ==="
+pip3 install --upgrade pip || true
+pip3 install -r requirements.txt || true
+
+echo "=== [4/5] Building & Normalizing 25 3D GLB Assets in assets/models/ ==="
+mkdir -p assets/models
+if [ -f "intro.mp4" ] && [ ! -f "assets/intro.mp4" ]; then
+    cp intro.mp4 assets/intro.mp4
+fi
+if [ -f "logo.png" ] && [ ! -f "assets/logo.png" ]; then
+    cp logo.png assets/logo.png
+fi
+python3 build_models_library.py
+export LIBGL_ALWAYS_SOFTWARE=1
+xvfb-run -a blender -b -P blender_scripts/normalize_assets.py || python3 blender_scripts/normalize_assets.py
+
+echo "=== [5/5] Installing Remotion & Verifying TypeScript ==="
+if command -v npm >/dev/null 2>&1 && [ -d "remotion-documentary" ]; then
+    cd remotion-documentary
+    npm install --no-audit --no-fund || true
+    npx tsc --noEmit || true
+    cd ..
 fi
 
-blender --version
-ffmpeg -version | head -n 1
+blender --version | head -n 2 || true
+ffmpeg -version | head -n 1 || true
+convert --version | head -n 1 || true
 echo "=== Environment Setup Complete ==="

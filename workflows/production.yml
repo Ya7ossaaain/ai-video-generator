@@ -1,0 +1,152 @@
+name: "🎬 LEMMiNO Hybrid Documentary Engine (Production)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: "موضوع الفيلم الوثائقي الاستقصائي (VIDEO_TOPIC)"
+        required: true
+        default: "D. B. Cooper Hijacking Mystery"
+      drive_folder_id:
+        description: "معرف مجلد Google Drive للرفع"
+        required: false
+        default: "1wn4z3A-t8Dnnq1kkiJopvUsCBQpkWxQW"
+
+permissions:
+  contents: write
+
+jobs:
+  produce-documentary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    env:
+      VIDEO_TOPIC: ${{ inputs.topic || 'D. B. Cooper Hijacking Mystery' }}
+      GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+      GIPHY_API_KEY: ${{ secrets.GIPHY_API_KEY }}
+      EUROPEANA_API_KEY: ${{ secrets.EUROPEANA_API_KEY }}
+      FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
+      OPENVERSE_CLIENT_ID: ${{ secrets.OPENVERSE_CLIENT_ID }}
+      OPENVERSE_CLIENT_SECRET: ${{ secrets.OPENVERSE_CLIENT_SECRET }}
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+      DRIVE_FOLDER_ID: ${{ inputs.drive_folder_id || '1wn4z3A-t8Dnnq1kkiJopvUsCBQpkWxQW' }}
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: "📥 Checkout repository (with Git LFS)"
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: "🧹 Free Runner Disk Space (~30GB)"
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          sudo apt-get clean
+          df -h
+
+      - name: "🐍 Setup Python 3.12"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: "📦 Setup Node.js 20"
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: "🦕 Setup Deno v2.x"
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: "🎞️ Install FFmpeg"
+        uses: FedericoCarboni/setup-ffmpeg@v3
+
+      - name: "🎨 Install Blender, ImageMagick & Arabic Fonts"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            blender \
+            xvfb \
+            libgl1-mesa-dri \
+            libglu1-mesa \
+            imagemagick \
+            fonts-noto-core \
+            fonts-noto-extra \
+            fontconfig \
+            libcairo2-dev \
+            pkg-config \
+            python3-dev
+          fc-cache -f -v >/dev/null 2>&1 || true
+
+      - name: "📦 Install Python Dependencies"
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: "🎬 Install Remotion & Verify TypeScript"
+        run: |
+          cd remotion-documentary
+          npm install
+          npx tsc --noEmit
+          npx remotion browser ensure
+          cd ..
+
+      - name: "📐 Build & Normalize 25 3D GLB Models"
+        run: |
+          python build_models_library.py
+          export LIBGL_ALWAYS_SOFTWARE=1
+          xvfb-run -a blender -b -P blender_scripts/normalize_assets.py || python blender_scripts/normalize_assets.py
+
+      - name: "⚡ Install Antigravity CLI"
+        run: |
+          set -euo pipefail
+          curl -fsSL --compressed https://antigravity.google/cli/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: "🔐 Configure Antigravity OAuth2"
+        env:
+          OAUTH_JSON: ${{ secrets.AGY_CREDENTIALS }}
+        run: |
+          set -euo pipefail
+          test -n "$OAUTH_JSON"
+          mkdir -p ~/.gemini/antigravity-cli/
+          printf "%s" "$OAUTH_JSON" > ~/.gemini/antigravity-cli/antigravity-oauth-token
+          chmod 600 ~/.gemini/antigravity-cli/antigravity-oauth-token
+
+      - name: "🚀 Run LEMMiNO Hybrid Documentary Engine"
+        run: |
+          python main.py
+
+      - name: "🔎 Verify Final Documentary with ffprobe"
+        run: |
+          set -euo pipefail
+          test -s output_build/final_documentary.mp4
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=width,height,codec_name -of default=noprint_wrappers=1 output_build/final_documentary.mp4
+
+      - name: "📤 Upload Production Artifacts"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LEMMiNO-Hybrid-Documentary-${{ github.run_id }}
+          path: |
+            output_build/final_documentary.mp4
+            output_build/thumbnail.jpg
+            workspace/evidence_manifest.json
+            workspace/script_manifest.json
+            workspace/visual_plan.json
+            production_logs.txt
+          retention-days: 5
+          if-no-files-found: warn
