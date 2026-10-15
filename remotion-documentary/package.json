@@ -1,11 +1,13 @@
 {
-  "name": "documentary-remotion",
-  "version": "1.0.0",
-  "description": "Arabic Investigative Documentary Remotion Renderer",
+  "name": "remotion-documentary",
+  "version": "2.0.0",
+  "description": "LEMMiNO Hybrid Documentary Engine - Motion Graphics & GIS HUD Suite",
+  "private": true,
   "scripts": {
     "start": "remotion studio",
-    "build": "remotion render src/index.ts DocumentaryComposition out.mp4",
-    "render": "remotion render"
+    "build": "remotion bundle",
+    "render": "remotion render",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.0",

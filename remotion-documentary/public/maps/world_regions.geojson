@@ -1,0 +1,16 @@
+{
+  "type": "FeatureCollection",
+  "name": "LEMMiNO_Forensic_GIS_Regions",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "Pacific Northwest Sector", "code": "US-PNW", "elevation_m": 1420 },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-124.7, 45.2], [-121.0, 45.2], [-121.0, 48.9], [-124.7, 48.9], [-124.7, 45.2]
+        ]]
+      }
+    }
+  ]
+}
