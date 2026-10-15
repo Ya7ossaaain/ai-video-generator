@@ -1,0 +1,231 @@
+{
+  "version": "1.0",
+  "total_models": 25,
+  "models": {
+    "briefcase_cash": {
+      "model_id": "briefcase_cash",
+      "file": "assets/models/briefcase_cash.glb",
+      "description": "Ransom briefcase opened to reveal $20 bill cash bundles",
+      "sub_parts": ["lower_shell", "upper_lid", "handle", "locks", "cash_bundles"],
+      "default_highlight": "lower_shell",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "cassette_recorder": {
+      "model_id": "cassette_recorder",
+      "file": "assets/models/cassette_recorder.glb",
+      "description": "Vintage magnetic tape cassette recorder for wiretap audio",
+      "sub_parts": ["main_casing", "tape_deck_door", "reel_left", "reel_right", "speaker_grille", "control_buttons"],
+      "default_highlight": "main_casing",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "classic_sedan": {
+      "model_id": "classic_sedan",
+      "file": "assets/models/classic_sedan.glb",
+      "description": "1970s vintage investigative sedan automobile",
+      "sub_parts": ["body_chassis", "hood", "trunk", "windshield", "wheels", "headlights"],
+      "default_highlight": "body_chassis",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "commercial_airliner": {
+      "model_id": "commercial_airliner",
+      "file": "assets/models/commercial_airliner.glb",
+      "description": "Boeing 727-100 commercial tri-jet airliner with ventral aft airstairs",
+      "sub_parts": ["fuselage", "cockpit", "wings", "flaps", "landing_gear", "aft_stairs", "engines"],
+      "default_highlight": "fuselage",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "earth_globe": {
+      "model_id": "earth_globe",
+      "file": "assets/models/earth_globe.glb",
+      "description": "3D geopolitical globe with coordinate grid and orbital rings",
+      "sub_parts": ["sphere_core", "continents_shell", "equator_ring", "orbital_ring"],
+      "default_highlight": "sphere_core",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "evidence_grid_table": {
+      "model_id": "evidence_grid_table",
+      "file": "assets/models/evidence_grid_table.glb",
+      "description": "Wireframe forensic inspection table with numbered evidence markers",
+      "sub_parts": ["table_frame", "wire_grid_surface", "legs", "evidence_markers", "specimen_trays"],
+      "default_highlight": "table_frame",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "forensic_microscope": {
+      "model_id": "forensic_microscope",
+      "file": "assets/models/forensic_microscope.glb",
+      "description": "Laboratory optical microscope for trace forensic analysis",
+      "sub_parts": ["base_plate", "arm_column", "eyepiece_tube", "objective_turret", "specimen_stage", "focus_knobs"],
+      "default_highlight": "base_plate",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "helicopter": {
+      "model_id": "helicopter",
+      "file": "assets/models/helicopter.glb",
+      "description": "Search and rescue tactical utility helicopter with searchlight",
+      "sub_parts": ["fuselage", "cockpit_glass", "main_rotor", "tail_rotor", "landing_skids", "searchlight"],
+      "default_highlight": "fuselage",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "historic_sailing_ship": {
+      "model_id": "historic_sailing_ship",
+      "file": "assets/models/historic_sailing_ship.glb",
+      "description": "Three-masted historical tall sailing vessel with full rigging",
+      "sub_parts": ["hull", "quarterdeck", "main_mast", "fore_mast", "sails", "rudder"],
+      "default_highlight": "hull",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "human_silhouette": {
+      "model_id": "human_silhouette",
+      "file": "assets/models/human_silhouette.glb",
+      "description": "Noir anonymous suspect silhouette in trenchcoat and tie",
+      "sub_parts": ["head", "torso", "trenchcoat", "arms", "legs", "tie_collar"],
+      "default_highlight": "head",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "investigation_dossier": {
+      "model_id": "investigation_dossier",
+      "file": "assets/models/investigation_dossier.glb",
+      "description": "Classified FBI case file folder with photographs and stamp",
+      "sub_parts": ["folder_cover", "classified_documents", "evidence_photos", "paperclip", "red_stamp_tab"],
+      "default_highlight": "folder_cover",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "modern_cargo_ship": {
+      "model_id": "modern_cargo_ship",
+      "file": "assets/models/modern_cargo_ship.glb",
+      "description": "Oceanic cargo freighter and container vessel with radar bridge",
+      "sub_parts": ["hull", "bridge_tower", "cargo_containers", "radar_mast", "propeller_stern"],
+      "default_highlight": "hull",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "naval_anchor": {
+      "model_id": "naval_anchor",
+      "file": "assets/models/naval_anchor.glb",
+      "description": "Heavy maritime Admiralty anchor with flukes and stock bar",
+      "sub_parts": ["shank", "stock_bar", "crown", "flukes", "shackle_ring"],
+      "default_highlight": "shank",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "orbital_satellite": {
+      "model_id": "orbital_satellite",
+      "file": "assets/models/orbital_satellite.glb",
+      "description": "Reconnaissance and telemetry orbital satellite with solar arrays",
+      "sub_parts": ["core_bus", "solar_array_left", "solar_array_right", "dish_antenna", "optical_sensor"],
+      "default_highlight": "core_bus",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "parachute_rig": {
+      "model_id": "parachute_rig",
+      "file": "assets/models/parachute_rig.glb",
+      "description": "Tactical canopy parachute with suspension lines and reserve pack",
+      "sub_parts": ["canopy_dome", "suspension_lines", "harness_pack", "ripcord_handle"],
+      "default_highlight": "canopy_dome",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "patrol_boat": {
+      "model_id": "patrol_boat",
+      "file": "assets/models/patrol_boat.glb",
+      "description": "High-speed maritime coast guard patrol and search boat",
+      "sub_parts": ["hull", "cabin", "radar_arch", "outboard_motor", "searchlight_mount"],
+      "default_highlight": "hull",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "pine_trees": {
+      "model_id": "pine_trees",
+      "file": "assets/models/pine_trees.glb",
+      "description": "Pacific Northwest dense conifer pine tree forest cluster",
+      "sub_parts": ["forest_floor_base", "trunks", "lower_canopy", "mid_canopy", "upper_canopy"],
+      "default_highlight": "forest_floor_base",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "pocket_watch": {
+      "model_id": "pocket_watch",
+      "file": "assets/models/pocket_watch.glb",
+      "description": "Precision mechanical chronometer watch with hands and crown",
+      "sub_parts": ["case_body", "bezel_ring", "dial_face", "hour_hand", "minute_hand", "crown_winder"],
+      "default_highlight": "case_body",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "radar_station": {
+      "model_id": "radar_station",
+      "file": "assets/models/radar_station.glb",
+      "description": "Air traffic control and military tracking radar dish tower",
+      "sub_parts": ["pedestal_tower", "rotary_azimuth_mount", "parabolic_dish", "feed_horn", "control_bunker"],
+      "default_highlight": "pedestal_tower",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "radio_transceiver": {
+      "model_id": "radio_transceiver",
+      "file": "assets/models/radio_transceiver.glb",
+      "description": "VHF/HF field radio transceiver with whip antenna and tuning dial",
+      "sub_parts": ["chassis_box", "tuning_dial", "frequency_scale", "whip_antenna", "microphone_handset", "toggle_switches"],
+      "default_highlight": "chassis_box",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "revolver_pistol": {
+      "model_id": "revolver_pistol",
+      "file": "assets/models/revolver_pistol.glb",
+      "description": "Forensic double-action revolver firearm evidence piece",
+      "sub_parts": ["frame", "barrel", "cylinder", "grip", "trigger", "hammer"],
+      "default_highlight": "frame",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "rocky_terrain": {
+      "model_id": "rocky_terrain",
+      "file": "assets/models/rocky_terrain.glb",
+      "description": "Topographical mountain ridge, valley floor, and cliff formation",
+      "sub_parts": ["valley_floor", "main_ridge", "cliff_face", "boulder_cluster"],
+      "default_highlight": "valley_floor",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "star_fort": {
+      "model_id": "star_fort",
+      "file": "assets/models/star_fort.glb",
+      "description": "Geometric bastion star fortress (trace italienne) with citadel and moat",
+      "sub_parts": ["outer_bastions", "curtain_walls", "inner_citadel", "watchtowers", "moat_perimeter"],
+      "default_highlight": "outer_bastions",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "submarine_vessel": {
+      "model_id": "submarine_vessel",
+      "file": "assets/models/submarine_vessel.glb",
+      "description": "Deep-sea reconnaissance submarine with conning tower and periscope",
+      "sub_parts": ["pressure_hull", "conning_tower", "periscope_mast", "dive_planes", "propeller_shroud"],
+      "default_highlight": "pressure_hull",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    },
+    "vintage_telephone": {
+      "model_id": "vintage_telephone",
+      "file": "assets/models/vintage_telephone.glb",
+      "description": "Classic rotary dial desk telephone for traced calls",
+      "sub_parts": ["base_housing", "rotary_dial", "cradle_forks", "handset"],
+      "default_highlight": "base_housing",
+      "normalized_bounds": [-1.0, 1.0],
+      "origin": [0.0, 0.0, 0.0]
+    }
+  }
+}
